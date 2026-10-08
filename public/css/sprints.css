@@ -1,0 +1,41 @@
+/* Sprint Backlog cards and nested User Story forms */
+.sprint-backlog-card { display: grid; gap: 18px; }
+.sprint-goal-box { padding: 16px 18px; border: 1px solid var(--line, #dce2e9); border-radius: 14px; background: var(--surface-soft, #f7f9fb); }
+.sprint-goal-box p { margin: 8px 0 0; white-space: pre-wrap; }
+.inline-story-form { border-top: 1px solid var(--line, #dce2e9); padding-top: 16px; }
+.inline-story-form summary { display: inline-flex; cursor: pointer; list-style: none; }
+.inline-story-form summary::-webkit-details-marker { display: none; }
+.inline-story-form form { margin-top: 16px; display: grid; gap: 14px; }
+.inline-story-form .field-group { display: grid; gap: 6px; }
+.inline-story-form textarea, .inline-story-form select { width: 100%; }
+.sprint-story-row { padding: 16px; border: 1px solid var(--line, #dce2e9); border-radius: 12px; display: grid; gap: 12px; }
+.sprint-story-row p { margin: 0; }
+.sprint-story-row .story-card-head { display: flex; align-items: center; gap: 12px; }
+.sprint-story-row .story-card-head .button { margin-left: auto; }
+.sprint-goal-actions, .sprint-gate-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.sprint-backlog-sprints-heading { margin-top: 32px; }
+.sprint-modal { width: min(520px, calc(100% - 32px)); max-width: none; max-height: min(90vh, 760px); margin: auto; padding: 0; overflow: auto; color: var(--text, #edf3f4); background: transparent; border: 0; }
+.sprint-modal::backdrop { background: rgba(3, 7, 9, .72); backdrop-filter: blur(3px); }
+.sprint-modal-card { padding: 24px; border: 1px solid var(--line-strong, rgba(221,235,244,.15)); border-radius: 16px; background: var(--panel-raised, #171d23); box-shadow: 0 24px 80px rgba(0,0,0,.4); }
+.sprint-modal-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.sprint-modal-heading h2 { margin: 4px 0 0; }
+.sprint-modal-close { flex: 0 0 auto; }
+.sprint-modal .section-description { margin: 10px 0 20px; }
+.sprint-modal form { display: grid; gap: 14px; }
+.sprint-modal .field-group { display: grid; gap: 6px; }
+.sprint-modal-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+@media (max-width: 520px) { .sprint-modal-card { padding: 20px; } .sprint-modal-actions { flex-direction: column-reverse; } .sprint-modal-actions .button { width: 100%; justify-content: center; } }
+.sprint-dates { display: none; }
+.story-criteria pre { white-space: pre-wrap; font: inherit; margin: 8px 0 0; }
+.story-estimation-panel { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line, rgba(221,235,244,.09)); }
+.story-estimation-panel > form:first-child { display: grid; justify-items: start; gap: 7px; }
+.estimation-agent-runs { display: grid; gap: 8px; margin: 0; padding-left: 20px; color: var(--muted, #9aa9ad); }
+.estimation-agent-runs li span { display: block; margin-top: 3px; font-size: 12px; }
+.story-estimate-final { color: var(--accent, #7ce2bc); }
+.estimation-stale { color: var(--amber, #e8c47d); }
+.story-estimation-approve { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; }
+.story-estimation-approve label { flex-basis: 100%; font-weight: 600; }
+.story-estimation-approve select { min-width: 150px; }
+@media (max-width: 640px) { .story-estimation-approve { align-items: stretch; flex-direction: column; } .story-estimation-approve select, .story-estimation-approve .button { width: 100%; } }
+@media (max-width: 720px) { .sprint-story-row .story-card-head { flex-wrap: wrap; } .sprint-story-row .story-card-head .button { margin-left: 0; } }
+
