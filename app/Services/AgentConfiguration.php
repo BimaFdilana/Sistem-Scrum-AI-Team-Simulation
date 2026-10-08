@@ -54,10 +54,7 @@ class AgentConfiguration
 
     public function defaults(string $role): array
     {
-        $pack = $this->packs()['profiles'][$role];
-        $settings = app(AgentModelCatalog::class)->settings($role);
-
-        return ['config_version' => 0, 'provider' => (string) ($settings['provider'] ?? ''), 'model' => (string) ($settings['model'] ?? ''), 'instructions' => $pack['instructions'], 'soul' => $pack['soul'], 'skills' => $pack['skills'], 'status' => 'pending'];
+        return ['config_version' => 0, 'provider' => '', 'model' => '', 'status' => 'pending'];
     }
 
     public function save(string $role, array $data, User $actor): array
@@ -69,31 +66,27 @@ class AgentConfiguration
         $catalogService = app(AgentModelCatalog::class);
         $catalog = $catalogService->fetch($role);
         $verified = $catalogService->contains($catalog, $data['provider'], $data['model']);
-        $changed = $data['provider'] !== $current['provider'] || $data['model'] !== $current['model'];
-        if ($changed && ! $verified) {
-            throw ValidationException::withMessages(['model' => 'Perubahan provider/model membutuhkan katalog runtime tersedia dan terautentikasi.']);
+        if (! $verified) {
+            throw ValidationException::withMessages(['selection' => 'Model membutuhkan katalog runtime tersedia dan terautentikasi, termasuk saat pemulihan.']);
         }
-        $status = $verified ? 'verified' : 'pending';
+        $status = 'verified';
         $snapshot = [];
         $pack = $this->packs()['profiles'][$role];
-        foreach ($data['skills'] as $id) {
-            if (! in_array($id, $pack['skills'], true)) {
-                throw ValidationException::withMessages(['skills' => 'Skill tidak tersedia untuk peran ini.']);
-            }
+        foreach ($pack['skills'] as $id) {
             $snapshot[$id] = ['body' => $pack['skill_body'], 'hash' => hash('sha256', $pack['skill_body'])];
         }
         try {
-            return DB::transaction(function () use ($role, $data, $actor, $agent, $status, $snapshot): array {
+            return DB::transaction(function () use ($role, $data, $actor, $agent, $status, $snapshot, $pack): array {
                 $locked = DB::table('agent_role_settings')->where('role', $role)->lockForUpdate()->first();
                 abort_unless(($locked?->config_version ?? 0) === $data['config_version'], 409, 'Konfigurasi telah berubah.');
                 if ($status === 'verified' && DB::table('agent_role_settings')->where('role', '!=', $role)->where('active_model', $data['model'])->exists()) {
-                    throw ValidationException::withMessages(['model' => 'Model aktif harus berbeda untuk setiap peran.']);
+                    throw ValidationException::withMessages(['selection' => 'Model aktif harus berbeda untuk setiap peran.']);
                 }
                 $version = $data['config_version'] + 1;
                 $id = DB::table('agent_config_versions')->insertGetId([
                     'role' => $role, 'profile' => $agent['profile'], 'config_version' => $version,
                     'actor_id' => $actor->id, 'actor_name' => $actor->name, 'provider' => $data['provider'], 'model' => $data['model'],
-                    'instructions' => $data['instructions'], 'soul' => $data['soul'], 'policy_snapshot' => $this->packs()['common_policy'], 'skills' => json_encode(array_values($data['skills'])),
+                    'instructions' => $pack['instructions'], 'soul' => $pack['soul'], 'policy_snapshot' => $this->packs()['common_policy'], 'skills' => json_encode(array_values($pack['skills'])),
                     'skill_snapshot' => json_encode($snapshot), 'status' => $status, 'created_at' => now(),
                 ]);
                 $pointer = ['version_id' => $id, 'config_version' => $version, 'active_model' => $status === 'verified' ? $data['model'] : null];

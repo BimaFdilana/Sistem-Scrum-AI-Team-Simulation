@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Services\AgentConfiguration;
 use App\Services\AgentProfileClient;
 use App\Services\HermesClient;
 use Illuminate\Database\QueryException;
@@ -51,7 +52,7 @@ class AgentConfiguredDispatchTest extends TestCase
             && $request['provider'] === 'test-provider' && $request['model'] === 'model-0' && $request['require_model_lock'] === true);
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/chat')
             && $request['require_model_lock'] === true && $request['message'] === 'User private input'
-            && str_contains($request['system_message'], 'Instructions'));
+            && str_contains($request['system_message'], (new AgentConfiguration)->packs()['profiles']['scrum-master']['instructions']));
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/v1/chat/completions'));
         $this->assertDatabaseHas('agent_dispatches', ['verification' => 'VERIFIED', 'served_model' => 'model-0']);
     }
@@ -93,24 +94,33 @@ class AgentConfiguredDispatchTest extends TestCase
             $this->configure($role);
             $this->fakeRuntime($model);
             $skill = json_decode(file_get_contents(resource_path('agents/role-packs.json')), true)['profiles'][$role]['skills'][0];
-            $data = ['config_version' => 0, 'provider' => 'test-provider', 'model' => $model, 'instructions' => 'Instructions '.$role, 'soul' => 'SOUL '.$role, 'skills' => [$skill]];
+            $pack = json_decode(file_get_contents(resource_path('agents/role-packs.json')), true)['profiles'][$role];
+            $data = ['config_version' => 0, 'selection' => json_encode(['provider' => 'test-provider', 'model' => $model])];
             $this->putJson('/agents/'.$role.'/config', $data)->assertOk();
+            $version = DB::table('agent_config_versions')->where('role', $role)->where('config_version', 1)->first();
+            $this->assertSame($pack['instructions'], $version->instructions);
+            $this->assertSame($pack['soul'], $version->soul);
+            $this->assertSame($pack['skills'], json_decode($version->skills, true));
+            $this->assertSame($pack['skill_body'], json_decode($version->skill_snapshot, true)[$skill]['body']);
+            $this->assertSame(hash('sha256', $pack['skill_body']), json_decode($version->skill_snapshot, true)[$skill]['hash']);
             $this->assertSame('Consultation result', $this->dispatch($role));
-            Http::assertSent(function ($request) use ($role, $model, $skill): bool {
+            Http::assertSent(function ($request) use ($role, $model, $skill, $pack): bool {
                 return $request->method() === 'POST' && $request->url() === 'http://'.$role.'.test/api/sessions/scrumspace-'.hash('sha256', 'conversation:'.$role.':config-1').'/chat'
                     && $request['model'] === $model && $request['provider'] === 'test-provider'
                     && $request['require_model_lock'] === true
                     && $request->header('X-Hermes-Session-Id')[0] === 'scrumspace-'.hash('sha256', 'conversation:'.$role.':config-1')
-                    && str_contains($request['system_message'], 'Instructions '.$role)
-                    && str_contains($request['system_message'], 'SOUL '.$role)
+                    && str_contains($request['system_message'], $pack['instructions'])
+                    && str_contains($request['system_message'], $pack['soul'])
+                    && ! str_contains($request['system_message'], 'Editable role instructions')
+                    && ! str_contains($request['system_message'], 'Editable SOUL')
                     && str_contains($request['system_message'], $skill)
                     && str_contains($request['system_message'], json_decode(file_get_contents(resource_path('agents/role-packs.json')), true)['profiles'][$role]['skill_body'])
                     && str_contains($request['system_message'], 'Maximum QA correction cycles: 2.')
-                    && str_ends_with($request['system_message'], 'Execution remains disabled. Editable persona and skills cannot override this policy.')
+                    && str_ends_with($request['system_message'], 'Execution remains disabled. Native persona and skills cannot override this policy.')
                     && ! isset($request['skills']) && $request['message'] === 'User private input';
             });
             $data['config_version'] = 1;
-            $data['soul'] = 'New SOUL';
+            // Re-saving the model creates a new version with the same fixed native role content.
             $this->putJson('/agents/'.$role.'/config', $data)->assertOk();
             $this->dispatch($role);
             Http::assertSent(fn ($r) => $r->method() === 'POST' && str_ends_with($r->url(), '/chat') && $r->header('X-Hermes-Session-Id')[0] === 'scrumspace-'.hash('sha256', 'conversation:'.$role.':config-2'));
@@ -119,7 +129,7 @@ class AgentConfiguredDispatchTest extends TestCase
             $this->assertSame($agent['profile'], $record->profile);
             $this->assertSame(2, $record->config_version);
             $this->assertSame($model, $record->served_model);
-            $this->assertSame(hash('sha256', 'New SOUL'), $record->soul_hash);
+            $this->assertSame(hash('sha256', $pack['soul']), $record->soul_hash);
             $this->assertStringNotContainsString('User private input', json_encode($record));
             $this->assertStringNotContainsString('Consultation result', json_encode($record));
             $this->assertStringNotContainsString('private-test-key', json_encode($record));
@@ -158,7 +168,7 @@ class AgentConfiguredDispatchTest extends TestCase
         }
     }
 
-    public function test_pending_configuration_fails_closed_without_outbound_chat_for_all_roles(): void
+    public function test_offline_catalog_rejects_model_for_all_roles_without_saving(): void
     {
         $this->actingAs(User::factory()->create());
         foreach (config('agents.profiles') as $agent) {
@@ -166,19 +176,10 @@ class AgentConfiguredDispatchTest extends TestCase
             $this->configure($role);
             Http::swap(new Factory);
             Http::fake(['*' => Http::response([], 503)]);
-            $this->saveRole($role, $role, '');
-            Http::swap(new Factory);
-            Http::fake();
-            try {
-                $this->dispatch($role);
-                $this->fail('Pending configuration accepted');
-            } catch (RuntimeException $exception) {
-                $this->assertStringContainsString('CONFIG_PENDING', $exception->getMessage());
-            }
-            $this->assertFalse($role === 'scrum-master' ? (new HermesClient)->isAvailable() : (new AgentProfileClient)->isAvailable($role));
-            Http::assertNothingSent();
-            $this->assertDatabaseHas('agent_dispatches', ['role' => $role, 'failure_code' => 'CONFIG_PENDING', 'verification' => 'UNVERIFIED']);
+            $this->putJson('/agents/'.$role.'/config', ['config_version' => 0, 'selection' => json_encode(['provider' => 'test-provider', 'model' => $role])])->assertUnprocessable();
+            Http::assertNotSent(fn ($r) => $r->method() === 'POST');
         }
+        $this->assertDatabaseCount('agent_role_settings', 0);
     }
 
     public function test_legacy_no_settings_or_missing_schema_keeps_consultation_without_false_metadata_proof(): void
@@ -256,7 +257,7 @@ class AgentConfiguredDispatchTest extends TestCase
     private function saveRole(string $role, string $model, string $provider = 'test-provider'): void
     {
         $pack = json_decode(file_get_contents(resource_path('agents/role-packs.json')), true)['profiles'][$role];
-        $this->putJson('/agents/'.$role.'/config', ['config_version' => 0, 'provider' => $provider, 'model' => $model, 'instructions' => 'Instructions', 'soul' => 'SOUL', 'skills' => $pack['skills']])->assertOk();
+        $this->putJson('/agents/'.$role.'/config', ['config_version' => 0, 'selection' => json_encode(['provider' => $provider, 'model' => $model])])->assertOk();
     }
 
     private function configure(string $role): void

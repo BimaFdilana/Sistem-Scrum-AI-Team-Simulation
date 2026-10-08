@@ -18,6 +18,65 @@ class AgentConfigurationTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_model_only_form_rejects_browser_persona_and_saves_fixed_role_pack(): void
+    {
+        $this->configure();
+        $this->catalog();
+        $this->actingAs(User::factory()->create());
+        $selection = json_encode(['provider' => 'test-provider', 'model' => 'model-one']);
+        $page = $this->get('/agents/scrum-master/config')->assertOk()->assertSee('name="selection"', false)
+            ->assertDontSee('name="instructions"', false)->assertDontSee('name="soul"', false)
+            ->assertDontSee('name="skills[]"', false)->assertDontSee('name="provider"', false)
+            ->assertDontSee('Editable role instructions')->assertDontSee('Curated skill');
+        foreach (['provider', 'model', 'instructions', 'soul', 'skills', 'base_url', 'api_key', 'profile', 'policy'] as $field) {
+            $this->putJson('/agents/scrum-master/config', ['config_version' => 0, 'selection' => $selection, $field => 'injected'])
+                ->assertUnprocessable()->assertJsonValidationErrors($field);
+        }
+        $this->putJson('/agents/scrum-master/config', ['config_version' => 0, 'selection' => $selection])->assertOk();
+        $pack = (new AgentConfiguration)->packs()['profiles']['scrum-master'];
+        $this->assertDatabaseHas('agent_config_versions', ['provider' => 'test-provider', 'model' => 'model-one', 'instructions' => $pack['instructions'], 'soul' => $pack['soul']]);
+        $this->getJson('/agents/scrum-master/config/history')->assertOk()->assertDontSee($pack['instructions'])->assertDontSee($pack['soul'])->assertDontSee('skills');
+        $this->get('/agents/scrum-master/config')->assertDontSee($pack['instructions'])->assertDontSee($pack['soul']);
+    }
+
+    public function test_packaged_role_content_matches_native_profile_source(): void
+    {
+        $packs = (new AgentConfiguration)->packs()['profiles'];
+        foreach (config('agents.profiles') as $role) {
+            $slug = $role['slug'];
+            $this->assertSame($packs[$slug]['soul'], $packs[$slug]['instructions']);
+            $this->assertNotEmpty($packs[$slug]['skills']);
+            $this->assertStringContainsString('Acceptance Criteria', $packs[$slug]['soul']);
+            $this->assertStringContainsString('poin', $packs[$slug]['skill_body']);
+            // CI need not mount a live Hermes profile; set this to verify deployment parity.
+            $nativeRoot = getenv('SCRUMSPACE_NATIVE_PROFILES_DIR');
+            if ($nativeRoot !== false && $nativeRoot !== '') {
+                $profile = rtrim($nativeRoot, '/').'/'.$role['profile'];
+                $this->assertSame(file_get_contents($profile.'/SOUL.md'), $packs[$slug]['soul']);
+                $this->assertSame(file_get_contents($profile.'/skills/'.$packs[$slug]['skills'][0].'/SKILL.md'), $packs[$slug]['skill_body']);
+            }
+        }
+    }
+
+    public function test_model_pair_must_be_exactly_encoded_and_live_catalog_verified_even_on_restore(): void
+    {
+        $this->configure();
+        $this->catalog();
+        $this->actingAs(User::factory()->create());
+        foreach (['invalid', '{}', '{"provider":"test-provider","model":"model-one","other":1}', '{"provider":"unproven","provider":"test-provider","model":"model-one"}', '{"provider":"unproven","model":"model-one"}', '{"provider":"test-provider","model":"unlisted"}'] as $selection) {
+            $this->putJson('/agents/scrum-master/config', ['config_version' => 0, 'selection' => $selection])
+                ->assertUnprocessable()->assertJsonValidationErrors('selection');
+        }
+        $this->assertDatabaseCount('agent_config_versions', 0);
+        $selection = json_encode(['provider' => 'test-provider', 'model' => 'model-one']);
+        $this->putJson('/agents/scrum-master/config', ['config_version' => 0, 'selection' => $selection])->assertOk();
+        Http::swap(new Factory);
+        Http::fake(['*' => Http::response([], 503)]);
+        $this->putJson('/agents/scrum-master/config', ['config_version' => 1, 'selection' => $selection])->assertUnprocessable();
+        $this->postJson('/agents/scrum-master/config/restore/1', ['config_version' => 1])->assertUnprocessable();
+        $this->assertDatabaseCount('agent_config_versions', 1);
+    }
+
     public function test_directory_links_fixed_role_editors_and_missing_schema_is_read_only(): void
     {
         Schema::dropIfExists('agent_dispatches');
@@ -42,36 +101,26 @@ class AgentConfigurationTest extends TestCase
         $payload = $this->payload();
         $this->putJson('/agents/scrum-master/config', $payload)->assertOk()->assertJsonPath('config_version', 1)->assertJsonPath('status', 'verified');
         $this->assertDatabaseHas('agent_role_settings', ['role' => 'scrum-master', 'config_version' => 1, 'active_model' => 'model-one']);
-        $this->get('/agents/scrum-master/config')->assertOk()->assertSee('Editable instructions')->assertSee('SOUL');
+        $this->get('/agents/scrum-master/config')->assertOk()->assertSee('model-one')->assertDontSee('name="instructions"', false);
         $this->putJson('/agents/scrum-master/config', $payload)->assertStatus(409);
         $payload['config_version'] = 1;
-        $payload['instructions'] = 'Second instructions';
+        $payload['selection'] = json_encode(['provider' => 'test-provider', 'model' => 'model-two']);
         $this->putJson('/agents/scrum-master/config', $payload)->assertOk()->assertJsonPath('config_version', 2);
-        $this->getJson('/agents/scrum-master/config/history')->assertOk()->assertJsonCount(2, 'versions')->assertJsonPath('versions.1.actor_id', $owner->id)->assertJsonPath('versions.1.instructions', 'Editable instructions');
+        $this->getJson('/agents/scrum-master/config/history')->assertOk()->assertJsonCount(2, 'versions')->assertJsonPath('versions.1.actor_id', $owner->id)->assertJsonPath('versions.1.model', 'model-one')->assertDontSee('instructions')->assertDontSee('soul')->assertDontSee('skills');
         $this->postJson('/agents/scrum-master/config/restore/1', ['config_version' => 2])->assertOk()->assertJsonPath('config_version', 3);
         $this->assertDatabaseCount('agent_config_versions', 3);
-        $this->assertDatabaseHas('agent_config_versions', ['role' => 'scrum-master', 'config_version' => 2, 'instructions' => 'Second instructions']);
-        $this->assertDatabaseHas('agent_config_versions', ['role' => 'scrum-master', 'config_version' => 3, 'instructions' => 'Editable instructions']);
+        $this->assertDatabaseHas('agent_config_versions', ['role' => 'scrum-master', 'config_version' => 3, 'model' => 'model-one']);
     }
 
-    public function test_offline_content_draft_and_restore_are_pending_and_cannot_claim_available(): void
+    public function test_offline_catalog_cannot_save_unverified_model(): void
     {
         $this->configure();
         Http::fake(['*' => Http::response([], 503)]);
         $this->actingAs(User::factory()->create());
-        $draft = $this->payload();
-        $draft['provider'] = '';
-        $draft['model'] = 'scrum-master';
-        $this->putJson('/agents/scrum-master/config', $draft)->assertOk()->assertJsonPath('status', 'pending');
-        $draft['config_version'] = 1;
-        $draft['instructions'] = 'Offline edited content';
-        $this->putJson('/agents/scrum-master/config', $draft)->assertOk()->assertJsonPath('status', 'pending');
-        $this->postJson('/agents/scrum-master/config/restore/1', ['config_version' => 2])->assertOk()->assertJsonPath('config_version', 3)->assertJsonPath('status', 'pending');
-        $this->assertDatabaseHas('agent_config_versions', ['config_version' => 3, 'instructions' => 'Editable instructions']);
-        Http::swap(new Factory);
-        Http::fake(['*' => Http::response(['data' => [['id' => 'scrum-master']]])]);
+        $this->putJson('/agents/scrum-master/config', $this->payload())->assertUnprocessable()->assertJsonValidationErrors('selection');
+        $this->assertDatabaseCount('agent_config_versions', 0);
         $this->assertFalse((new HermesClient)->isAvailable());
-        Http::assertNothingSent();
+        Http::assertNotSent(fn ($r) => $r->method() === 'POST');
     }
 
     public function test_catalog_get_only_allowlists_metadata_and_rejects_unavailable_or_unproven_provider(): void
@@ -91,8 +140,8 @@ class AgentConfigurationTest extends TestCase
         Http::assertSent(fn ($r) => $r->method() === 'GET' && $r->url() === 'http://scrum-master.test/api/model/options' && $r->hasHeader('Authorization', 'Bearer private-test-key'));
         Http::assertSentCount(1);
         $payload = $this->payload();
-        $payload['provider'] = 'unproven';
-        $this->putJson('/agents/scrum-master/config', $payload)->assertUnprocessable()->assertJsonValidationErrors('model');
+        $payload['selection'] = json_encode(['provider' => 'unproven', 'model' => 'model-one']);
+        $this->putJson('/agents/scrum-master/config', $payload)->assertUnprocessable()->assertJsonValidationErrors('selection');
         $this->assertDatabaseCount('agent_config_versions', 0);
         $this->get('/agents/scrum-master/config')->assertOk()->assertDontSee('<script>unsafe</script>', false);
     }
@@ -120,17 +169,15 @@ class AgentConfigurationTest extends TestCase
         $this->actingAs(User::factory()->create());
         $this->putJson('/agents/scrum-master/config', $this->payload())->assertOk();
         $payload = $this->payload();
-        $payload['skills'] = ['scrumspace-laravel-backend'];
-        $this->putJson('/agents/backend-developer/config', $payload)->assertUnprocessable()->assertJsonValidationErrors('model');
-        $payload['model'] = 'model-two';
+        $this->putJson('/agents/backend-developer/config', $payload)->assertUnprocessable()->assertJsonValidationErrors('selection');
+        $payload['selection'] = json_encode(['provider' => 'test-provider', 'model' => 'model-two']);
         $this->putJson('/agents/backend-developer/config', $payload)->assertOk();
-        $payload['skills'] = ['scrumspace-scrum-master'];
         $payload['config_version'] = 1;
-        $this->putJson('/agents/scrum-master/config', $payload)->assertUnprocessable();
+        $this->putJson('/agents/scrum-master/config', $payload)->assertUnprocessable()->assertJsonValidationErrors('selection');
         $this->assertDatabaseCount('agent_config_versions', 2);
     }
 
-    public function test_auth_role_skills_and_endpoint_policy_boundaries_and_xss_escaping(): void
+    public function test_auth_and_forbidden_configuration_fields_are_enforced(): void
     {
         Http::fake();
         foreach (['/agents/scrum-master/config', '/agents/scrum-master/config/history', '/agents/scrum-master/config/connectivity'] as $path) {
@@ -141,23 +188,15 @@ class AgentConfigurationTest extends TestCase
         Http::assertNothingSent();
         $this->actingAs(User::factory()->create());
         $this->putJson('/agents/unknown/config', $this->payload())->assertNotFound();
-        foreach (['../../private', 'scrumspace-laravel-qa', 'https://remote/skill'] as $skill) {
-            $payload = $this->payload();
-            $payload['skills'] = [$skill];
-            $this->putJson('/agents/scrum-master/config', $payload)->assertUnprocessable()->assertJsonValidationErrors('skills.0');
-        }
-        foreach (['base_url', 'api_key', 'profile', 'policy'] as $field) {
+        foreach (['provider', 'model', 'instructions', 'soul', 'skills', 'base_url', 'api_key', 'profile', 'policy'] as $field) {
             $this->putJson('/agents/scrum-master/config', [...$this->payload(), $field => 'forbidden'])->assertUnprocessable()->assertJsonValidationErrors($field);
         }
         Http::assertNothingSent();
         $this->configure();
         Http::swap(new Factory);
         $this->catalog();
-        $payload = $this->payload();
-        $payload['instructions'] = '<script>alert("XSS")</script>';
-        $payload['soul'] = '<img src=x onerror=alert(1)>';
-        $this->putJson('/agents/scrum-master/config', $payload)->assertOk();
-        $this->get('/agents/scrum-master/config')->assertOk()->assertSee('&lt;script&gt;', false)->assertDontSee('<script>alert(', false)->assertDontSee('<img src=x', false);
+        $this->putJson('/agents/scrum-master/config', $this->payload())->assertOk();
+        $this->postJson('/agents/scrum-master/config/restore/1', ['config_version' => 1, 'instructions' => 'forbidden'])->assertUnprocessable()->assertJsonValidationErrors('instructions');
         $this->getJson('/agents/scrum-master/config/history')->assertDontSee('private-test-key')->assertDontSee('secret-catalog')->assertDontSee('private-catalog');
         $this->postJson('/agents/backend-developer/config/restore/1', ['config_version' => 0])->assertNotFound();
     }
@@ -194,14 +233,14 @@ class AgentConfigurationTest extends TestCase
             $this->actingAs($owner)->putJson('/agents/scrum-master/config', $this->payload())->assertOk();
             DB::purge('stage2_restart');
             $current = (new AgentConfiguration)->current('scrum-master');
-            $this->assertSame('Editable instructions', $current['instructions']);
+            $this->assertSame((new AgentConfiguration)->packs()['profiles']['scrum-master']['instructions'], $current['instructions']);
             $this->assertSame('scrumagent', $current['profile']);
             $this->getJson('/agents/scrum-master/config/history')->assertOk()->assertJsonCount(1, 'versions');
             try {
                 DB::table('agent_config_versions')->where('role', 'scrum-master')->update(['instructions' => 'tampered']);
                 $this->fail('Immutable history accepted UPDATE');
             } catch (QueryException) {
-                $this->assertDatabaseHas('agent_config_versions', ['instructions' => 'Editable instructions']);
+                $this->assertDatabaseHas('agent_config_versions', ['instructions' => (new AgentConfiguration)->packs()['profiles']['scrum-master']['instructions']]);
             }
             try {
                 DB::table('agent_config_versions')->where('role', 'scrum-master')->delete();
@@ -228,7 +267,7 @@ class AgentConfigurationTest extends TestCase
         $this->actingAs(User::factory()->create());
         $this->getJson('/agents/scrum-master/config/connectivity')->assertOk()->assertJsonPath('providers.0.models', ['model-one'])
             ->assertJsonPath('providers.1.available', false)->assertDontSee('private.example');
-        $this->putJson('/agents/scrum-master/config', [...$this->payload(), 'model' => 'blocked-model'])->assertUnprocessable();
+        $this->putJson('/agents/scrum-master/config', [...$this->payload(), 'selection' => json_encode(['provider' => 'test-provider', 'model' => 'blocked-model'])])->assertUnprocessable();
     }
 
     private function configure(string $role = 'scrum-master'): void
@@ -244,6 +283,6 @@ class AgentConfigurationTest extends TestCase
 
     private function payload(): array
     {
-        return ['config_version' => 0, 'provider' => 'test-provider', 'model' => 'model-one', 'instructions' => 'Editable instructions', 'soul' => 'Editable SOUL', 'skills' => ['scrumspace-scrum-master']];
+        return ['config_version' => 0, 'selection' => json_encode(['provider' => 'test-provider', 'model' => 'model-one'])];
     }
 }

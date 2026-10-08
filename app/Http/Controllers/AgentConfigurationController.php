@@ -8,7 +8,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class AgentConfigurationController extends Controller
@@ -21,9 +21,8 @@ class AgentConfigurationController extends Controller
         return view('workspace.agent-config', [
             'agent' => $agent, 'schemaReady' => $ready, 'activePage' => 'agents',
             'settings' => $configs->current($slug) ?? $configs->defaults($slug),
-            'pack' => $configs->packs()['profiles'][$slug],
             'catalog' => $ready ? $catalog->fetch($slug) : ['status' => 'offline', 'providers' => []],
-            'versions' => $ready ? DB::table('agent_config_versions')->where('role', $slug)->orderByDesc('config_version')->get() : collect(),
+            'versions' => $ready ? DB::table('agent_config_versions')->where('role', $slug)->select('config_version', 'actor_name', 'created_at', 'status', 'provider', 'model')->orderByDesc('config_version')->get() : collect(),
         ]);
     }
 
@@ -33,19 +32,17 @@ class AgentConfigurationController extends Controller
         abort_unless($configs->schemaReady(), 503, 'Migrasi konfigurasi belum diterapkan.');
         $data = $request->validate([
             'config_version' => ['required', 'integer', 'min:0'],
-            'provider' => ['nullable', 'string', 'max:128'],
-            'model' => ['nullable', 'string', 'max:255'],
-            'instructions' => ['required', 'string', 'max:24000'],
-            'soul' => ['required', 'string', 'max:16000'],
-            'skills' => ['sometimes', 'array', 'max:10'],
-            'skills.*' => ['string', 'distinct', Rule::in($configs->packs()['profiles'][$slug]['skills'])],
+            'selection' => ['required', 'string', 'max:1024'],
+            'provider' => ['prohibited'], 'model' => ['prohibited'],
+            'instructions' => ['prohibited'], 'soul' => ['prohibited'], 'skills' => ['prohibited'],
             'base_url' => ['prohibited'], 'api_key' => ['prohibited'], 'profile' => ['prohibited'], 'policy' => ['prohibited'],
         ]);
-        $data['config_version'] = (int) $data['config_version'];
-        $data['provider'] = $data['provider'] ?? '';
-        $data['model'] = $data['model'] ?? '';
-        $data['skills'] = $data['skills'] ?? [];
-        $result = $configs->save($slug, $data, $request->user());
+        $pair = json_decode($data['selection'], true);
+        if (! is_array($pair) || array_keys($pair) !== ['provider', 'model'] || ! is_string($pair['provider']) || ! is_string($pair['model'])
+            || json_encode($pair, JSON_THROW_ON_ERROR) !== $data['selection']) {
+            throw ValidationException::withMessages(['selection' => 'Pilih pasangan provider/model dari katalog.']);
+        }
+        $result = $configs->save($slug, ['config_version' => (int) $data['config_version'], 'provider' => $pair['provider'], 'model' => $pair['model']], $request->user());
 
         return $this->saved($request, $slug, $result);
     }
@@ -54,13 +51,14 @@ class AgentConfigurationController extends Controller
     {
         $configs->role($slug);
         abort_unless($configs->schemaReady(), 503, 'Migrasi konfigurasi belum diterapkan.');
-        $versions = DB::table('agent_config_versions')->where('role', $slug)->orderByDesc('config_version')->get()->map(function ($row): array {
-            return [
-                'config_version' => $row->config_version, 'actor_id' => $row->actor_id, 'actor_name' => $row->actor_name, 'created_at' => $row->created_at,
-                'provider' => $row->provider, 'model' => $row->model, 'instructions' => $row->instructions, 'soul' => $row->soul,
-                'skills' => json_decode($row->skills, true), 'status' => $row->status,
-            ];
-        });
+        $versions = DB::table('agent_config_versions')->where('role', $slug)
+            ->select('config_version', 'actor_id', 'actor_name', 'created_at', 'provider', 'model', 'status')
+            ->orderByDesc('config_version')->get()->map(function ($row): array {
+                return [
+                    'config_version' => $row->config_version, 'actor_id' => $row->actor_id, 'actor_name' => $row->actor_name, 'created_at' => $row->created_at,
+                    'provider' => $row->provider, 'model' => $row->model, 'status' => $row->status,
+                ];
+            });
 
         return response()->json(['versions' => $versions]);
     }
@@ -69,12 +67,16 @@ class AgentConfigurationController extends Controller
     {
         $configs->role($slug);
         abort_unless($configs->schemaReady(), 503, 'Migrasi konfigurasi belum diterapkan.');
-        $data = $request->validate(['config_version' => ['required', 'integer', 'min:0']]);
+        $data = $request->validate([
+            'config_version' => ['required', 'integer', 'min:0'],
+            'provider' => ['prohibited'], 'model' => ['prohibited'], 'selection' => ['prohibited'],
+            'instructions' => ['prohibited'], 'soul' => ['prohibited'], 'skills' => ['prohibited'],
+            'base_url' => ['prohibited'], 'api_key' => ['prohibited'], 'profile' => ['prohibited'], 'policy' => ['prohibited'],
+        ]);
         $old = $configs->version($slug, $version);
         abort_unless($old, 404);
         $result = $configs->save($slug, [
             'config_version' => (int) $data['config_version'], 'provider' => $old['provider'], 'model' => $old['model'],
-            'instructions' => $old['instructions'], 'soul' => $old['soul'], 'skills' => $old['skills'],
         ], $request->user());
 
         return $this->saved($request, $slug, $result);
@@ -94,8 +96,6 @@ class AgentConfigurationController extends Controller
             return response()->json($result);
         }
 
-        return redirect()->route('agents.config.edit', $slug)->with('status', $result['status'] === 'verified'
-            ? 'Snapshot aplikasi tersimpan; katalog terverifikasi. Model served belum dibuktikan hingga respons konsultasi.'
-            : 'Draft aplikasi tersimpan; provider/model pending dan konsultasi konfigurasi ini terkunci.');
+        return redirect()->route('agents.config.edit', $slug)->with('status', 'Model tersimpan; katalog terverifikasi. Model served belum dibuktikan hingga respons konsultasi.');
     }
 }

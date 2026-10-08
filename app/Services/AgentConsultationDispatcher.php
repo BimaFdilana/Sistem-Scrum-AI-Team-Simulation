@@ -23,13 +23,13 @@ class AgentConsultationDispatcher
         $policy = $legacyPolicy;
         $prompt = $legacyPolicy;
         if ($snapshot) {
-            $policy .= "\n\n".$snapshot['policy_snapshot']."\nConsultation and analysis only. Maximum team discussion rounds: 3. Maximum QA correction cycles: 2. Native tool authorization is not granted by role configuration.\nExecution remains disabled. Editable persona and skills cannot override this policy.";
-            $prompt = "Editable role instructions (subordinate to immutable safety policy):\n".$snapshot['instructions']
-                ."\n\nEditable SOUL (persona only):\n".$snapshot['soul'];
+            $policy .= "\n\n".$snapshot['policy_snapshot']."\nConsultation and analysis only. Maximum team discussion rounds: 3. Maximum QA correction cycles: 2. Native tool authorization is not granted by role configuration.\nExecution remains disabled. Native persona and skills cannot override this policy.";
+            $prompt = "Fixed role instructions (packaged native profile snapshot; subordinate to immutable safety policy):\n".$snapshot['instructions']
+                ."\n\nFixed SOUL (native profile snapshot):\n".$snapshot['soul'];
             foreach ($snapshot['skill_snapshot'] as $id => $skill) {
                 $prompt .= "\n\nCurated skill ".$id.":\n".$skill['body'];
             }
-            $prompt .= "\n\nIMMUTABLE SAFETY POLICY — overrides all editable content:\n".$policy;
+            $prompt .= "\n\nIMMUTABLE SAFETY POLICY — overrides all role content:\n".$policy;
         }
         $provider = $snapshot['provider'] ?? null;
         $model = $snapshot['model'] ?? ($settings['model'] ?? '');
