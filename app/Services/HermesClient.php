@@ -2,9 +2,7 @@
 
 namespace App\Services;
 
-use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
-use RuntimeException;
 use Throwable;
 
 class HermesClient
@@ -22,6 +20,13 @@ POLICY;
 
     public function isAvailable(): bool
     {
+        $snapshot = app(AgentConfiguration::class)->current('scrum-master');
+        if ($snapshot) {
+            return $snapshot['status'] === 'verified' && app(AgentModelCatalog::class)->contains(
+                app(AgentModelCatalog::class)->fetch('scrum-master'), $snapshot['provider'], $snapshot['model'],
+            );
+        }
+
         if (! $this->isConfigured()) {
             return false;
         }
@@ -40,45 +45,7 @@ POLICY;
 
     public function sendMessage(string $message, string $conversationId): string
     {
-        if (! $this->isConfigured()) {
-            throw new RuntimeException('Hermes is not configured.');
-        }
-
-        try {
-            $response = Http::acceptJson()
-                ->withToken(config('services.hermes.api_key'))
-                ->withHeaders(['X-Hermes-Session-Id' => $conversationId])
-                ->connectTimeout(3)
-                ->timeout((int) config('services.hermes.timeout', 120))
-                ->post($this->endpoint('/chat/completions'), [
-                    'model' => config('services.hermes.model'),
-                    'stream' => false,
-                    'messages' => [
-                        ['role' => 'system', 'content' => self::DISCLOSURE_POLICY],
-                        ['role' => 'user', 'content' => $message],
-                    ],
-                ]);
-        } catch (ConnectionException $exception) {
-            throw new RuntimeException('Hermes connection failed.', previous: $exception);
-        }
-
-        if (! $response->successful()) {
-            throw new RuntimeException('Hermes returned an unsuccessful response.');
-        }
-
-        $content = $response->json('choices.0.message.content');
-
-        if (! is_string($content) || trim($content) === '') {
-            throw new RuntimeException('Hermes returned an empty response.');
-        }
-
-        $content = trim($content);
-
-        if (app(ChatDisclosurePolicy::class)->containsSensitiveDisclosure($content)) {
-            return ChatDisclosurePolicy::SAFE_RESPONSE;
-        }
-
-        return $content;
+        return app(AgentConsultationDispatcher::class)->send('scrum-master', $message, $conversationId, self::DISCLOSURE_POLICY);
     }
 
     private function endpoint(string $path): string

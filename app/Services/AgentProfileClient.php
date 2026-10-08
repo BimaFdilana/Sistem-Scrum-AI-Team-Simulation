@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 use Throwable;
@@ -11,6 +10,14 @@ class AgentProfileClient
 {
     public function isAvailable(string $slug): bool
     {
+        app(AgentConfiguration::class)->role($slug);
+        $snapshot = app(AgentConfiguration::class)->current($slug);
+        if ($snapshot) {
+            return $snapshot['status'] === 'verified' && app(AgentModelCatalog::class)->contains(
+                app(AgentModelCatalog::class)->fetch($slug), $snapshot['provider'], $snapshot['model'],
+            );
+        }
+
         $settings = $this->settings($slug);
 
         if (! $this->isConfigured($settings)) {
@@ -32,9 +39,8 @@ class AgentProfileClient
     public function sendMessage(string $slug, string $message, string $conversationId): string
     {
         $agent = collect(config('agents.profiles'))->firstWhere('slug', $slug);
-        $settings = $this->settings($slug);
 
-        if (! $agent || $slug === 'scrum-master' || ! $this->isConfigured($settings)) {
+        if (! $agent || $slug === 'scrum-master') {
             throw new RuntimeException('AI Agent profile is not configured.');
         }
 
@@ -45,41 +51,7 @@ class AgentProfileClient
             ChatDisclosurePolicy::SAFE_RESPONSE,
         );
 
-        try {
-            $response = Http::acceptJson()
-                ->withToken($settings['api_key'])
-                ->withHeaders(['X-Hermes-Session-Id' => $conversationId])
-                ->connectTimeout(3)
-                ->timeout((int) config('services.hermes.timeout', 120))
-                ->post($this->endpoint($settings, '/chat/completions'), [
-                    'model' => $settings['model'],
-                    'stream' => false,
-                    'messages' => [
-                        ['role' => 'system', 'content' => $systemPrompt],
-                        ['role' => 'user', 'content' => $message],
-                    ],
-                ]);
-        } catch (ConnectionException $exception) {
-            throw new RuntimeException('AI Agent connection failed.', previous: $exception);
-        }
-
-        if (! $response->successful()) {
-            throw new RuntimeException('AI Agent returned an unsuccessful response.');
-        }
-
-        $content = $response->json('choices.0.message.content');
-
-        if (! is_string($content) || trim($content) === '') {
-            throw new RuntimeException('AI Agent returned an empty response.');
-        }
-
-        $content = trim($content);
-
-        if (app(ChatDisclosurePolicy::class)->containsSensitiveDisclosure($content)) {
-            return ChatDisclosurePolicy::SAFE_RESPONSE;
-        }
-
-        return $content;
+        return app(AgentConsultationDispatcher::class)->send($slug, $message, $conversationId, $systemPrompt);
     }
 
     private function isConfigured(array $settings): bool

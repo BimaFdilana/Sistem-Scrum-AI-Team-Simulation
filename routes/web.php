@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ActorController;
+use App\Http\Controllers\AgentConfigurationController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\ProjectController;
@@ -28,6 +29,11 @@ Route::middleware('auth')->group(function (): void {
         ->middleware('throttle:30,1')
         ->name('chat.messages.store');
     Route::get('/agents', [WorkspaceController::class, 'agents'])->name('agents.index');
+    Route::get('/agents/{slug}/config', [AgentConfigurationController::class, 'edit'])->name('agents.config.edit');
+    Route::put('/agents/{slug}/config', [AgentConfigurationController::class, 'update'])->name('agents.config.update');
+    Route::get('/agents/{slug}/config/history', [AgentConfigurationController::class, 'history'])->name('agents.config.history');
+    Route::post('/agents/{slug}/config/restore/{version}', [AgentConfigurationController::class, 'restore'])->whereNumber('version')->name('agents.config.restore');
+    Route::get('/agents/{slug}/config/connectivity', [AgentConfigurationController::class, 'connectivity'])->middleware('throttle:20,1')->name('agents.config.connectivity');
     Route::get('/agents/{slug}/activity', [WorkspaceController::class, 'agentActivity'])->name('agents.activity');
     Route::get('/agents/{slug}/chat', [ChatController::class, 'profileChat'])->name('agents.chat');
     Route::post('/agents/{slug}/chat/messages', [ChatController::class, 'storeForProfile'])

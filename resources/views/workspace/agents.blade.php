@@ -26,6 +26,7 @@
                     @else
                         <span class="button button-ghost" aria-label="Agent spesialis dikoordinasikan oleh Scrum Master">Dipanggil melalui Scrum Master</span>
                     @endif
+                    <a class="button button-secondary" href="{{ route('agents.config.edit', ['slug' => $agent['slug']], false) }}">Konfigurasi Agent</a>
                     <a class="button button-secondary" href="{{ $activityUrl }}">Log activity</a>
                 </div>
             </article>
