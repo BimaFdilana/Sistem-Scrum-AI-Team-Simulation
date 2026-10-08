@@ -31,6 +31,6 @@ class StoryEstimationAgentRun extends Model
 
     public function estimationRun(): BelongsTo
     {
-        return $this->belongsTo(StoryEstimationRun::class);
+        return $this->belongsTo(StoryEstimationRun::class, 'story_estimation_run_id');
     }
 }

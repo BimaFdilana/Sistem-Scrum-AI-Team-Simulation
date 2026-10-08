@@ -26,6 +26,23 @@ class Story extends Model
         'revision',
     ];
 
+    protected static function booted(): void
+    {
+        static::updating(function (Story $story): void {
+            if ($story->isDirty([
+                'title',
+                'actor_id',
+                'sprint_purpose',
+                'acceptance_criteria',
+                'project_id',
+                'sprint_id',
+                'revision',
+            ])) {
+                $story->estimate_points = null;
+            }
+        });
+    }
+
     protected function casts(): array
     {
         return [

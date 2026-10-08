@@ -147,7 +147,6 @@ class StoryController extends Controller
 
         if ($story->isDirty(['title', 'actor_id', 'sprint_purpose', 'acceptance_criteria'])) {
             $story->revision = $currentRevision + 1;
-            $story->estimate_points = null;
             $story->scope_status = 'NEEDS_REFINEMENT';
             $story->scope_approved_revision = null;
             $story->scope_approved_by = null;
