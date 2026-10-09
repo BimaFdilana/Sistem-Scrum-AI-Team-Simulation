@@ -3,10 +3,10 @@
 namespace Tests\Feature;
 
 use App\Models\Actor;
+use App\Models\ChatMessage;
 use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\Story;
-use App\Models\StoryEstimationAgentRun;
 use App\Models\StoryEstimationRun;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -18,128 +18,84 @@ class StoryEstimationTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_p_o_can_request_independent_fibonacci_estimates_and_scrum_master_posts_the_summary(): void
+    public function test_team_consensus_and_scrum_master_report_set_final_fibonacci_point_without_p_o_selection(): void
     {
         $this->configureEstimationProfiles();
         Http::fake(function (Request $request) {
+            if (str_contains($request->url(), 'scrum-master.test')) {
+                return Http::response(['choices' => [['message' => ['content' => 'Scrum Master: ketiganya setuju 5 poin.']]]]);
+            }
             $content = $request['messages'][1]['content'] ?? '';
-            if (str_contains($request->url(), 'scrum-master.test')) {
-                return Http::response(['choices' => [['message' => ['content' => 'Scrum Master: hasil estimasi telah dirangkum.']]]]);
+            $secondRound = str_contains($content, 'PUTARAN 2');
+            $point = $secondRound ? 5 : match (true) {
+                str_contains($request->url(), 'backend.test') => 3,
+                str_contains($request->url(), 'frontend.test') => 5,
+                default => 8,
+            };
+            $response = ['estimate_points' => $point, 'rationale' => 'Cakupan keseluruhan dan kriteria diperiksa.'];
+            if ($secondRound) {
+                $response['response'] = 'Saya membaca pendapat peserta lain dan menyetujui 5 poin.';
+                $response['explicit_agree'] = true;
             }
 
-            $points = match (true) {
-                str_contains($request->url(), 'backend.test') => str_contains($content, 'PUTARAN 2') ? 5 : 3,
-                str_contains($request->url(), 'frontend.test') => str_contains($content, 'PUTARAN 2') ? 5 : 5,
-                str_contains($request->url(), 'qa.test') => str_contains($content, 'PUTARAN 2') ? 8 : 8,
-                default => null,
-            };
-
-            return $points
-                ? Http::response(['choices' => [['message' => ['content' => json_encode(['estimate_points' => $points, 'rationale' => 'Estimasi berdasarkan cakupan dan kriteria yang diberikan.'])]]]])
-                : Http::response([], 404);
+            return Http::response(['choices' => [['message' => ['content' => json_encode($response)]]]]);
         });
         [$owner, $project, $story] = $this->makeStory();
-
-        $this->actingAs($owner)
-            ->post('/stories/'.$story->id.'/estimation-runs')
-            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog')
-            ->assertSessionHas('status');
-
-        $this->assertDatabaseHas('story_estimation_runs', [
-            'story_id' => $story->id,
-            'story_revision' => 1,
-            'status' => 'COMPLETED',
-        ]);
+        $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs')
+            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog')->assertSessionHas('status');
+        $run = StoryEstimationRun::query()->where('story_id', $story->id)->firstOrFail();
+        $this->assertSame('COMPLETED', $run->status);
+        $this->assertSame(5, $run->consensus_points);
+        $this->assertNotNull($run->report_sent_at);
+        $this->assertSame(5, $story->fresh()->estimate_points);
         $this->assertDatabaseCount('story_estimation_agent_runs', 6);
-        $this->assertDatabaseHas('chat_conversations', [
-            'user_id' => $owner->id,
-            'agent_profile' => 'scrum-master',
-        ]);
-        $chatSummary = \App\Models\ChatMessage::query()->where('role', 'assistant')->value('content');
-        $this->assertStringContainsString('Scrum Master: hasil estimasi telah dirangkum.', $chatSummary);
-        $this->assertStringContainsString('Backend Developer: 3 → 5', $chatSummary);
-        $this->assertNull($story->fresh()->estimate_points);
+        $this->assertDatabaseCount('story_estimation_messages', 18);
+        $this->assertStringContainsString('ketiganya setuju 5 poin', ChatMessage::query()->where('role', 'assistant')->value('content'));
         Http::assertSentCount(7);
-
-        $this->actingAs($owner)->get('/agents/backend-developer/activity')
-            ->assertOk()->assertSee('REFINEMENT FIBONACCI')->assertSee('US-01')
-            ->assertSee('Putaran 1')->assertSee('Putaran 2');
+        $this->get('/agents/backend-developer/activity')->assertOk()->assertSee('REFINEMENT FIBONACCI');
     }
 
-    public function test_p_o_can_set_only_a_fibonacci_value_from_a_completed_current_run(): void
+    public function test_no_consensus_after_three_rounds_never_sets_point_or_fabricates_report(): void
     {
         $this->configureEstimationProfiles();
         Http::fake(function (Request $request) {
             if (str_contains($request->url(), 'scrum-master.test')) {
-                return Http::response(['choices' => [['message' => ['content' => 'Ringkasan Scrum Master.']]]]);
+                return Http::response([], 500);
+            }
+            $point = match (true) {
+                str_contains($request->url(), 'backend.test') => 3,
+                str_contains($request->url(), 'frontend.test') => 5,
+                default => 8,
+            };
+            $content = $request['messages'][1]['content'] ?? '';
+            $first = str_contains($content, 'PUTARAN 1');
+            $answer = ['estimate_points' => $point, 'rationale' => 'Belum ada dasar menyamakan ukuran.'];
+            if (! $first) {
+                $answer['response'] = 'Saya membaca usulan lain, tetapi tetap berbeda.';
+                $answer['explicit_agree'] = false;
             }
 
-            return Http::response(['choices' => [['message' => ['content' => json_encode(['estimate_points' => 5, 'rationale' => 'Cakupan sedang.'])]]]]);
+            return Http::response(['choices' => [['message' => ['content' => json_encode($answer)]]]]);
         });
         [$owner, $project, $story] = $this->makeStory();
-        $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs');
-        $runId = (int) \DB::table('story_estimation_runs')->where('story_id', $story->id)->value('id');
-
-        $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs/'.$runId.'/approve', ['estimate_points' => 5])
-            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog');
-
-        $this->assertSame(5, $story->fresh()->estimate_points);
-        $this->assertDatabaseHas('story_estimation_runs', ['id' => $runId, 'approved_points' => 5, 'approved_by' => $owner->id]);
-    }
-
-    public function test_invalid_or_stale_estimation_cannot_be_approved(): void
-    {
-        [$owner, $project, $story] = $this->makeStory();
-        $runId = \DB::table('story_estimation_runs')->insertGetId([
-            'story_id' => $story->id,
-            'requested_by' => $owner->id,
-            'story_revision' => 1,
-            'status' => 'COMPLETED',
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-
-        $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs/'.$runId.'/approve', ['estimate_points' => 4])
-            ->assertSessionHasErrors('estimate_points');
-
-        $story->forceFill(['revision' => 2])->save();
-        $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs/'.$runId.'/approve', ['estimate_points' => 5])
+        $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs')
             ->assertRedirect('/projects/'.$project->id.'/sprint-backlog')->assertSessionHasErrors('estimation');
+        $this->assertDatabaseHas('story_estimation_runs', ['story_id' => $story->id, 'status' => 'NO_CONSENSUS', 'consensus_points' => null]);
+        $this->assertDatabaseCount('story_estimation_agent_runs', 9);
+        $this->assertDatabaseCount('story_estimation_messages', 27);
         $this->assertNull($story->fresh()->estimate_points);
+        $this->assertDatabaseCount('chat_messages', 0);
+        Http::assertSentCount(9);
     }
 
-    public function test_story_backlog_displays_the_estimation_action_and_current_point_value(): void
+    public function test_backlog_shows_read_only_discussion_and_hides_manual_point_selection(): void
     {
         [$owner, $project, $story] = $this->makeStory();
-        $story->forceFill(['estimate_points' => 8])->save();
-        $run = StoryEstimationRun::query()->create([
-            'story_id' => $story->id,
-            'requested_by' => $owner->id,
-            'story_revision' => $story->revision,
-            'status' => 'COMPLETED',
-            'summary' => 'Perbedaan estimasi dibahas.',
-            'approved_points' => 8,
-            'approved_by' => $owner->id,
-            'approved_at' => now(),
-            'completed_at' => now(),
-        ]);
-        foreach (['backend-developer', 'frontend-developer', 'qa-engineer'] as $profile) {
-            foreach ([1, 2] as $round) {
-                StoryEstimationAgentRun::query()->create([
-                    'story_estimation_run_id' => $run->id,
-                    'profile_slug' => $profile,
-                    'round' => $round,
-                    'status' => 'COMPLETED',
-                    'estimate_points' => 5,
-                    'rationale' => 'Diperiksa terhadap kriteria.',
-                ]);
-            }
-        }
-
         $this->actingAs($owner)->get('/projects/'.$project->id.'/sprint-backlog')
-            ->assertOk()->assertSee('Estimasi Fibonacci via Scrum Master')
-            ->assertSee('8 poin Fibonacci')
-            ->assertSee('Buka hasil diskusi di chat Scrum Master');
+            ->assertOk()->assertSee('Diskusi Fibonacci via Scrum Master')
+            ->assertSee('Lihat Diskusi Tim')->assertDontSee('Poin final pilihan PO');
+        $this->get('/stories/'.$story->id.'/discussion')->assertOk()
+            ->assertSee('Diskusi Fibonacci')->assertSee('Eksekusi &amp; Revisi QA', false);
     }
 
     private function configureEstimationProfiles(): void
@@ -160,35 +116,23 @@ class StoryEstimationTest extends TestCase
         ]);
     }
 
-    /** @return array{User, Project, Story} */
     private function makeStory(): array
     {
         $owner = User::factory()->create();
         $project = Project::query()->create([
-            'name' => 'Budget Workspace',
-            'project_type' => 'NEW_PROJECT',
-            'stack' => 'Laravel',
-            'status' => 'SETUP_REQUIRED',
+            'name' => 'Budget Workspace', 'project_type' => 'NEW_PROJECT', 'stack' => 'Laravel', 'status' => 'SETUP_REQUIRED',
         ]);
-        $backlog = $project->backlog;
         $sprint = Sprint::query()->create([
-            'project_id' => $project->id,
-            'backlog_id' => $backlog->id,
-            'name' => 'Sprint 1',
-            'status' => 'PLANNING',
-            'revision' => 1,
+            'project_id' => $project->id, 'backlog_id' => $project->backlog->id,
+            'name' => 'Sprint 1', 'status' => 'PLANNING', 'revision' => 1,
         ]);
         $actor = Actor::query()->where('name', 'Administrator')->firstOrFail();
         $story = Story::query()->create([
-            'project_id' => $project->id,
-            'sprint_id' => $sprint->id,
-            'actor_id' => $actor->id,
-            'user_story_key' => 'US-01',
-            'title' => 'Kelola pengajuan',
-            'sprint_purpose' => 'Pengajuan mudah dipantau oleh PO.',
+            'project_id' => $project->id, 'sprint_id' => $sprint->id,
+            'actor_id' => $actor->id, 'user_story_key' => 'US-01',
+            'title' => 'Kelola pengajuan', 'sprint_purpose' => 'Pengajuan mudah dipantau oleh PO.',
             'acceptance_criteria' => "PO dapat membuat pengajuan.\nSistem menampilkan status pengajuan.",
-            'scope_status' => 'NEEDS_REFINEMENT',
-            'revision' => 1,
+            'scope_status' => 'NEEDS_REFINEMENT', 'revision' => 1,
         ]);
 
         return [$owner, $project, $story];

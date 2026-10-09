@@ -69,43 +69,36 @@
                             <p><strong>Saya Ingin:</strong> {{ $story->title }}</p>
                             <p><strong>Agar:</strong> {{ $story->sprint_purpose }}</p>
                             <div class="story-criteria"><strong>Acceptance Criteria</strong><pre>{{ $story->acceptance_criteria }}</pre></div>
-                            @if ($story->estimate_points)<p class="story-estimate-final"><strong>Estimasi final PO:</strong> {{ $story->estimate_points }} poin Fibonacci</p>@endif
+                            @php($latestEstimationRun = $estimationSchemaReady ? $story->estimationRuns->first() : null)
+                            @php($agreed = $latestEstimationRun && $latestEstimationRun->story_revision === $story->revision && $latestEstimationRun->status === 'COMPLETED' && $latestEstimationRun->report_sent_at && $latestEstimationRun->consensus_points === $story->estimate_points)
+                            @if ($agreed)
+                                @php($size = in_array($story->estimate_points, [1, 2], true) ? 'Ringan' : (in_array($story->estimate_points, [3, 5], true) ? 'Sedang' : 'Berat'))
+                                <p class="story-estimate-final"><strong>Poin Fibonacci final · Hasil kesepakatan tim:</strong> {{ $story->estimate_points }} ({{ $size }})</p>
+                            @elseif ($story->estimate_points)
+                                <p class="estimation-stale">Poin lama belum terbukti sebagai kesepakatan tim untuk revisi ini; Eksekusi tetap terkunci.</p>
+                            @endif
+                            <a class="button button-ghost" href="{{ route('stories.discussion.show', $story) }}">Lihat Diskusi Tim</a>
+                            <button class="button button-ghost" type="button" disabled title="Executor project terisolasi dan persetujuan scope belum tersedia">Eksekusi User Story — belum tersedia</button>
                             @if ($estimationSchemaReady && $sprint->status === 'PLANNING')
                                 <div class="story-estimation-panel">
                                     <form method="POST" action="{{ route('stories.estimations.store', $story) }}">
                                         @csrf
-                                        <button class="button button-ghost" type="submit">Estimasi Fibonacci via Scrum Master</button>
-                                        <p class="field-help">Backend, Frontend, dan QA memberi estimasi independen lalu meninjau hasil bersama Scrum Master. Tidak ada skor feasibility.</p>
+                                        <button class="button button-ghost" type="submit" @disabled($latestEstimationRun?->status === 'RUNNING')>Diskusi Fibonacci via Scrum Master</button>
+                                        <p class="field-help">FE, BE dan QA memberi usulan keseluruhan story, saling menanggapi, lalu secara eksplisit menyepakati poin yang sama dalam maksimal tiga putaran. Tanpa kesepakatan, tidak ada poin final.</p>
                                     </form>
-                                    @php($latestEstimationRun = $story->estimationRuns->first())
                                     @if ($latestEstimationRun)
                                         @if ($latestEstimationRun->story_revision !== $story->revision)
-                                            <p class="estimation-stale">Hasil run #{{ $latestEstimationRun->id }} kedaluwarsa karena User Story berubah.</p>
+                                            <p class="estimation-stale">Run #{{ $latestEstimationRun->id }} kedaluwarsa karena User Story berubah.</p>
                                         @else
-                                            <p class="field-help">Status refinement: <strong>{{ $latestEstimationRun->status }}</strong> · Revisi {{ $latestEstimationRun->story_revision }}</p>
-                                            <ul class="estimation-agent-runs">
-                                                @foreach ($latestEstimationRun->agentRuns as $agentRun)
-                                                    <li>
-                                                        <strong>{{ ['backend-developer' => 'Backend Developer', 'frontend-developer' => 'Frontend Developer', 'qa-engineer' => 'QA Engineer'][$agentRun->profile_slug] ?? $agentRun->profile_slug }}</strong>
-                                                        <span>Putaran {{ $agentRun->round }} · {{ $agentRun->status }}@if ($agentRun->estimate_points) · {{ $agentRun->estimate_points }} poin @endif</span>
-                                                        @if ($agentRun->rationale)<span>{{ $agentRun->rationale }}</span>@endif
-                                                    </li>
-                                                @endforeach
-                                            </ul>
+                                            <p class="field-help">Status diskusi: <strong>{{ $latestEstimationRun->status }}</strong> · Revisi {{ $latestEstimationRun->story_revision }}</p>
                                             @if ($latestEstimationRun->status === 'COMPLETED')
-                                                <a class="text-link" href="{{ route('chat.index') }}">Buka hasil diskusi di chat Scrum Master →</a>
-                                                <form class="story-estimation-approve" method="POST" action="{{ route('stories.estimations.approve', [$story, $latestEstimationRun]) }}">
-                                                    @csrf
-                                                    <label for="estimate-points-{{ $story->id }}">Poin final pilihan PO</label>
-                                                    <select id="estimate-points-{{ $story->id }}" name="estimate_points" required>
-                                                        <option value="">Pilih poin Fibonacci</option>
-                                                        @foreach ([1, 2, 3, 5, 8, 13] as $point)
-                                                            <option value="{{ $point }}" @selected((string) $latestEstimationRun->approved_points === (string) $point)>{{ $point }}</option>
-                                                        @endforeach
-                                                    </select>
-                                                    <button class="button button-primary" type="submit">Tetapkan estimasi final</button>
-                                                </form>
+                                                <a class="text-link" href="{{ route('chat.index') }}">Buka laporan di chat Scrum Master →</a>
+                                            @elseif ($latestEstimationRun->status === 'RUNNING' && $latestEstimationRun->created_at?->lte(now()->subMinutes(30)) && (int) $latestEstimationRun->requested_by === (int) auth()->id())
+                                                <form method="POST" action="{{ route('stories.estimations.cancel', [$story, $latestEstimationRun]) }}">@csrf<button class="button button-ghost" type="submit">Hentikan run lama (lebih dari 30 menit)</button></form>
+                                            @elseif ($latestEstimationRun->status === 'REPORT_PENDING')
+                                                <form method="POST" action="{{ route('stories.estimations.report', [$story, $latestEstimationRun]) }}">@csrf<button class="button button-ghost" type="submit">Coba Lagi Laporan Scrum Master</button></form>
                                             @endif
+                                            <p class="field-help">Lihat usulan, tanggapan, dan persetujuan asli setiap agent melalui Lihat Diskusi Tim.</p>
                                         @endif
                                     @endif
                                 </div>

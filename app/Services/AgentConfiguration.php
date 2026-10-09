@@ -79,9 +79,6 @@ class AgentConfiguration
             return DB::transaction(function () use ($role, $data, $actor, $agent, $status, $snapshot, $pack): array {
                 $locked = DB::table('agent_role_settings')->where('role', $role)->lockForUpdate()->first();
                 abort_unless(($locked?->config_version ?? 0) === $data['config_version'], 409, 'Konfigurasi telah berubah.');
-                if ($status === 'verified' && DB::table('agent_role_settings')->where('role', '!=', $role)->where('active_model', $data['model'])->exists()) {
-                    throw ValidationException::withMessages(['selection' => 'Model aktif harus berbeda untuk setiap peran.']);
-                }
                 $version = $data['config_version'] + 1;
                 $id = DB::table('agent_config_versions')->insertGetId([
                     'role' => $role, 'profile' => $agent['profile'], 'config_version' => $version,
@@ -100,8 +97,8 @@ class AgentConfiguration
                 return ['config_version' => $version, 'status' => $status];
             });
         } catch (QueryException) {
-            // Includes racing first saves and unique model activation. Never echo SQL or credentials.
-            abort(409, 'Konflik konfigurasi atau model aktif. Muat ulang editor.');
+            // Includes racing first saves. Never echo SQL or credentials.
+            abort(409, 'Konflik konfigurasi. Muat ulang editor.');
         }
     }
 }

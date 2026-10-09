@@ -158,7 +158,7 @@ class AgentConfigurationTest extends TestCase
         Http::assertNotSent(fn ($r) => $r->method() === 'POST');
     }
 
-    public function test_duplicate_active_models_are_rejected_across_roles_and_endpoint_catalog_is_role_scoped(): void
+    public function test_roles_can_share_a_catalog_verified_model_and_retain_independent_selections(): void
     {
         $this->configure();
         $this->configure('backend-developer');
@@ -168,13 +168,54 @@ class AgentConfigurationTest extends TestCase
         ]);
         $this->actingAs(User::factory()->create());
         $this->putJson('/agents/scrum-master/config', $this->payload())->assertOk();
-        $payload = $this->payload();
-        $this->putJson('/agents/backend-developer/config', $payload)->assertUnprocessable()->assertJsonValidationErrors('selection');
-        $payload['selection'] = json_encode(['provider' => 'test-provider', 'model' => 'model-two']);
-        $this->putJson('/agents/backend-developer/config', $payload)->assertOk();
-        $payload['config_version'] = 1;
-        $this->putJson('/agents/scrum-master/config', $payload)->assertUnprocessable()->assertJsonValidationErrors('selection');
+        $this->putJson('/agents/backend-developer/config', $this->payload())->assertOk();
+        foreach (['scrum-master', 'backend-developer'] as $role) {
+            $this->assertDatabaseHas('agent_role_settings', ['role' => $role, 'config_version' => 1, 'active_model' => 'model-one']);
+            $this->assertSame('model-one', (new AgentConfiguration)->current($role)['model']);
+            $this->get('/agents/'.$role.'/config')->assertOk()->assertSee('model-one');
+        }
         $this->assertDatabaseCount('agent_config_versions', 2);
+    }
+
+    public function test_migrated_schema_preserves_four_role_pointers_and_foreign_keys_without_unique_model_index(): void
+    {
+        $this->catalog();
+        $this->actingAs(User::factory()->create());
+        foreach (config('agents.profiles') as $position => $agent) {
+            $role = $agent['slug'];
+            $this->configure($role);
+            $this->putJson('/agents/'.$role.'/config', [
+                'config_version' => 0,
+                'selection' => json_encode(['provider' => 'test-provider', 'model' => ['model-one', 'model-two', 'model-three', 'model-four'][$position]]),
+            ])->assertOk();
+        }
+        $before = DB::table('agent_role_settings')->orderBy('role')->get()->toArray();
+        $versions = DB::table('agent_config_versions')->orderBy('id')->get()->toArray();
+        $this->assertCount(4, $before);
+        $indexes = DB::select("PRAGMA index_list('agent_role_settings')");
+        $this->assertNotContains('agent_role_settings_active_model_unique', array_column($indexes, 'name'));
+        $this->assertSame([], DB::select('PRAGMA foreign_key_check'));
+        $this->assertEquals($before, DB::table('agent_role_settings')->orderBy('role')->get()->toArray());
+        $this->assertEquals($versions, DB::table('agent_config_versions')->orderBy('id')->get()->toArray());
+        DB::table('agent_role_settings')->where('role', 'backend-developer')->update(['active_model' => 'model-one']);
+        $this->assertDatabaseHas('agent_role_settings', ['role' => 'backend-developer', 'active_model' => 'model-one']);
+        $this->assertDatabaseHas('agent_role_settings', ['role' => 'scrum-master', 'active_model' => 'model-one']);
+        $this->assertSame([], DB::select('PRAGMA foreign_key_check'));
+    }
+
+    public function test_distinct_models_remain_available_per_role(): void
+    {
+        $this->configure();
+        $this->configure('backend-developer');
+        $this->catalog();
+        $this->actingAs(User::factory()->create());
+        $this->putJson('/agents/scrum-master/config', $this->payload())->assertOk();
+        $this->putJson('/agents/backend-developer/config', [
+            'config_version' => 0,
+            'selection' => json_encode(['provider' => 'test-provider', 'model' => 'model-two']),
+        ])->assertOk();
+        $this->assertSame('model-one', (new AgentConfiguration)->current('scrum-master')['model']);
+        $this->assertSame('model-two', (new AgentConfiguration)->current('backend-developer')['model']);
     }
 
     public function test_auth_and_forbidden_configuration_fields_are_enforced(): void

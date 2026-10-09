@@ -22,7 +22,8 @@ class StoryController extends Controller
         }
         $backlog = $project->backlog;
         $estimationSchemaReady = Schema::hasTable('story_estimation_runs')
-            && Schema::hasTable('story_estimation_agent_runs');
+            && Schema::hasTable('story_estimation_agent_runs')
+            && Schema::hasTable('story_estimation_messages');
         $storyRelations = ['stories.actor'];
         if ($estimationSchemaReady) {
             $storyRelations[] = 'stories.estimationRuns.agentRuns';

@@ -12,8 +12,11 @@ class StoryEstimationRun extends Model
         'story_id',
         'requested_by',
         'story_revision',
+        'story_snapshot_hash',
         'status',
         'summary',
+        'consensus_points',
+        'report_sent_at',
         'approved_points',
         'approved_by',
         'approved_at',
@@ -24,6 +27,8 @@ class StoryEstimationRun extends Model
     {
         return [
             'story_revision' => 'integer',
+            'consensus_points' => 'integer',
+            'report_sent_at' => 'datetime',
             'approved_points' => 'integer',
             'approved_at' => 'datetime',
             'completed_at' => 'datetime',
@@ -48,5 +53,10 @@ class StoryEstimationRun extends Model
     public function agentRuns(): HasMany
     {
         return $this->hasMany(StoryEstimationAgentRun::class)->orderBy('round')->orderBy('profile_slug');
+    }
+
+    public function messages(): HasMany
+    {
+        return $this->hasMany(StoryEstimationMessage::class)->orderBy('round')->orderBy('id');
     }
 }
