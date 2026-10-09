@@ -309,7 +309,7 @@ class StoryEstimationService
         }
         foreach ($round === 1 ? ['rationale'] : ['rationale', 'response'] as $field) {
             if (! is_string($data[$field]) || trim($data[$field]) === '' || mb_strlen($data[$field]) > 1000
-                || $this->disclosure->containsSensitiveDisclosure($data[$field])) {
+                || $this->disclosure->containsStructuredEvidenceSecret($data[$field])) {
                 throw new RuntimeException('Unsafe or empty response.');
             }
             $data[$field] = trim($data[$field]);

@@ -491,6 +491,27 @@ class StoryEstimationConsensusCoreTest extends TestCase
         $this->assertSame(2, $story->fresh()->estimate_points);
     }
 
+    public function test_structured_rationale_may_discuss_server_validation_without_being_treated_as_a_secret(): void
+    {
+        [$story, $owner] = $this->story();
+        $agents = Mockery::mock(AgentProfileClient::class);
+        $agents->shouldReceive('sendMessage')->times(6)->andReturnUsing(function ($slug, $prompt) {
+            $round = str_contains($prompt, 'PUTARAN 1') ? 1 : 2;
+
+            return json_encode(['estimate_points' => 5, 'rationale' => 'Validasi server-side dan error permission harus diperiksa.']
+                + ($round === 2 ? ['response' => 'Saya sudah membaca pesan tim dan setuju 5.', 'explicit_agree' => true] : []));
+        });
+        $this->app->instance(AgentProfileClient::class, $agents);
+        $sm = Mockery::mock(HermesClient::class);
+        $sm->shouldReceive('sendMessage')->once()->andReturn('Tim sepakat lima poin.');
+        $this->app->instance(HermesClient::class, $sm);
+
+        $run = app(StoryEstimationService::class)->estimate($story, $owner);
+
+        $this->assertSame('COMPLETED', $run->status);
+        $this->assertSame(5, $story->fresh()->estimate_points);
+    }
+
     private function story(): array
     {
         $owner = User::factory()->create();
