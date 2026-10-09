@@ -87,7 +87,7 @@ class StoryEstimationWorkflowTest extends TestCase
         $run->messages()->create([
             'story_revision' => $story->revision, 'round' => 1,
             'sender_slug' => 'qa-engineer', 'recipient_slug' => 'scrum-master',
-            'content' => 'pesan-run-pribadi-123', 'estimate_points' => 3,
+            'content' => '{"estimate_points":3,"rationale":"pesan-run-pribadi-123"}', 'estimate_points' => 3,
         ]);
         $this->actingAs($owner)->get('/stories/'.$story->id.'/discussion')->assertOk()->assertSee('pesan-run-pribadi-123');
         $this->actingAs(User::factory()->create())->get('/stories/'.$story->id.'/discussion')

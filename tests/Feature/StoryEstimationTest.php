@@ -26,13 +26,18 @@ class StoryEstimationTest extends TestCase
                 return Http::response(['choices' => [['message' => ['content' => 'Scrum Master: ketiganya setuju 5 poin.']]]]);
             }
             $content = $request['messages'][1]['content'] ?? '';
+            $finalConfirmation = str_contains($content, 'KONFIRMASI FINAL PUTARAN 3');
             $secondRound = str_contains($content, 'PUTARAN 2');
-            $point = $secondRound ? 5 : match (true) {
+            $point = ($secondRound || $finalConfirmation) ? 5 : match (true) {
                 str_contains($request->url(), 'backend.test') => 3,
                 str_contains($request->url(), 'frontend.test') => 5,
                 default => 8,
             };
-            $response = ['estimate_points' => $point, 'rationale' => 'Cakupan keseluruhan dan kriteria diperiksa.'];
+            if ($finalConfirmation) {
+                $response = ['estimate_points' => $point, 'explicit_agree' => true, 'rationale' => 'Konfirmasi akhir setelah membaca ringkasan.'];
+            } else {
+                $response = ['estimate_points' => $point, 'rationale' => 'Cakupan keseluruhan dan kriteria diperiksa.'];
+            }
             if ($secondRound) {
                 $response['response'] = 'Saya membaca pendapat peserta lain dan menyetujui 5 poin.';
                 $response['explicit_agree'] = true;
@@ -48,10 +53,10 @@ class StoryEstimationTest extends TestCase
         $this->assertSame(5, $run->consensus_points);
         $this->assertNotNull($run->report_sent_at);
         $this->assertSame(5, $story->fresh()->estimate_points);
-        $this->assertDatabaseCount('story_estimation_agent_runs', 6);
-        $this->assertDatabaseCount('story_estimation_messages', 18);
+        $this->assertDatabaseCount('story_estimation_agent_runs', 9);
+        $this->assertDatabaseCount('story_estimation_messages', 27);
         $this->assertStringContainsString('ketiganya setuju 5 poin', ChatMessage::query()->where('role', 'assistant')->value('content'));
-        Http::assertSentCount(7);
+        Http::assertSentCount(10);
         $this->get('/agents/backend-developer/activity')->assertOk()->assertSee('REFINEMENT FIBONACCI');
     }
 
@@ -68,9 +73,12 @@ class StoryEstimationTest extends TestCase
                 default => 8,
             };
             $content = $request['messages'][1]['content'] ?? '';
+            $finalConfirmation = str_contains($content, 'KONFIRMASI FINAL PUTARAN 3');
             $first = str_contains($content, 'PUTARAN 1');
             $answer = ['estimate_points' => $point, 'rationale' => 'Belum ada dasar menyamakan ukuran.'];
-            if (! $first) {
+            if ($finalConfirmation) {
+                $answer = ['estimate_points' => $point, 'explicit_agree' => false, 'rationale' => 'Masih ada perbedaan.'];
+            } elseif (! $first) {
                 $answer['response'] = 'Saya membaca usulan lain, tetapi tetap berbeda.';
                 $answer['explicit_agree'] = false;
             }

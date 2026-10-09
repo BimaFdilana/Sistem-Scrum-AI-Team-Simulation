@@ -150,11 +150,13 @@ class StoryEstimationConsensusCoreTest extends TestCase
     {
         [$story, $owner] = $this->story();
         $agents = Mockery::mock(AgentProfileClient::class);
-        $agents->shouldReceive('sendMessage')->times(6)->andReturnUsing(function ($slug, $prompt) {
-            $round = str_contains($prompt, 'PUTARAN 1') ? 1 : 2;
+        $agents->shouldReceive('sendMessage')->times(9)->andReturnUsing(function ($slug, $prompt) {
+            $round = str_contains($prompt, 'PUTARAN 1') ? 1 : (str_contains($prompt, 'PUTARAN 2') ? 2 : 3);
+            if ($round === 1) {
+                return '{"estimate_points":5,"rationale":"Ukuran sah"}';
+            }
 
-            return json_encode(['estimate_points' => 5, 'rationale' => 'Ukuran sah']
-                + ($round === 2 ? ['response' => 'Setuju semua.', 'explicit_agree' => true] : []));
+            return json_encode(['estimate_points' => 5, 'rationale' => 'Ukuran sah', 'response' => 'Setuju semua.', 'explicit_agree' => true]);
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
@@ -220,11 +222,13 @@ class StoryEstimationConsensusCoreTest extends TestCase
     {
         [$story, $owner] = $this->story();
         $agents = Mockery::mock(AgentProfileClient::class);
-        $agents->shouldReceive('sendMessage')->times(6)->andReturnUsing(function ($slug, $prompt) {
-            $round = str_contains($prompt, 'PUTARAN 1') ? 1 : 2;
+        $agents->shouldReceive('sendMessage')->times(9)->andReturnUsing(function ($slug, $prompt) {
+            $round = str_contains($prompt, 'PUTARAN 1') ? 1 : (str_contains($prompt, 'PUTARAN 2') ? 2 : 3);
+            if ($round === 1) {
+                return '{"estimate_points":5,"rationale":"Ukuran sah"}';
+            }
 
-            return json_encode(['estimate_points' => 5, 'rationale' => 'Ukuran sah']
-                + ($round === 2 ? ['response' => 'Setuju semua.', 'explicit_agree' => true] : []));
+            return json_encode(['estimate_points' => 5, 'rationale' => 'Ukuran sah', 'response' => 'Setuju semua.', 'explicit_agree' => true]);
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
@@ -233,7 +237,7 @@ class StoryEstimationConsensusCoreTest extends TestCase
         $cancelled = false;
         DB::listen(function ($query) use (&$cancelled, $story): void {
             if (! $cancelled && str_contains($query->sql, 'select "status" from "story_estimation_runs"')
-                && DB::table('story_estimation_messages')->count() === 18) {
+                && DB::table('story_estimation_messages')->count() === 27) {
                 $cancelled = true;
                 DB::table('story_estimation_runs')->where('story_id', $story->id)->update(['status' => 'CANCELLED']);
             }
@@ -248,11 +252,13 @@ class StoryEstimationConsensusCoreTest extends TestCase
     {
         [$story, $owner] = $this->story();
         $agents = Mockery::mock(AgentProfileClient::class);
-        $agents->shouldReceive('sendMessage')->times(6)->andReturnUsing(function ($slug, $prompt) {
-            $round = str_contains($prompt, 'PUTARAN 1') ? 1 : 2;
+        $agents->shouldReceive('sendMessage')->times(9)->andReturnUsing(function ($slug, $prompt) {
+            $round = str_contains($prompt, 'PUTARAN 1') ? 1 : (str_contains($prompt, 'PUTARAN 2') ? 2 : 3);
+            if ($round === 1) {
+                return '{"estimate_points":5,"rationale":"Ukuran sah"}';
+            }
 
-            return json_encode(['estimate_points' => 5, 'rationale' => 'Ukuran sah']
-                + ($round === 2 ? ['response' => 'Setuju semua.', 'explicit_agree' => true] : []));
+            return json_encode(['estimate_points' => 5, 'rationale' => 'Ukuran sah', 'response' => 'Setuju semua.', 'explicit_agree' => true]);
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
@@ -273,12 +279,12 @@ class StoryEstimationConsensusCoreTest extends TestCase
         [$story, $owner] = $this->story();
         $prompts = [];
         $agents = Mockery::mock(AgentProfileClient::class);
-        $agents->shouldReceive('sendMessage')->times(6)->andReturnUsing(function ($slug, $prompt, $conversation) use (&$prompts) {
+        $agents->shouldReceive('sendMessage')->times(9)->andReturnUsing(function ($slug, $prompt, $conversation) use (&$prompts) {
             $prompts[$slug][] = $prompt;
             $round = count($prompts[$slug]);
             $point = $round === 1 ? ['backend-developer' => 3, 'frontend-developer' => 5, 'qa-engineer' => 8][$slug] : 5;
 
-            return json_encode(['estimate_points' => $point, 'rationale' => 'Analisis nyata '.$slug.' putaran '.$round] + ($round === 2 ? ['response' => 'Menanggapi pendapat tim.', 'explicit_agree' => true] : []));
+            return json_encode(['estimate_points' => $point, 'rationale' => 'Analisis nyata '.$slug.' putaran '.$round] + ($round === 2 ? ['response' => 'Menanggapi pendapat tim.', 'explicit_agree' => true] : ($round === 1 ? [] : ['explicit_agree' => true])));
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
@@ -295,13 +301,75 @@ class StoryEstimationConsensusCoreTest extends TestCase
         $this->assertSame(5, $run->consensus_points);
         $this->assertNotNull($run->report_sent_at);
         $this->assertSame(5, $story->fresh()->estimate_points);
-        $this->assertCount(18, $run->messages);
-        $this->assertSame(6, $run->agentRuns()->count());
+        $this->assertCount(27, $run->messages);
+        $this->assertSame(9, $run->agentRuns()->count());
         $this->assertSame(1, $run->messages()->where('sender_slug', 'backend-developer')->where('recipient_slug', 'frontend-developer')->where('round', 1)->count());
         $this->assertStringContainsString('Analisis nyata qa-engineer putaran 1', $prompts['backend-developer'][1]);
         $this->assertStringContainsString('Analisis nyata frontend-developer putaran 1', $prompts['backend-developer'][1]);
         $this->assertStringNotContainsString('Analisis nyata frontend-developer putaran 1', $prompts['backend-developer'][0]);
         $this->assertSame('Sedang', StoryEstimationService::category(5));
+    }
+
+    public function test_final_confirmation_uses_identical_capped_difference_summary_and_requires_round_three(): void
+    {
+        [$story, $owner] = $this->story();
+        $prompts = [];
+        $agents = Mockery::mock(AgentProfileClient::class);
+        $agents->shouldReceive('sendMessage')->times(9)->andReturnUsing(function ($slug, $prompt) use (&$prompts) {
+            $prompts[$slug][] = $prompt;
+            $round = count($prompts[$slug]);
+            if ($round === 1) {
+                $point = ['backend-developer' => 3, 'frontend-developer' => 5, 'qa-engineer' => 8][$slug];
+
+                return json_encode(['estimate_points' => $point, 'rationale' => str_repeat('evidence-', 100)]);
+            }
+            if ($round === 2) {
+                return json_encode(['estimate_points' => 5, 'rationale' => 'Debate '.$slug, 'response' => 'Round two evidence '.$slug, 'explicit_agree' => true]);
+            }
+
+            return '{"estimate_points":5,"explicit_agree":true,"rationale":"Konfirmasi akhir 5."}';
+        });
+        $this->app->instance(AgentProfileClient::class, $agents);
+        $sm = Mockery::mock(HermesClient::class);
+        $sm->shouldReceive('sendMessage')->once()->andReturn('Laporan berdasar bukti.');
+        $this->app->instance(HermesClient::class, $sm);
+
+        $run = app(StoryEstimationService::class)->estimate($story, $owner);
+
+        $this->assertSame('COMPLETED', $run->status);
+        $this->assertSame(5, $run->consensus_points);
+        $this->assertSame($prompts['backend-developer'][2], $prompts['frontend-developer'][2]);
+        $this->assertSame($prompts['backend-developer'][2], $prompts['qa-engineer'][2]);
+        $this->assertStringContainsString('KONFIRMASI FINAL PUTARAN 3', $prompts['backend-developer'][2]);
+        $this->assertStringContainsString('Kandidat Fibonacci: [3,5,8]', $prompts['backend-developer'][2]);
+        $this->assertLessThanOrEqual(3500, strlen($prompts['backend-developer'][2]));
+        $this->assertSame(27, $run->messages()->count());
+        $this->assertSame(3, $run->messages()->where('round', 3)->where('recipient_slug', 'scrum-master')->count());
+    }
+
+    public function test_round_two_agreement_alone_never_short_circuits_final_confirmation(): void
+    {
+        [$story, $owner] = $this->story();
+        $agents = Mockery::mock(AgentProfileClient::class);
+        $agents->shouldReceive('sendMessage')->times(9)->andReturnUsing(function ($slug, $prompt) {
+            $round = str_contains($prompt, 'PUTARAN 1') ? 1 : (str_contains($prompt, 'PUTARAN 2') ? 2 : 3);
+
+            return json_encode($round === 1
+                ? ['estimate_points' => 5, 'rationale' => 'Mandiri']
+                : ($round === 2
+                    ? ['estimate_points' => 5, 'rationale' => 'Setuju sementara', 'response' => 'Setuju', 'explicit_agree' => true]
+                    : ['estimate_points' => 5, 'explicit_agree' => false, 'rationale' => 'Konfirmasi ditolak']));
+        });
+        $this->app->instance(AgentProfileClient::class, $agents);
+        $sm = Mockery::mock(HermesClient::class);
+        $sm->shouldNotReceive('sendMessage');
+        $this->app->instance(HermesClient::class, $sm);
+
+        $run = app(StoryEstimationService::class)->estimate($story, $owner);
+
+        $this->assertSame('NO_CONSENSUS', $run->status);
+        $this->assertNull($run->consensus_points);
+        $this->assertSame(9, $run->agentRuns()->count());
     }
 
     public function test_disagreement_runs_three_complete_rounds_without_assigning_point(): void
@@ -315,7 +383,7 @@ class StoryEstimationConsensusCoreTest extends TestCase
 
             return json_encode(['estimate_points' => ['backend-developer' => 3, 'frontend-developer' => 5, 'qa-engineer' => 8][$slug],
                 'rationale' => 'Alasan '.$slug.' ronde '.$round] + ($round > 1
-                    ? ['response' => 'Tidak setuju dengan argumen lain.', 'explicit_agree' => false] : []));
+                    ? ['response' => 'Tidak setuju dengan argumen lain.', 'explicit_agree' => false] : ($round === 1 ? [] : ['explicit_agree' => true])));
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
@@ -337,11 +405,13 @@ class StoryEstimationConsensusCoreTest extends TestCase
     {
         [$story, $owner] = $this->story();
         $agents = Mockery::mock(AgentProfileClient::class);
-        $agents->shouldReceive('sendMessage')->times(6)->andReturnUsing(function ($slug, $prompt) {
-            $round = str_contains($prompt, 'PUTARAN 1') ? 1 : 2;
+        $agents->shouldReceive('sendMessage')->times(9)->andReturnUsing(function ($slug, $prompt) {
+            $round = str_contains($prompt, 'PUTARAN 1') ? 1 : (str_contains($prompt, 'PUTARAN 2') ? 2 : 3);
+            if ($round === 1) {
+                return '{"estimate_points":8,"rationale":"Penilaian scope"}';
+            }
 
-            return json_encode(['estimate_points' => 8, 'rationale' => 'Penilaian scope '.$slug]
-                + ($round === 2 ? ['response' => 'Setuju pada estimasi 8.', 'explicit_agree' => true] : []));
+            return json_encode(['estimate_points' => 8, 'rationale' => 'Penilaian scope '.$slug, 'response' => 'Setuju pada estimasi 8.', 'explicit_agree' => true]);
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
@@ -359,15 +429,15 @@ class StoryEstimationConsensusCoreTest extends TestCase
         $this->assertSame(8, $run->consensus_points);
         $this->assertNull($run->report_sent_at);
         $this->assertNull($story->fresh()->estimate_points);
-        $this->assertSame(18, $run->messages()->count());
+        $this->assertSame(27, $run->messages()->count());
         $this->assertSame(0, ChatMessage::query()->count());
 
         $reported = $service->report($run, $owner);
         $this->assertSame('COMPLETED', $reported->status);
         $this->assertSame(8, $story->fresh()->estimate_points);
         $this->assertNotNull($reported->report_sent_at);
-        $this->assertSame(6, $reported->agentRuns()->count());
-        $this->assertSame(18, $reported->messages()->count());
+        $this->assertSame(9, $reported->agentRuns()->count());
+        $this->assertSame(27, $reported->messages()->count());
         $this->assertSame(1, ChatMessage::query()->count());
         $this->assertSame('Berat', StoryEstimationService::category(8));
         $this->assertSame('Ringan', StoryEstimationService::category(2));
@@ -379,9 +449,11 @@ class StoryEstimationConsensusCoreTest extends TestCase
         $agents = Mockery::mock(AgentProfileClient::class);
         $agents->shouldReceive('sendMessage')->times(9)->andReturnUsing(function ($slug, $prompt) {
             $round = str_contains($prompt, 'PUTARAN 1') ? 1 : (str_contains($prompt, 'PUTARAN 2') ? 2 : 3);
+            if ($round === 1) {
+                return '{"estimate_points":5,"rationale":"Mandiri"}';
+            }
 
-            return json_encode(['estimate_points' => 5, 'rationale' => 'Mandiri']
-                + ($round > 1 ? ['response' => 'Belum ada persetujuan.', 'explicit_agree' => false] : []));
+            return json_encode(['estimate_points' => 5, 'rationale' => 'Mandiri', 'response' => 'Belum ada persetujuan.', 'explicit_agree' => false]);
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
@@ -399,11 +471,11 @@ class StoryEstimationConsensusCoreTest extends TestCase
     {
         [$story, $owner] = $this->story();
         $agents = Mockery::mock(AgentProfileClient::class);
-        $agents->shouldReceive('sendMessage')->times(6)->andReturnUsing(function ($slug, $prompt) {
-            $round = str_contains($prompt, 'PUTARAN 1') ? 1 : 2;
+        $agents->shouldReceive('sendMessage')->times(9)->andReturnUsing(function ($slug, $prompt) {
+            $round = str_contains($prompt, 'PUTARAN 1') ? 1 : (str_contains($prompt, 'PUTARAN 2') ? 2 : 3);
 
             return json_encode(['estimate_points' => 3, 'rationale' => 'Ukuran story']
-                + ($round === 2 ? ['response' => 'Kesimpulan bersama.', 'explicit_agree' => true] : []));
+                + ($round === 2 ? ['response' => 'Kesimpulan bersama.', 'explicit_agree' => true] : ($round === 1 ? [] : ['explicit_agree' => true])));
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
@@ -453,7 +525,7 @@ class StoryEstimationConsensusCoreTest extends TestCase
             }
 
             return json_encode(['estimate_points' => 5, 'rationale' => 'Alasan spesialis']
-                + ($round > 1 ? ['response' => 'Masih beda pendapat.', 'explicit_agree' => false] : []));
+                + ($round > 1 ? ['response' => 'Masih beda pendapat.', 'explicit_agree' => false] : ($round === 1 ? [] : ['explicit_agree' => true])));
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
@@ -471,11 +543,11 @@ class StoryEstimationConsensusCoreTest extends TestCase
     {
         [$story, $owner] = $this->story();
         $agents = Mockery::mock(AgentProfileClient::class);
-        $agents->shouldReceive('sendMessage')->times(6)->andReturnUsing(function ($slug, $prompt) {
-            $round = str_contains($prompt, 'PUTARAN 1') ? 1 : 2;
+        $agents->shouldReceive('sendMessage')->times(9)->andReturnUsing(function ($slug, $prompt) {
+            $round = str_contains($prompt, 'PUTARAN 1') ? 1 : (str_contains($prompt, 'PUTARAN 2') ? 2 : 3);
 
             return json_encode(['estimate_points' => 2, 'rationale' => 'Ukur story']
-                + ($round === 2 ? ['response' => 'Sepakat dua.', 'explicit_agree' => true] : []));
+                + ($round === 2 ? ['response' => 'Sepakat dua.', 'explicit_agree' => true] : ($round === 1 ? [] : ['explicit_agree' => true])));
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
@@ -495,11 +567,11 @@ class StoryEstimationConsensusCoreTest extends TestCase
     {
         [$story, $owner] = $this->story();
         $agents = Mockery::mock(AgentProfileClient::class);
-        $agents->shouldReceive('sendMessage')->times(6)->andReturnUsing(function ($slug, $prompt) {
-            $round = str_contains($prompt, 'PUTARAN 1') ? 1 : 2;
+        $agents->shouldReceive('sendMessage')->times(9)->andReturnUsing(function ($slug, $prompt) {
+            $round = str_contains($prompt, 'PUTARAN 1') ? 1 : (str_contains($prompt, 'PUTARAN 2') ? 2 : 3);
 
             return json_encode(['estimate_points' => 5, 'rationale' => 'Validasi server-side dan error permission harus diperiksa.']
-                + ($round === 2 ? ['response' => 'Saya sudah membaca pesan tim dan setuju 5.', 'explicit_agree' => true] : []));
+                + ($round === 2 ? ['response' => 'Saya sudah membaca pesan tim dan setuju 5.', 'explicit_agree' => true] : ($round === 1 ? [] : ['explicit_agree' => true])));
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);

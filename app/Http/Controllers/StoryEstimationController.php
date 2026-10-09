@@ -39,10 +39,17 @@ class StoryEstimationController extends Controller
     {
         $ready = $this->schemaReady();
 
+        $runs = $ready ? $story->estimationRuns()
+            ->where('requested_by', $request->user()->id)
+            ->with([
+                'agentRuns',
+                'messages' => fn ($query) => $query->where('recipient_slug', 'scrum-master'),
+            ])->latest('created_at')->get() : collect();
+
         return view('stories.discussion', [
             'story' => $story->load('project', 'sprint'),
-            'runs' => $ready ? $story->estimationRuns()->where('requested_by', $request->user()->id)
-                ->with(['agentRuns', 'messages'])->get() : collect(),
+            'runs' => $runs,
+            'currentRun' => $runs->first(fn ($run) => (int) $run->story_revision === (int) $story->revision) ?? $runs->first(),
             'schemaReady' => $ready,
             'activePage' => 'backlog',
         ]);
