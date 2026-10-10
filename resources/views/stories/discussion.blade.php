@@ -59,6 +59,8 @@
                             'INVALID_JSON_SCHEMA' => 'Jawaban agent tidak mengikuti format yang diminta.',
                             'SAFETY_REJECTION' => 'Jawaban ditolak oleh kebijakan keamanan.',
                             'STALE_OR_CANCELLED' => 'Run menjadi kedaluwarsa atau dibatalkan.',
+                        'WORKER_FAILED' => 'Worker diskusi berhenti sebelum proses selesai.',
+                        'WORKER_TIMEOUT' => 'Worker diskusi melewati batas waktu.',
                             default => 'Permintaan agent gagal.',
                         };
                     @endphp

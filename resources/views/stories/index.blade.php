@@ -100,6 +100,8 @@
                                                     'INVALID_JSON_SCHEMA' => 'jawaban agent tidak valid',
                                                     'SAFETY_REJECTION' => 'jawaban ditolak kebijakan keamanan',
                                                     'STALE_OR_CANCELLED' => 'run kedaluwarsa atau dibatalkan',
+                                                    'WORKER_FAILED' => 'worker diskusi berhenti',
+                                                    'WORKER_TIMEOUT' => 'worker diskusi timeout',
                                                     default => 'permintaan agent gagal',
                                                 })
                                                 <p class="field-help"><strong>{{ strtoupper($failedAgent->profile_slug) }} · Putaran {{ $failedAgent->round }}:</strong> {{ $failureText }}. Periksa konfigurasi/koneksi, lalu gunakan Retry bila tersedia.</p>
@@ -242,7 +244,9 @@
                 const errorLabels = {
                     PROVIDER_OVERLOADED: 'Provider sedang sibuk.', PROVIDER_TIMEOUT: 'Provider melewati batas waktu.',
                     PROVIDER_CONNECTION: 'Provider tidak dapat dihubungi.', INVALID_JSON_SCHEMA: 'Jawaban agent tidak valid.',
-                    SAFETY_REJECTION: 'Jawaban ditolak oleh kebijakan keamanan.', STALE_OR_CANCELLED: 'Run kedaluwarsa atau dibatalkan.'
+                    SAFETY_REJECTION: 'Jawaban ditolak oleh kebijakan keamanan.', STALE_OR_CANCELLED: 'Run kedaluwarsa atau dibatalkan.',
+                    WORKER_FAILED: 'Worker diskusi berhenti sebelum proses selesai.',
+                    WORKER_TIMEOUT: 'Worker diskusi melewati batas waktu.'
                 };
                 const terminal = ['COMPLETED', 'FAILED', 'PARTIAL', 'NO_CONSENSUS', 'STALE', 'CANCELLED'];
                 const setProgress = (data) => {

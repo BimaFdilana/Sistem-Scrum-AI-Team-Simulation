@@ -94,6 +94,34 @@ class StoryEstimationAsyncTest extends TestCase
         Queue::assertPushed(RunStoryEstimationJob::class, 1);
     }
 
+    public function test_worker_failure_terminalizes_run_and_in_progress_agent(): void
+    {
+        [$owner, $project, $story] = $this->makeStory();
+        $run = StoryEstimationRun::query()->create([
+            'story_id' => $story->id, 'requested_by' => $owner->id,
+            'story_revision' => $story->revision, 'status' => 'RUNNING',
+        ]);
+        $agentRun = $run->agentRuns()->create([
+            'profile_slug' => 'backend-developer', 'round' => 3, 'status' => 'RUNNING', 'started_at' => now(),
+        ]);
+
+        $job = new RunStoryEstimationJob($run->id, $owner->id);
+        $job->failed(new \RuntimeException('worker timeout'));
+
+        $this->assertSame('FAILED', $run->fresh()->status);
+        $this->assertSame('WORKER_FAILED', $agentRun->fresh()->error_code);
+        $this->assertSame('FAILED', $agentRun->fresh()->status);
+        $this->assertNotNull($run->fresh()->completed_at);
+    }
+
+    public function test_story_estimation_job_allows_time_for_three_rounds(): void
+    {
+        $job = new RunStoryEstimationJob(1, 1);
+
+        $this->assertSame(900, $job->timeout);
+        $this->assertSame(960, config('queue.connections.database.retry_after'));
+    }
+
     public function test_retry_never_creates_a_second_active_run(): void
     {
         Queue::fake();

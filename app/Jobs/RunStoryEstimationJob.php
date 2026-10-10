@@ -11,6 +11,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Queue\TimeoutExceededException;
 use Throwable;
 
 class RunStoryEstimationJob implements ShouldBeUnique, ShouldQueue
@@ -18,6 +19,10 @@ class RunStoryEstimationJob implements ShouldBeUnique, ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 1;
+
+    public int $timeout = 900;
+
+    public bool $failOnTimeout = true;
 
     public int $uniqueFor = 86400;
 
@@ -46,6 +51,12 @@ class RunStoryEstimationJob implements ShouldBeUnique, ShouldQueue
             return;
         }
 
+        $errorCode = $exception instanceof TimeoutExceededException ? 'WORKER_TIMEOUT' : 'WORKER_FAILED';
+        $run->agentRuns()->where('status', 'RUNNING')->update([
+            'status' => 'FAILED',
+            'error_code' => $errorCode,
+            'completed_at' => now(),
+        ]);
         $run->forceFill(['status' => 'FAILED', 'completed_at' => now()])->save();
     }
 }
