@@ -30,6 +30,53 @@ class StoryEstimationAsyncTest extends TestCase
         Queue::assertPushed(RunStoryEstimationJob::class, fn ($job) => $job->runId === $run->id && $job->requesterId === $owner->id);
     }
 
+    public function test_store_claims_running_run_dispatches_job_and_returns_json_for_progress_dialog(): void
+    {
+        Queue::fake();
+        [$owner, $project, $story] = $this->makeStory();
+
+        $response = $this->actingAs($owner)->withHeader('Accept', 'application/json')
+            ->postJson('/stories/'.$story->id.'/estimation-runs');
+
+        $run = StoryEstimationRun::query()->firstOrFail();
+        $response->assertAccepted()->assertJsonPath('run_id', $run->id)->assertJsonPath('status', 'RUNNING');
+        Queue::assertPushed(RunStoryEstimationJob::class);
+    }
+
+    public function test_status_endpoint_returns_requester_scoped_progress_and_failure(): void
+    {
+        [$owner, $project, $story] = $this->makeStory();
+        $run = StoryEstimationRun::query()->create([
+            'story_id' => $story->id, 'requested_by' => $owner->id,
+            'story_revision' => $story->revision, 'status' => 'RUNNING',
+        ]);
+        $run->agentRuns()->createMany([
+            ['profile_slug' => 'backend-developer', 'round' => 1, 'status' => 'COMPLETED', 'completed_at' => now()],
+            ['profile_slug' => 'frontend-developer', 'round' => 1, 'status' => 'FAILED', 'error_code' => 'PROVIDER_TIMEOUT', 'completed_at' => now()],
+        ]);
+
+        $this->actingAs($owner)->getJson('/stories/'.$story->id.'/estimation-runs/'.$run->id.'/status')
+            ->assertOk()
+            ->assertJsonPath('status', 'RUNNING')
+            ->assertJsonPath('round', 1)
+            ->assertJsonPath('completed_agents', 1)
+            ->assertJsonPath('failed_agent.profile', 'frontend-developer')
+            ->assertJsonPath('failed_agent.error_code', 'PROVIDER_TIMEOUT');
+    }
+
+    public function test_status_endpoint_hides_another_requesters_run(): void
+    {
+        [$owner, $project, $story] = $this->makeStory();
+        $run = StoryEstimationRun::query()->create([
+            'story_id' => $story->id, 'requested_by' => $owner->id,
+            'story_revision' => $story->revision, 'status' => 'RUNNING',
+        ]);
+
+        $this->actingAs(User::factory()->create())
+            ->getJson('/stories/'.$story->id.'/estimation-runs/'.$run->id.'/status')
+            ->assertForbidden();
+    }
+
     public function test_retry_creates_one_new_run_only_for_terminal_retryable_status(): void
     {
         Queue::fake();

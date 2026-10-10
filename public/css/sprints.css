@@ -15,8 +15,8 @@
 .sprint-goal-actions, .sprint-gate-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .sprint-backlog-sprints-heading { margin-top: 32px; }
 .sprint-modal { width: min(520px, calc(100% - 32px)); max-width: none; max-height: min(90vh, 760px); margin: auto; padding: 0; overflow: auto; color: var(--text, #edf3f4); background: transparent; border: 0; }
-.sprint-modal::backdrop { background: rgba(3, 7, 9, .72); backdrop-filter: blur(3px); }
-.sprint-modal-card { padding: 24px; border: 1px solid var(--line-strong, rgba(221,235,244,.15)); border-radius: 16px; background: var(--panel-raised, #171d23); box-shadow: 0 24px 80px rgba(0,0,0,.4); }
+.sprint-modal::backdrop, .fibonacci-progress-modal::backdrop { background: rgba(3, 7, 9, .72); backdrop-filter: blur(3px); }
+.sprint-modal-card, .fibonacci-progress-card { padding: 24px; border: 1px solid var(--line-strong, rgba(221,235,244,.15)); border-radius: 16px; background: var(--panel-raised, #171d23); box-shadow: 0 24px 80px rgba(0,0,0,.4); }
 .sprint-modal-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .sprint-modal-heading h2 { margin: 4px 0 0; }
 .sprint-modal-close { flex: 0 0 auto; }
@@ -24,7 +24,7 @@
 .sprint-modal form { display: grid; gap: 14px; }
 .sprint-modal .field-group { display: grid; gap: 6px; }
 .sprint-modal-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
-@media (max-width: 520px) { .sprint-modal-card { padding: 20px; } .sprint-modal-actions { flex-direction: column-reverse; } .sprint-modal-actions .button { width: 100%; justify-content: center; } }
+@media (max-width: 520px) { .sprint-modal-card, .fibonacci-progress-card { padding: 20px; } .sprint-modal-actions { flex-direction: column-reverse; } .sprint-modal-actions .button { width: 100%; justify-content: center; } }
 .sprint-dates { display: none; }
 .story-criteria pre { white-space: pre-wrap; font: inherit; margin: 8px 0 0; }
 .story-estimation-panel { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line, rgba(221,235,244,.09)); }
@@ -36,6 +36,11 @@
 .story-estimation-approve { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; }
 .story-estimation-approve label { flex-basis: 100%; font-weight: 600; }
 .story-estimation-approve select { min-width: 150px; }
+.fibonacci-progress-modal { width: min(520px, calc(100% - 32px)); max-width: none; margin: auto; padding: 0; color: var(--text); background: transparent; border: 0; }
+.fibonacci-progress-track { height: 8px; overflow: hidden; margin: 22px 0 12px; border-radius: 999px; background: var(--panel); }
+.fibonacci-progress-track span { display: block; width: 8%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--accent-strong)); transition: width .3s ease; }
+.fibonacci-progress-stage { min-height: 24px; margin: 0 0 10px; color: var(--text); }
+.fibonacci-progress-meta { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px; }
+.fibonacci-progress-error { margin: 16px 0 0; padding: 10px 12px; border: 1px solid rgba(243,140,145,.35); border-radius: 9px; background: rgba(243,140,145,.08); color: var(--danger); }
 @media (max-width: 640px) { .story-estimation-approve { align-items: stretch; flex-direction: column; } .story-estimation-approve select, .story-estimation-approve .button { width: 100%; } }
 @media (max-width: 720px) { .sprint-story-row .story-card-head { flex-wrap: wrap; } .sprint-story-row .story-card-head .button { margin-left: 0; } }
-

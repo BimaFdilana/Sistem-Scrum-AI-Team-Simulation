@@ -81,7 +81,7 @@
                             <button class="button button-ghost" type="button" disabled title="Executor project terisolasi dan persetujuan scope belum tersedia">Eksekusi User Story — belum tersedia</button>
                             @if ($estimationSchemaReady && $sprint->status === 'PLANNING')
                                 <div class="story-estimation-panel">
-                                    <form method="POST" action="{{ route('stories.estimations.store', $story) }}">
+                                    <form method="POST" action="{{ route('stories.estimations.store', $story) }}" data-fibonacci-form data-story-label="{{ $story->display_id }}">
                                         @csrf
                                         <button class="button button-ghost" type="submit" @disabled($latestEstimationRun?->status === 'RUNNING')>Diskusi Fibonacci via Scrum Master</button>
                                         <p class="field-help">FE, BE dan QA memberi usulan keseluruhan story, saling menanggapi, lalu secara eksplisit menyepakati poin yang sama dalam maksimal tiga putaran. Tanpa kesepakatan, tidak ada poin final.</p>
@@ -202,6 +202,102 @@
                 });
 
                 if (dialog.dataset.openOnLoad === 'true') dialog.showModal();
+            })();
+        </script>
+        <dialog class="fibonacci-progress-modal" id="fibonacci-progress-dialog" aria-labelledby="fibonacci-progress-title" aria-describedby="fibonacci-progress-description">
+            <div class="fibonacci-progress-card">
+                <div class="sprint-modal-heading">
+                    <div>
+                        <p class="section-kicker">FIBONACCI DISCUSSION</p>
+                        <h2 id="fibonacci-progress-title">Diskusi Fibonacci</h2>
+                    </div>
+                    <button class="icon-button" type="button" data-fibonacci-close aria-label="Tutup dialog">×</button>
+                </div>
+                <p id="fibonacci-progress-description" class="section-description">Memulai diskusi dengan Backend, Frontend, dan QA.</p>
+                <div class="fibonacci-progress-track" aria-hidden="true"><span data-fibonacci-progress-bar></span></div>
+                <p class="fibonacci-progress-stage" data-fibonacci-stage>Menunggu worker...</p>
+                <div class="fibonacci-progress-meta"><span data-fibonacci-round>Putaran —/3</span><span data-fibonacci-agents>Agent selesai 0/3</span></div>
+                <p class="fibonacci-progress-error" data-fibonacci-error hidden></p>
+                <div class="sprint-modal-actions">
+                    <button class="button button-ghost" type="button" data-fibonacci-close>Tutup</button>
+                    <a class="button button-primary" href="#" data-fibonacci-discussion hidden>Buka Diskusi Tim</a>
+                    <button class="button button-primary" type="button" data-fibonacci-reload hidden>Muat ulang Sprint Backlog</button>
+                </div>
+            </div>
+        </dialog>
+        <script>
+            (() => {
+                const dialog = document.getElementById('fibonacci-progress-dialog');
+                if (!dialog) return;
+                const stage = dialog.querySelector('[data-fibonacci-stage]');
+                const round = dialog.querySelector('[data-fibonacci-round]');
+                const agents = dialog.querySelector('[data-fibonacci-agents]');
+                const bar = dialog.querySelector('[data-fibonacci-progress-bar]');
+                const error = dialog.querySelector('[data-fibonacci-error]');
+                const discussion = dialog.querySelector('[data-fibonacci-discussion]');
+                const reload = dialog.querySelector('[data-fibonacci-reload]');
+                let timer = null;
+
+                const labels = { 'backend-developer': 'Backend', 'frontend-developer': 'Frontend', 'qa-engineer': 'QA' };
+                const errorLabels = {
+                    PROVIDER_OVERLOADED: 'Provider sedang sibuk.', PROVIDER_TIMEOUT: 'Provider melewati batas waktu.',
+                    PROVIDER_CONNECTION: 'Provider tidak dapat dihubungi.', INVALID_JSON_SCHEMA: 'Jawaban agent tidak valid.',
+                    SAFETY_REJECTION: 'Jawaban ditolak oleh kebijakan keamanan.', STALE_OR_CANCELLED: 'Run kedaluwarsa atau dibatalkan.'
+                };
+                const terminal = ['COMPLETED', 'FAILED', 'PARTIAL', 'NO_CONSENSUS', 'STALE', 'CANCELLED'];
+                const setProgress = (data) => {
+                    const completed = Number(data.completed_agents || 0);
+                    const percentage = data.status === 'COMPLETED' ? 100 : Math.min(95, Math.max(8, ((data.round - 1) * 3 + completed) / 9 * 100));
+                    bar.style.width = `${percentage}%`;
+                    round.textContent = `Putaran ${data.round || '—'}/3`;
+                    agents.textContent = `Agent selesai ${completed}/3`;
+                    stage.textContent = data.status === 'RUNNING'
+                        ? (data.active_profile ? `Menunggu respons ${labels[data.active_profile] || data.active_profile}...` : 'Menjalankan diskusi agent...')
+                        : data.status === 'COMPLETED' ? 'Konsensus dan laporan Scrum Master tersimpan.'
+                        : data.status === 'NO_CONSENSUS' ? 'Tiga putaran selesai tanpa konsensus.'
+                        : `Diskusi berhenti dengan status ${data.status}.`;
+                    if (data.failed_agent) {
+                        error.hidden = false;
+                        error.textContent = `${labels[data.failed_agent.profile] || data.failed_agent.profile} · Putaran ${data.failed_agent.round}: ${errorLabels[data.failed_agent.error_code] || 'Permintaan agent gagal.'}`;
+                    }
+                    if (terminal.includes(data.status)) {
+                        clearTimeout(timer);
+                        discussion.hidden = false;
+                        reload.hidden = false;
+                    }
+                };
+                const poll = async (url) => {
+                    try {
+                        const response = await fetch(url, { headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
+                        if (!response.ok) throw new Error('Status diskusi tidak dapat dibaca.');
+                        const data = await response.json();
+                        setProgress(data);
+                        if (!terminal.includes(data.status)) timer = setTimeout(() => poll(url), 1500);
+                    } catch (exception) {
+                        error.hidden = false;
+                        error.textContent = exception.message;
+                        timer = setTimeout(() => poll(url), 3000);
+                    }
+                };
+                document.querySelectorAll('[data-fibonacci-form]').forEach((form) => form.addEventListener('submit', async (event) => {
+                    event.preventDefault();
+                    const button = form.querySelector('button[type="submit"]');
+                    button.disabled = true;
+                    dialog.querySelector('#fibonacci-progress-title').textContent = `Diskusi ${form.dataset.storyLabel}`;
+                    error.hidden = true; discussion.hidden = true; reload.hidden = true; bar.style.width = '8%';
+                    dialog.showModal();
+                    try {
+                        const response = await fetch(form.action, { method: 'POST', headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content }, body: new FormData(form) });
+                        const data = await response.json();
+                        if (!response.ok) throw new Error(data.message || 'Diskusi tidak dapat dimulai.');
+                        discussion.href = data.discussion_url;
+                        poll(data.status_url);
+                    } catch (exception) {
+                        error.hidden = false; error.textContent = exception.message; stage.textContent = 'Diskusi tidak dapat dimulai.'; button.disabled = false;
+                    }
+                }));
+                dialog.querySelectorAll('[data-fibonacci-close]').forEach((button) => button.addEventListener('click', () => dialog.close()));
+                reload.addEventListener('click', () => window.location.reload());
             })();
         </script>
     @else

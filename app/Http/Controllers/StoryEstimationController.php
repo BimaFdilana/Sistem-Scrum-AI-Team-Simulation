@@ -6,6 +6,7 @@ use App\Jobs\RunStoryEstimationJob;
 use App\Models\Story;
 use App\Models\StoryEstimationRun;
 use App\Services\StoryEstimationService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -13,7 +14,7 @@ use Illuminate\View\View;
 
 class StoryEstimationController extends Controller
 {
-    public function store(Request $request, Story $story, StoryEstimationService $estimator): RedirectResponse
+    public function store(Request $request, Story $story, StoryEstimationService $estimator): RedirectResponse|JsonResponse
     {
         if (! $this->schemaReady()) {
             return $this->backToBacklog($story)->withErrors(['estimation' => 'Diskusi Fibonacci menunggu migrasi database estimasi.']);
@@ -24,6 +25,15 @@ class StoryEstimationController extends Controller
         [$run, $created] = $estimator->claimRun($story->load('actor'), $request->user());
         if ($created) {
             RunStoryEstimationJob::dispatch($run->id, $request->user()->id);
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'run_id' => $run->id,
+                'status' => $run->status,
+                'status_url' => route('stories.estimations.status', [$story, $run]),
+                'discussion_url' => route('stories.discussion.show', $story),
+            ], $created ? 202 : 200);
         }
 
         return $this->backToBacklog($story)->with('status', $created
@@ -67,6 +77,35 @@ class StoryEstimationController extends Controller
             'currentRun' => $runs->first(fn ($run) => (int) $run->story_revision === (int) $story->revision) ?? $runs->first(),
             'schemaReady' => $ready,
             'activePage' => 'backlog',
+        ]);
+    }
+
+    public function status(Request $request, Story $story, StoryEstimationRun $run): JsonResponse
+    {
+        abort_unless((int) $run->story_id === (int) $story->id, 404);
+        abort_unless((int) $run->requested_by === (int) $request->user()->id, 403);
+
+        $run->load('agentRuns');
+        $round = min(3, (int) ($run->agentRuns->max('round') ?: 1));
+        $roundRuns = $run->agentRuns->where('round', $round);
+        $failed = $run->agentRuns->where('status', 'FAILED')->sortByDesc('id')->first();
+        $completed = $roundRuns->where('status', 'COMPLETED')->count();
+        $running = $roundRuns->where('status', 'RUNNING')->sortByDesc('id')->first();
+
+        return response()->json([
+            'run_id' => $run->id,
+            'status' => $run->status,
+            'round' => $round,
+            'total_rounds' => 3,
+            'completed_agents' => $completed,
+            'total_agents' => 3,
+            'active_profile' => $running?->profile_slug,
+            'failed_agent' => $failed ? [
+                'profile' => $failed->profile_slug,
+                'round' => $failed->round,
+                'error_code' => $failed->error_code,
+            ] : null,
+            'terminal' => in_array($run->status, ['COMPLETED', 'FAILED', 'PARTIAL', 'NO_CONSENSUS', 'STALE', 'CANCELLED'], true),
         ]);
     }
 

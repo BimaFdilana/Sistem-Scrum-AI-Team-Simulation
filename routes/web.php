@@ -49,6 +49,7 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/stories/{story}/estimation-runs', [StoryEstimationController::class, 'store'])->middleware('throttle:6,1')->name('stories.estimations.store');
     Route::post('/stories/{story}/estimation-runs/{run}/retry', [StoryEstimationController::class, 'retry'])->middleware('throttle:6,1')->name('stories.estimations.retry');
     Route::get('/stories/{story}/discussion', [StoryEstimationController::class, 'discussion'])->name('stories.discussion.show');
+    Route::get('/stories/{story}/estimation-runs/{run}/status', [StoryEstimationController::class, 'status'])->name('stories.estimations.status');
     Route::post('/stories/{story}/estimation-runs/{run}/report', [StoryEstimationController::class, 'report'])->name('stories.estimations.report');
     Route::post('/stories/{story}/estimation-runs/{run}/cancel', [StoryEstimationController::class, 'cancel'])->name('stories.estimations.cancel');
     Route::get('/stories/{story}/tasks', [TaskController::class, 'index'])->name('stories.tasks.index');
