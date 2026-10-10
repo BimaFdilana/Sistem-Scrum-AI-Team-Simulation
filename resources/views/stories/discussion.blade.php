@@ -61,10 +61,17 @@
                             'STALE_OR_CANCELLED' => 'Run menjadi kedaluwarsa atau dibatalkan.',
                         'WORKER_FAILED' => 'Worker diskusi berhenti sebelum proses selesai.',
                         'WORKER_TIMEOUT' => 'Worker diskusi melewati batas waktu.',
+                        'WORKER_STALE' => 'Worker diskusi tidak mengirim heartbeat.',
                             default => 'Permintaan agent gagal.',
                         };
                     @endphp
-                    <p class="discussion-banner discussion-banner--danger"><strong>{{ strtoupper($failedAgent->profile_slug) }} · Putaran {{ $failedAgent->round }}:</strong> {{ $failureText }} Tindakan berikutnya: periksa konfigurasi/koneksi agent lalu gunakan Retry jika status run mengizinkan.</p>
+                    <p class="discussion-banner discussion-banner--danger"><strong>{{ strtoupper($failedAgent->profile_slug) }} · Putaran {{ $failedAgent->round }}:</strong> {{ $failureText }} Tindakan berikutnya: periksa konfigurasi/koneksi lalu retry agent ini jika status run mengizinkan.</p>
+                    @if ($run->status === 'FAILED' && (int) $run->requested_by === (int) auth()->id() && (int) $run->story_revision === (int) $story->revision)
+                        <form method="POST" action="{{ route('stories.estimations.agents.retry', [$story, $run, $failedAgent]) }}">
+                            @csrf
+                            <button class="button button-ghost" type="submit">Retry {{ strtoupper($failedAgent->profile_slug) }} saja</button>
+                        </form>
+                    @endif
                 @endif
                 @if ($run->status === 'COMPLETED' && $run->consensus_points)
                     <p class="discussion-banner"><strong>Poin Fibonacci final: {{ $run->consensus_points }}</strong> · Laporan Scrum Master tersimpan.</p>

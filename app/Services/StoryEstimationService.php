@@ -2,8 +2,11 @@
 
 namespace App\Services;
 
+use App\Jobs\EstimateStoryAgentJob;
+use App\Jobs\SendStoryEstimationReportJob;
 use App\Models\ChatConversation;
 use App\Models\Story;
+use App\Models\StoryEstimationAgentRun;
 use App\Models\StoryEstimationRun;
 use App\Models\User;
 use Illuminate\Database\QueryException;
@@ -48,10 +51,144 @@ class StoryEstimationService
             return $run->fresh(['agentRuns', 'messages']);
         }
 
+        // Backward-compatible service API; HTTP workflow uses claimRun + queued jobs.
+        $run->forceFill(['status' => 'RUNNING'])->save();
+
         return $this->estimateExisting($run, $requester);
     }
 
-    /** Claim exactly one active run; workers call estimateExisting after dispatch. */
+    /** Initialize/fan out work and advance only after a complete round. */
+    public function advance(StoryEstimationRun $run): void
+    {
+        $dispatch = [];
+        $reportRunId = null;
+        DB::transaction(function () use ($run, &$dispatch, &$reportRunId): void {
+            $locked = StoryEstimationRun::query()->lockForUpdate()->find($run->id);
+            if (! $locked || ! in_array($locked->status, ['QUEUED', 'RUNNING'], true)) {
+                return;
+            }
+            if ($locked->status === 'QUEUED') {
+                $locked->forceFill(['status' => 'RUNNING'])->save();
+                foreach (array_keys(self::SPECIALISTS) as $slug) {
+                    $locked->agentRuns()->firstOrCreate(['profile_slug' => $slug, 'round' => 1], ['status' => 'QUEUED']);
+                }
+            }
+            $round = (int) ($locked->agentRuns()->max('round') ?: 1);
+            $entries = $locked->agentRuns()->where('round', $round)->get();
+            if ($entries->contains(fn ($entry) => in_array($entry->status, ['QUEUED', 'RUNNING'], true))) {
+                $dispatch = $entries->where('status', 'QUEUED')->map(fn ($entry) => [$locked->id, $entry->id])->all();
+
+                return;
+            }
+            if ($entries->contains(fn ($entry) => $entry->status !== 'COMPLETED')) {
+                $locked->forceFill(['status' => 'FAILED', 'completed_at' => now()])->save();
+
+                return;
+            }
+            $this->deliverPeerMessages($locked, $round);
+            if ($round < 3) {
+                foreach (array_keys(self::SPECIALISTS) as $slug) {
+                    $entry = $locked->agentRuns()->firstOrCreate(['profile_slug' => $slug, 'round' => $round + 1], ['status' => 'QUEUED']);
+                    if ($entry->status === 'QUEUED') {
+                        $dispatch[] = [$locked->id, $entry->id];
+                    }
+                }
+
+                return;
+            }
+            $responses = $locked->messages()->where('round', 3)->where('recipient_slug', 'scrum-master')->get();
+            if ($responses->count() === 3 && $responses->pluck('estimate_points')->unique()->count() === 1
+                && $responses->every(fn ($message) => $message->explicit_agree === true)
+                && $this->receivedPriorRound($locked, 3)) {
+                $locked->forceFill(['consensus_points' => $responses->first()->estimate_points, 'status' => 'REPORT_PENDING'])->save();
+                $reportRunId = $locked->id;
+            } else {
+                $locked->forceFill(['status' => 'NO_CONSENSUS', 'completed_at' => now()])->save();
+            }
+        });
+        foreach ($dispatch as [$runId, $agentId]) {
+            EstimateStoryAgentJob::dispatch($runId, $agentId);
+        }
+        if ($reportRunId !== null) {
+            SendStoryEstimationReportJob::dispatch($reportRunId);
+        }
+    }
+
+    /** Run exactly one specialist consultation; the original response is persisted verbatim. */
+    public function processAgent(StoryEstimationAgentRun $entry): void
+    {
+        $entry = DB::transaction(function () use ($entry) {
+            $locked = StoryEstimationAgentRun::query()->lockForUpdate()->find($entry->id);
+            if (! $locked || $locked->status !== 'QUEUED') {
+                return null;
+            }
+            $locked->forceFill(['status' => 'RUNNING', 'started_at' => now(), 'heartbeat_at' => now()])->save();
+
+            return $locked;
+        });
+        if (! $entry) {
+            return;
+        }
+        $run = $entry->estimationRun()->firstOrFail();
+        $story = $run->story()->firstOrFail();
+        if (! $this->current($run)) {
+            $this->failAgent($entry, 'STALE_OR_CANCELLED');
+
+            return;
+        }
+        $round = (int) $entry->round;
+        $snapshot = $this->snapshot($story);
+        $prior = $round === 1 ? [] : $run->messages()->where('round', $round - 1)->where('recipient_slug', 'scrum-master')->get()->map(fn ($message) => [
+            'sender' => $message->sender_slug, 'content' => $this->promptExcerpt($message->content),
+            'estimate_points' => $message->estimate_points, 'explicit_agree' => $message->explicit_agree,
+        ])->all();
+        if ($round > 1 && count($prior) !== 3) {
+            $this->failAgent($entry, 'MISSING_PRIOR_ROUND');
+
+            return;
+        }
+        try {
+            $raw = $this->agents->sendMessage($entry->profile_slug, $this->agentPrompt(self::SPECIALISTS[$entry->profile_slug], $snapshot, $round, $prior, $run), 'story-estimation-'.$run->id.'-'.$entry->profile_slug.'-r'.$round);
+            if (! $this->current($run, $snapshot)) {
+                $this->failAgent($entry, 'STALE_OR_CANCELLED');
+
+                return;
+            }
+            $data = $this->validatedResponse($raw, $round);
+            $content = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+            DB::transaction(function () use ($entry, $run, $data, $content): void {
+                $entry->forceFill(['status' => 'COMPLETED', 'estimate_points' => $data['estimate_points'], 'rationale' => $data['rationale'], 'heartbeat_at' => now(), 'completed_at' => now()])->save();
+                if (! $run->messages()->where('round', $entry->round)->where('sender_slug', $entry->profile_slug)->exists()) {
+                    $run->messages()->create(['story_revision' => $run->story_revision, 'round' => $entry->round, 'sender_slug' => $entry->profile_slug, 'recipient_slug' => 'scrum-master', 'content' => $content, 'estimate_points' => $data['estimate_points'], 'explicit_agree' => $data['explicit_agree'] ?? null]);
+                }
+            });
+        } catch (Throwable $exception) {
+            $this->failAgent($entry, $this->failureCode($exception, $run));
+        }
+    }
+
+    public function failAgent(StoryEstimationAgentRun $entry, string $errorCode): void
+    {
+        $entry->newQuery()->whereKey($entry->id)->whereIn('status', ['QUEUED', 'RUNNING'])->update(['status' => 'FAILED', 'error_code' => $errorCode, 'heartbeat_at' => now(), 'completed_at' => now()]);
+        $run = $entry->estimationRun()->first();
+        if ($run && in_array($run->status, ['QUEUED', 'RUNNING'], true)) {
+            $run->forceFill(['status' => 'FAILED', 'completed_at' => now()])->save();
+        }
+    }
+
+    private function deliverPeerMessages(StoryEstimationRun $run, int $round): void
+    {
+        $responses = $run->messages()->where('round', $round)->where('recipient_slug', 'scrum-master')->get();
+        foreach ($responses as $response) {
+            foreach (array_keys(self::SPECIALISTS) as $recipient) {
+                if ($response->sender_slug !== $recipient && ! $run->messages()->where('round', $round)->where('sender_slug', $response->sender_slug)->where('recipient_slug', $recipient)->exists()) {
+                    $run->messages()->create(['story_revision' => $run->story_revision, 'round' => $round, 'sender_slug' => $response->sender_slug, 'recipient_slug' => $recipient, 'content' => $response->content, 'estimate_points' => $response->estimate_points, 'explicit_agree' => $response->explicit_agree]);
+                }
+            }
+        }
+    }
+
+    /** Claim exactly one active run; workers call advance after dispatch. */
     public function claimRun(Story $story, User $requester): array
     {
         $story = $story->fresh();
@@ -66,7 +203,7 @@ class StoryEstimationService
                 }
                 $existing = StoryEstimationRun::query()->where('story_id', $story->id)
                     ->where('story_revision', $story->revision)
-                    ->whereIn('status', ['RUNNING', 'REPORT_PENDING', 'COMPLETED'])
+                    ->whereIn('status', ['QUEUED', 'RUNNING', 'REPORT_PENDING', 'COMPLETED'])
                     ->lockForUpdate()->first();
                 if ($existing) {
                     return [$existing, false];
@@ -77,7 +214,7 @@ class StoryEstimationService
                     'requested_by' => $requester->id,
                     'story_revision' => $story->revision,
                     'story_snapshot_hash' => $this->fingerprint($snapshot),
-                    'status' => 'RUNNING',
+                    'status' => 'QUEUED',
                 ]), true];
             });
         } catch (QueryException $e) {
@@ -91,7 +228,7 @@ class StoryEstimationService
             // Another request won the partial unique index. Never dispatch its workers.
             $run = StoryEstimationRun::query()->where('story_id', $story->id)
                 ->where('story_revision', $story->revision)
-                ->whereIn('status', ['RUNNING', 'REPORT_PENDING', 'COMPLETED'])->first();
+                ->whereIn('status', ['QUEUED', 'RUNNING', 'REPORT_PENDING', 'COMPLETED'])->first();
             if (! $run) {
                 abort(409, 'Concurrent estimation is changing; retry the request.');
             }
@@ -161,6 +298,48 @@ class StoryEstimationService
         }
 
         return $this->finish($run, 'NO_CONSENSUS');
+    }
+
+    public function recoverStale(StoryEstimationRun $run): void
+    {
+        DB::transaction(function () use ($run): void {
+            $locked = StoryEstimationRun::query()->lockForUpdate()->find($run->id);
+            if (! $locked || ! in_array($locked->status, ['QUEUED', 'RUNNING'], true)) {
+                return;
+            }
+            if ($locked->status === 'QUEUED' && $locked->created_at?->lt(now()->subMinutes(5))) {
+                $locked->forceFill(['status' => 'FAILED', 'completed_at' => now()])->save();
+
+                return;
+            }
+            $stale = $locked->agentRuns()->where('status', 'RUNNING')
+                ->where(function ($query): void {
+                    $query->whereNull('heartbeat_at')->orWhere('heartbeat_at', '<', now()->subMinutes(4));
+                })->get();
+            foreach ($stale as $entry) {
+                $entry->forceFill(['status' => 'FAILED', 'error_code' => 'WORKER_STALE', 'completed_at' => now()])->save();
+            }
+            if ($stale->isNotEmpty()) {
+                $locked->forceFill(['status' => 'FAILED', 'completed_at' => now()])->save();
+            }
+        });
+    }
+
+    /** Requeue only one failed specialist for the same current revision. */
+    public function retryAgent(StoryEstimationRun $run, StoryEstimationAgentRun $entry, User $requester): void
+    {
+        $run->refresh();
+        $entry->refresh();
+        $story = $run->story()->first();
+        if ($run->requested_by !== $requester->id || $entry->story_estimation_run_id !== $run->id
+            || $entry->status !== 'FAILED' || ! in_array($run->status, ['FAILED', 'RUNNING'], true)
+            || ! $story || $story->revision !== $run->story_revision || $story->sprint?->status !== 'PLANNING'
+            || ! $run->story_snapshot_hash || ! hash_equals($run->story_snapshot_hash, $this->fingerprint($this->snapshot($story)))) {
+            throw new RuntimeException('Only a failed agent in the active revision can be retried.');
+        }
+        $entry->forceFill(['status' => 'QUEUED', 'error_code' => null, 'completed_at' => null])->save();
+        $run->forceFill(['status' => 'RUNNING', 'completed_at' => null])->save();
+        EstimateStoryAgentJob::dispatch($run->id, $entry->id);
     }
 
     public function cancelStaleRun(StoryEstimationRun $run, User $requester): StoryEstimationRun

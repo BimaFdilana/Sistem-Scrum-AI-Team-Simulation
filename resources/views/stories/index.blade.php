@@ -102,6 +102,7 @@
                                                     'STALE_OR_CANCELLED' => 'run kedaluwarsa atau dibatalkan',
                                                     'WORKER_FAILED' => 'worker diskusi berhenti',
                                                     'WORKER_TIMEOUT' => 'worker diskusi timeout',
+                                                    'WORKER_STALE' => 'worker tidak mengirim heartbeat',
                                                     default => 'permintaan agent gagal',
                                                 })
                                                 <p class="field-help"><strong>{{ strtoupper($failedAgent->profile_slug) }} · Putaran {{ $failedAgent->round }}:</strong> {{ $failureText }}. Periksa konfigurasi/koneksi, lalu gunakan Retry bila tersedia.</p>
@@ -246,7 +247,8 @@
                     PROVIDER_CONNECTION: 'Provider tidak dapat dihubungi.', INVALID_JSON_SCHEMA: 'Jawaban agent tidak valid.',
                     SAFETY_REJECTION: 'Jawaban ditolak oleh kebijakan keamanan.', STALE_OR_CANCELLED: 'Run kedaluwarsa atau dibatalkan.',
                     WORKER_FAILED: 'Worker diskusi berhenti sebelum proses selesai.',
-                    WORKER_TIMEOUT: 'Worker diskusi melewati batas waktu.'
+                    WORKER_TIMEOUT: 'Worker diskusi melewati batas waktu.',
+                    WORKER_STALE: 'Worker diskusi tidak mengirim heartbeat.'
                 };
                 const terminal = ['COMPLETED', 'FAILED', 'PARTIAL', 'NO_CONSENSUS', 'STALE', 'CANCELLED'];
                 const setProgress = (data) => {

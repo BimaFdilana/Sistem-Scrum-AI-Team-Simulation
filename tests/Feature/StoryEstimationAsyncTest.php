@@ -2,13 +2,15 @@
 
 namespace Tests\Feature;
 
-use App\Jobs\RunStoryEstimationJob;
+use App\Jobs\AdvanceStoryEstimationJob;
+use App\Jobs\EstimateStoryAgentJob;
 use App\Models\Actor;
 use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\Story;
 use App\Models\StoryEstimationRun;
 use App\Models\User;
+use App\Services\StoryEstimationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -17,7 +19,7 @@ class StoryEstimationAsyncTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_store_claims_running_run_dispatches_job_and_returns_without_inference(): void
+    public function test_store_claims_queued_run_dispatches_one_advance_job_without_inference(): void
     {
         Queue::fake();
         [$owner, $project, $story] = $this->makeStory();
@@ -26,11 +28,11 @@ class StoryEstimationAsyncTest extends TestCase
 
         $response->assertRedirect('/projects/'.$project->id.'/sprint-backlog')->assertSessionHas('status');
         $run = StoryEstimationRun::query()->firstOrFail();
-        $this->assertSame('RUNNING', $run->status);
-        Queue::assertPushed(RunStoryEstimationJob::class, fn ($job) => $job->runId === $run->id && $job->requesterId === $owner->id);
+        $this->assertSame('QUEUED', $run->status);
+        Queue::assertPushed(AdvanceStoryEstimationJob::class, fn ($job) => $job->runId === $run->id);
     }
 
-    public function test_store_claims_running_run_dispatches_job_and_returns_json_for_progress_dialog(): void
+    public function test_store_claims_queued_run_dispatches_job_and_returns_json_for_progress_dialog(): void
     {
         Queue::fake();
         [$owner, $project, $story] = $this->makeStory();
@@ -39,8 +41,8 @@ class StoryEstimationAsyncTest extends TestCase
             ->postJson('/stories/'.$story->id.'/estimation-runs');
 
         $run = StoryEstimationRun::query()->firstOrFail();
-        $response->assertAccepted()->assertJsonPath('run_id', $run->id)->assertJsonPath('status', 'RUNNING');
-        Queue::assertPushed(RunStoryEstimationJob::class);
+        $response->assertAccepted()->assertJsonPath('run_id', $run->id)->assertJsonPath('status', 'QUEUED');
+        Queue::assertPushed(AdvanceStoryEstimationJob::class);
     }
 
     public function test_status_endpoint_returns_requester_scoped_progress_and_failure(): void
@@ -91,7 +93,7 @@ class StoryEstimationAsyncTest extends TestCase
 
         $this->assertDatabaseCount('story_estimation_runs', 2);
         $this->assertDatabaseHas('story_estimation_runs', ['id' => $failed->id, 'status' => 'FAILED']);
-        Queue::assertPushed(RunStoryEstimationJob::class, 1);
+        Queue::assertPushed(AdvanceStoryEstimationJob::class, 1);
     }
 
     public function test_worker_failure_terminalizes_run_and_in_progress_agent(): void
@@ -105,7 +107,7 @@ class StoryEstimationAsyncTest extends TestCase
             'profile_slug' => 'backend-developer', 'round' => 3, 'status' => 'RUNNING', 'started_at' => now(),
         ]);
 
-        $job = new RunStoryEstimationJob($run->id, $owner->id);
+        $job = new EstimateStoryAgentJob($run->id, $agentRun->id);
         $job->failed(new \RuntimeException('worker timeout'));
 
         $this->assertSame('FAILED', $run->fresh()->status);
@@ -114,12 +116,76 @@ class StoryEstimationAsyncTest extends TestCase
         $this->assertNotNull($run->fresh()->completed_at);
     }
 
-    public function test_story_estimation_job_allows_time_for_three_rounds(): void
+    public function test_each_agent_job_has_a_per_agent_timeout(): void
     {
-        $job = new RunStoryEstimationJob(1, 1);
+        $job = new EstimateStoryAgentJob(1, 1);
 
-        $this->assertSame(900, $job->timeout);
-        $this->assertSame(960, config('queue.connections.database.retry_after'));
+        $this->assertSame(180, $job->timeout);
+        $this->assertGreaterThan($job->timeout, config('queue.connections.database.retry_after'));
+    }
+
+    public function test_advance_dispatches_exactly_three_independent_agent_jobs_for_round_one(): void
+    {
+        Queue::fake();
+        [$owner, $project, $story] = $this->makeStory();
+        $run = StoryEstimationRun::query()->create([
+            'story_id' => $story->id, 'requested_by' => $owner->id,
+            'story_revision' => $story->revision, 'status' => 'QUEUED',
+        ]);
+
+        (new AdvanceStoryEstimationJob($run->id))->handle(app(StoryEstimationService::class));
+
+        $this->assertSame('RUNNING', $run->fresh()->status);
+        $this->assertSame(3, $run->agentRuns()->where('round', 1)->where('status', 'QUEUED')->count());
+        Queue::assertPushed(EstimateStoryAgentJob::class, 3);
+    }
+
+    public function test_failed_agent_can_be_retried_without_restarting_successful_agents(): void
+    {
+        Queue::fake();
+        [$owner, $project, $story] = $this->makeStory();
+        $run = StoryEstimationRun::query()->create([
+            'story_id' => $story->id, 'requested_by' => $owner->id,
+            'story_revision' => $story->revision,
+            'story_snapshot_hash' => hash('sha256', json_encode([
+                'story_id' => $story->display_id, 'revision' => $story->revision,
+                'actor' => $story->actor?->name, 'feature' => $story->title,
+                'purpose' => $story->sprint_purpose, 'acceptance_criteria' => $story->acceptance_criteria,
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)),
+            'status' => 'FAILED',
+        ]);
+        $successful = $run->agentRuns()->create([
+            'profile_slug' => 'backend-developer', 'round' => 1, 'status' => 'COMPLETED', 'estimate_points' => 3,
+        ]);
+        $failed = $run->agentRuns()->create([
+            'profile_slug' => 'frontend-developer', 'round' => 1, 'status' => 'FAILED', 'error_code' => 'PROVIDER_TIMEOUT',
+        ]);
+
+        $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs/'.$run->id.'/agents/'.$failed->id.'/retry')
+            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog')->assertSessionHas('status');
+
+        $this->assertSame('RUNNING', $run->fresh()->status);
+        $this->assertSame('QUEUED', $failed->fresh()->status);
+        $this->assertSame('COMPLETED', $successful->fresh()->status);
+        Queue::assertPushed(EstimateStoryAgentJob::class, fn ($job) => $job->agentRunId === $failed->id);
+    }
+
+    public function test_status_endpoint_recovers_agent_without_heartbeat(): void
+    {
+        [$owner, $project, $story] = $this->makeStory();
+        $run = StoryEstimationRun::query()->create([
+            'story_id' => $story->id, 'requested_by' => $owner->id,
+            'story_revision' => $story->revision, 'status' => 'RUNNING',
+        ]);
+        $agent = $run->agentRuns()->create([
+            'profile_slug' => 'qa-engineer', 'round' => 1, 'status' => 'RUNNING',
+            'started_at' => now()->subMinutes(6), 'heartbeat_at' => now()->subMinutes(6),
+        ]);
+
+        $this->actingAs($owner)->getJson('/stories/'.$story->id.'/estimation-runs/'.$run->id.'/status')->assertOk();
+
+        $this->assertSame('FAILED', $run->fresh()->status);
+        $this->assertSame('WORKER_STALE', $agent->fresh()->error_code);
     }
 
     public function test_retry_never_creates_a_second_active_run(): void

@@ -16,6 +16,7 @@ class StoryEstimationAgentRun extends Model
         'rationale',
         'error_code',
         'started_at',
+        'heartbeat_at',
         'completed_at',
     ];
 
@@ -25,6 +26,7 @@ class StoryEstimationAgentRun extends Model
             'round' => 'integer',
             'estimate_points' => 'integer',
             'started_at' => 'datetime',
+            'heartbeat_at' => 'datetime',
             'completed_at' => 'datetime',
         ];
     }

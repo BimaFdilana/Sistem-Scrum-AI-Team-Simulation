@@ -2,8 +2,9 @@
 
 namespace App\Http\Controllers;
 
-use App\Jobs\RunStoryEstimationJob;
+use App\Jobs\AdvanceStoryEstimationJob;
 use App\Models\Story;
+use App\Models\StoryEstimationAgentRun;
 use App\Models\StoryEstimationRun;
 use App\Services\StoryEstimationService;
 use Illuminate\Http\JsonResponse;
@@ -24,7 +25,7 @@ class StoryEstimationController extends Controller
         }
         [$run, $created] = $estimator->claimRun($story->load('actor'), $request->user());
         if ($created) {
-            RunStoryEstimationJob::dispatch($run->id, $request->user()->id);
+            AdvanceStoryEstimationJob::dispatch($run->id);
         }
 
         if ($request->expectsJson()) {
@@ -37,7 +38,7 @@ class StoryEstimationController extends Controller
         }
 
         return $this->backToBacklog($story)->with('status', $created
-            ? 'Diskusi Fibonacci sedang diproses di latar belakang. Status run: RUNNING.'
+            ? 'Diskusi Fibonacci sedang diproses di latar belakang. Status run: QUEUED.'
             : 'Diskusi Fibonacci untuk revisi ini sudah berjalan atau selesai. Status run: '.$run->status.'.');
     }
 
@@ -55,9 +56,22 @@ class StoryEstimationController extends Controller
         if (! $created) {
             return $this->backToBacklog($story)->withErrors(['estimation' => 'Diskusi story ini masih berlangsung; retry tidak membuat run ganda.']);
         }
-        RunStoryEstimationJob::dispatch($retry->id, $request->user()->id);
+        AdvanceStoryEstimationJob::dispatch($retry->id);
 
         return $this->backToBacklog($story)->with('status', 'Retry Fibonacci dijadwalkan. Status run: RUNNING.');
+    }
+
+    public function retryAgent(Request $request, Story $story, StoryEstimationRun $run, StoryEstimationAgentRun $agentRun, StoryEstimationService $estimator): RedirectResponse
+    {
+        abort_unless((int) $run->story_id === (int) $story->id, 404);
+        abort_unless($this->schemaReady(), 503);
+        try {
+            $estimator->retryAgent($run, $agentRun, $request->user());
+        } catch (\RuntimeException) {
+            return $this->backToBacklog($story)->withErrors(['estimation' => 'Agent gagal belum dapat diulang untuk revisi aktif ini.']);
+        }
+
+        return $this->backToBacklog($story)->with('status', 'Retry agent Fibonacci dijadwalkan.');
     }
 
     public function discussion(Request $request, Story $story): View
@@ -85,6 +99,8 @@ class StoryEstimationController extends Controller
         abort_unless((int) $run->story_id === (int) $story->id, 404);
         abort_unless((int) $run->requested_by === (int) $request->user()->id, 403);
 
+        $estimator = app(StoryEstimationService::class);
+        $estimator->recoverStale($run);
         $run->load('agentRuns');
         $round = min(3, (int) ($run->agentRuns->max('round') ?: 1));
         $roundRuns = $run->agentRuns->where('round', $round);
