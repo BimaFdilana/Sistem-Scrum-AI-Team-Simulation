@@ -41,6 +41,7 @@ class ActorsTest extends TestCase
             ->get('/actors')
             ->assertOk()
             ->assertSee('actors.css', false)
+            ->assertSee('actor-row', false)
             ->assertSee('actor-actions', false)
             ->assertSee('aria-label="Edit actor Administrator"', false)
             ->assertSee('aria-label="Hapus actor Administrator"', false);

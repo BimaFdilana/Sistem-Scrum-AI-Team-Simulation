@@ -20,7 +20,7 @@
     @else
         <section class="project-list" aria-label="Daftar aktor">
         @forelse ($actors as $actor)
-            <article class="project-row">
+            <article class="project-row actor-row">
                 <span class="project-mark">{{ mb_strtoupper(mb_substr($actor->name, 0, 1)) }}</span>
                 <span class="project-main"><strong>{{ $actor->name }}</strong><small>{{ $actor->description ?: 'Belum ada deskripsi' }}</small></span>
                 <span class="project-type">{{ $actor->stories_count }} story</span>
