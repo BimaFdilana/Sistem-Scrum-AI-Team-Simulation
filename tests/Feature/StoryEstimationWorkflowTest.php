@@ -94,6 +94,31 @@ class StoryEstimationWorkflowTest extends TestCase
             ->assertOk()->assertDontSee('pesan-run-pribadi-123');
     }
 
+    public function test_discussion_bubbles_follow_dark_workspace_palette_for_each_role(): void
+    {
+        [$owner, $project, $story] = $this->makeStory();
+        $run = StoryEstimationRun::query()->create([
+            'story_id' => $story->id, 'requested_by' => $owner->id,
+            'story_revision' => $story->revision, 'status' => 'NO_CONSENSUS',
+        ]);
+        foreach (['backend-developer', 'frontend-developer', 'qa-engineer'] as $slug) {
+            $run->messages()->create([
+                'story_revision' => $story->revision, 'round' => 1,
+                'sender_slug' => $slug, 'recipient_slug' => 'scrum-master',
+                'content' => '{"estimate_points":5,"rationale":"Cakupan story."}', 'estimate_points' => 5,
+            ]);
+        }
+
+        $page = $this->actingAs($owner)->get('/stories/'.$story->id.'/discussion')->assertOk();
+        $page->assertSee('background:var(--panel-raised)', false)
+            ->assertSee('color:var(--text)', false)
+            ->assertSee('chat-bubble--backend', false)
+            ->assertSee('chat-bubble--frontend', false)
+            ->assertSee('chat-bubble--qa', false)
+            ->assertDontSee('background:#fff;', false)
+            ->assertDontSee('background:#eef6ff;', false);
+    }
+
     private function makeStory(): array
     {
         $owner = User::factory()->create();

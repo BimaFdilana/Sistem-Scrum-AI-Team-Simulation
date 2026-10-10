@@ -2,18 +2,26 @@
 
 @section('content')
 <style>
-    .discussion-run { margin: 1rem 0 1.5rem; }
+    .discussion-run { margin: 1rem 0 1.5rem; background:var(--panel); }
     .discussion-status { display:flex; justify-content:space-between; gap:1rem; align-items:center; flex-wrap:wrap; }
-    .discussion-banner { border-radius:.75rem; padding:.75rem 1rem; margin:.75rem 0; background:#eef6ff; }
-    .discussion-banner--danger { background:#fff1f2; color:#9f1239; }
-    .chat-list { list-style:none; padding:0; margin:1rem 0; display:grid; gap:.65rem; }
-    .chat-bubble { border:1px solid #e5e7eb; border-left:4px solid #64748b; border-radius:.7rem; padding:.7rem .85rem; background:#fff; }
-    .chat-bubble--backend { border-left-color:#2563eb; } .chat-bubble--frontend { border-left-color:#7c3aed; } .chat-bubble--qa { border-left-color:#059669; }
-    .chat-meta { display:flex; gap:.55rem; align-items:center; flex-wrap:wrap; font-size:.82rem; color:#64748b; }
-    .chat-role { font-weight:700; color:#111827; } .round-badge,.agreement-badge { border-radius:999px; padding:.12rem .45rem; background:#f1f5f9; }
-    .agreement-badge--yes { background:#dcfce7; color:#166534; } .agreement-badge--no { background:#fee2e2; color:#991b1b; }
-    .chat-content { margin:.4rem 0 0; white-space:pre-wrap; overflow-wrap:anywhere; }
-    .sm-summary { border-left:3px solid #f59e0b; padding:.55rem .8rem; background:#fffbeb; }
+    .discussion-banner { border:1px solid rgba(124,226,188,.22); border-radius:var(--radius); padding:.75rem 1rem; margin:.75rem 0; background:rgba(124,226,188,.08); color:var(--text); }
+    .discussion-banner--danger { border-color:rgba(243,140,145,.24); background:rgba(243,140,145,.09); color:var(--danger); }
+    .chat-list { list-style:none; padding:1rem; margin:1rem 0; display:flex; flex-direction:column; gap:.75rem; border:1px solid var(--line); border-radius:var(--radius); background:var(--bg); }
+    .chat-bubble { width:fit-content; max-width:min(760px,92%); border:1px solid var(--line-strong); border-left:3px solid var(--accent); border-radius:var(--radius); padding:.75rem .95rem; background:var(--panel-raised); color:var(--text); }
+    .chat-bubble--backend { border-left-color:#7db5f3; background:linear-gradient(135deg,rgba(125,181,243,.10),var(--panel-raised) 85%); }
+    .chat-bubble--frontend { align-self:flex-end; border-left-color:#b59af5; background:linear-gradient(135deg,rgba(181,154,245,.10),var(--panel-raised) 85%); }
+    .chat-bubble--qa { border-left-color:var(--accent); background:linear-gradient(135deg,rgba(124,226,188,.10),var(--panel-raised) 85%); }
+    .chat-meta { display:flex; gap:.55rem; align-items:center; flex-wrap:wrap; font-size:.82rem; color:var(--muted); }
+    .chat-role { font-weight:700; color:var(--text); }
+    .chat-bubble--backend .chat-role { color:#a9cefa; }
+    .chat-bubble--frontend .chat-role { color:#cbb8fb; }
+    .chat-bubble--qa .chat-role { color:var(--accent-strong); }
+    .round-badge,.agreement-badge { border:1px solid var(--line); border-radius:999px; padding:.12rem .5rem; background:var(--panel-hover); color:var(--muted); }
+    .agreement-badge--yes { border-color:rgba(124,226,188,.28); background:rgba(124,226,188,.11); color:var(--accent-strong); }
+    .agreement-badge--no { border-color:rgba(243,140,145,.28); background:rgba(243,140,145,.11); color:var(--danger); }
+    .chat-content { margin:.5rem 0 0; color:var(--text); white-space:pre-wrap; overflow-wrap:anywhere; }
+    .sm-summary { border:1px solid rgba(232,196,125,.2); border-left:3px solid var(--amber); border-radius:var(--radius); padding:.65rem .85rem; background:rgba(232,196,125,.07); color:var(--text); }
+    @media(max-width:640px) { .chat-list{padding:.7rem} .chat-bubble{max-width:100%} }
 </style>
 <section class="page-heading">
     <div>
