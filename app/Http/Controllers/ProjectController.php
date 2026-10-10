@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreProjectRequest;
+use App\Jobs\ImportGithubProjectJob;
 use App\Models\Project;
+use App\Services\PublicGithubRepositoryService;
 use App\Support\Archives\ZipArchiveInspector;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -37,17 +39,20 @@ class ProjectController extends Controller
     {
         $data = $request->validated();
         $archiveFile = $request->file('source_archive');
+        $githubUrl = blank($data['github_repository_url'] ?? null) ? null : PublicGithubRepositoryService::normalizeUrl($data['github_repository_url']);
         $storedPath = null;
 
         try {
-            $project = DB::transaction(function () use ($data, $archiveFile, $zipInspector, &$storedPath): Project {
+            $project = DB::transaction(function () use ($data, $archiveFile, $githubUrl, $zipInspector, &$storedPath): Project {
                 $isExisting = $data['project_type'] === 'EXISTING_PROJECT';
                 $project = Project::query()->create([
                     'name' => $data['name'],
                     'description' => $data['description'] ?? null,
                     'project_type' => $data['project_type'],
-                    'stack' => $data['stack'] ?? null,
-                    'status' => $isExisting ? 'SOURCE_QUARANTINED' : 'SETUP_REQUIRED',
+                    'source_repository_url' => $githubUrl,
+                    'source_branch' => $data['github_branch'] ?? null,
+                    'stack' => $githubUrl ? null : ($data['stack'] ?? null),
+                    'status' => $githubUrl ? 'SOURCE_VERIFYING' : ($isExisting ? 'SOURCE_QUARANTINED' : 'SETUP_REQUIRED'),
                 ]);
 
                 if ($archiveFile) {
@@ -81,9 +86,15 @@ class ProjectController extends Controller
             throw $exception;
         }
 
+        if ($project->status === 'SOURCE_VERIFYING') {
+            ImportGithubProjectJob::dispatch($project->id);
+        }
+
         return redirect()
             ->route('projects.show', $project)
-            ->with('status', 'Project tersimpan. Source existing tetap dikarantina dan belum dieksekusi.');
+            ->with('status', $project->status === 'SOURCE_VERIFYING'
+                ? 'Repository GitHub diterima dan sedang diverifikasi di latar belakang. Source belum dieksekusi.'
+                : 'Project tersimpan. Source existing tetap dikarantina dan belum dieksekusi.');
     }
 
     public function show(Project $project): View

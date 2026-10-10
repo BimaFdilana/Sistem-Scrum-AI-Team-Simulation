@@ -16,6 +16,11 @@ class Project extends Model
         'name',
         'description',
         'project_type',
+        'source_repository_url',
+        'source_branch',
+        'source_commit_sha',
+        'workspace_path',
+        'source_error',
         'stack',
         'status',
     ];

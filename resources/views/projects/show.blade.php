@@ -21,14 +21,24 @@
             <div class="approval-rule"><span class="rule-check">✓</span><span>Belum ada agent yang diberi izin mengubah source project ini.</span></div>
         </article>
         <article class="empty-panel">
-            <div class="panel-heading"><div><p class="section-kicker">SOURCE BASELINE</p><h2>Source archive</h2></div><span class="soft-badge">Private</span></div>
-            @forelse ($project->sourceArchives as $archive)
-                <p class="archive-name">{{ $archive->original_name }}</p>
-                <div class="archive-meta"><span>{{ number_format($archive->size_bytes / 1048576, 2) }} MB</span><span>SHA-256 <code>{{ $archive->sha256 }}</code></span></div>
-                <div class="approval-rule"><span class="status-dot status-idle"></span><span>Status {{ str_replace('_', ' ', $archive->status) }} · belum diekstrak atau dijalankan</span></div>
-            @empty
-                <p>Belum ada source archive. Project baru belum memiliki repository/worktree.</p>
-            @endforelse
+            <div class="panel-heading"><div><p class="section-kicker">SOURCE BASELINE</p><h2>{{ $project->source_repository_url ? 'GitHub repository' : 'Source archive' }}</h2></div><span class="soft-badge">{{ $project->source_repository_url ? 'Public · private baseline' : 'Private' }}</span></div>
+            @if ($project->source_repository_url)
+                <p class="archive-name">{{ $project->source_repository_url }}</p>
+                <div class="archive-meta"><span>Branch: {{ $project->source_branch ?: 'default branch' }}</span><span>Commit: <code>{{ $project->source_commit_sha ?: 'pending' }}</code></span></div>
+                @if ($project->source_error)
+                    <div class="approval-rule"><span class="status-dot status-danger"></span><span>{{ $project->source_error }}</span></div>
+                @else
+                    <div class="approval-rule"><span class="status-dot status-idle"></span><span>Status {{ str_replace('_', ' ', $project->status) }} · tidak ada kode yang dijalankan</span></div>
+                @endif
+            @else
+                @forelse ($project->sourceArchives as $archive)
+                    <p class="archive-name">{{ $archive->original_name }}</p>
+                    <div class="archive-meta"><span>{{ number_format($archive->size_bytes / 1048576, 2) }} MB</span><span>SHA-256 <code>{{ $archive->sha256 }}</code></span></div>
+                    <div class="approval-rule"><span class="status-dot status-idle"></span><span>Status {{ str_replace('_', ' ', $archive->status) }} · belum diekstrak atau dijalankan</span></div>
+                @empty
+                    <p>Belum ada source baseline. Project baru belum memiliki repository/worktree.</p>
+                @endforelse
+            @endif
         </article>
     </section>
 
