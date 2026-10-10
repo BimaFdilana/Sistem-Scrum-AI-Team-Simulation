@@ -15,6 +15,9 @@
     @if (in_array(($activePage ?? ''), ['backlog', 'sprints'], true))
         <link rel="stylesheet" href="{{ asset('css/sprints.css') }}">
     @endif
+    @if (($activePage ?? '') === 'actors')
+        <link rel="stylesheet" href="{{ asset('css/actors.css') }}">
+    @endif
 </head>
 <body class="workspace-body">
     <div class="app-shell">

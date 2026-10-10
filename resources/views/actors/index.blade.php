@@ -25,13 +25,13 @@
                 <span class="project-main"><strong>{{ $actor->name }}</strong><small>{{ $actor->description ?: 'Belum ada deskripsi' }}</small></span>
                 <span class="project-type">{{ $actor->stories_count }} story</span>
                 <span class="project-status"><i></i>{{ $actor->is_active ? 'AKTIF' : 'NONAKTIF' }}</span>
-                <span class="story-card-actions">
-                    <a class="button button-ghost" href="{{ route('actors.edit', $actor) }}">Edit</a>
+                <span class="actor-actions" aria-label="Aksi actor {{ $actor->name }}">
+                    <a class="button button-ghost" href="{{ route('actors.edit', $actor) }}" aria-label="Edit actor {{ $actor->name }}">Edit</a>
                     @if ($actor->stories_count === 0)
                         <form method="POST" action="{{ route('actors.destroy', $actor) }}" onsubmit="return confirm('Hapus aktor ini?')">
                             @csrf
                             @method('DELETE')
-                            <button class="button button-ghost" type="submit">Hapus</button>
+                            <button class="button button-danger" type="submit" aria-label="Hapus actor {{ $actor->name }}">Hapus</button>
                         </form>
                     @endif
                 </span>

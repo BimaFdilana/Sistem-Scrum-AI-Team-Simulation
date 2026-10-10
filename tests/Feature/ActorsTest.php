@@ -32,4 +32,17 @@ class ActorsTest extends TestCase
         $this->delete('/actors/'.$actor->id)->assertRedirect('/actors');
         $this->assertDatabaseMissing('actors', ['id' => $actor->id]);
     }
+
+    public function test_actor_actions_use_a_responsive_action_group(): void
+    {
+        $owner = User::factory()->create();
+
+        $this->actingAs($owner)
+            ->get('/actors')
+            ->assertOk()
+            ->assertSee('actors.css', false)
+            ->assertSee('actor-actions', false)
+            ->assertSee('aria-label="Edit actor Administrator"', false)
+            ->assertSee('aria-label="Hapus actor Administrator"', false);
+    }
 }
