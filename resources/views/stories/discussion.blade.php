@@ -44,13 +44,37 @@
         @forelse ($runs as $run)
             <article class="story-card discussion-run">
                 <div class="discussion-status"><h3>Run #{{ $run->id }} · Revisi {{ $run->story_revision }}</h3><span class="scope-pill">{{ $run->status }}</span></div>
-                @if ($run->story_revision !== $story->revision)<p class="estimation-stale">Kedaluwarsa: story telah berubah.</p>@endif
+                @if ($run->story_revision !== $story->revision)
+                    <p class="estimation-stale">Kedaluwarsa: story telah berubah.</p>
+                @endif
+                @php
+                    $failedAgent = $run->agentRuns->where('status', 'FAILED')->sortByDesc('id')->first();
+                @endphp
+                @if ($failedAgent)
+                    @php
+                        $failureText = match ($failedAgent->error_code) {
+                            'PROVIDER_OVERLOADED' => 'Provider sedang sibuk.',
+                            'PROVIDER_TIMEOUT' => 'Provider melewati batas waktu.',
+                            'PROVIDER_CONNECTION' => 'Provider tidak dapat dihubungi.',
+                            'INVALID_JSON_SCHEMA' => 'Jawaban agent tidak mengikuti format yang diminta.',
+                            'SAFETY_REJECTION' => 'Jawaban ditolak oleh kebijakan keamanan.',
+                            'STALE_OR_CANCELLED' => 'Run menjadi kedaluwarsa atau dibatalkan.',
+                            default => 'Permintaan agent gagal.',
+                        };
+                    @endphp
+                    <p class="discussion-banner discussion-banner--danger"><strong>{{ strtoupper($failedAgent->profile_slug) }} · Putaran {{ $failedAgent->round }}:</strong> {{ $failureText }} Tindakan berikutnya: periksa konfigurasi/koneksi agent lalu gunakan Retry jika status run mengizinkan.</p>
+                @endif
                 @if ($run->status === 'COMPLETED' && $run->consensus_points)
                     <p class="discussion-banner"><strong>Poin Fibonacci final: {{ $run->consensus_points }}</strong> · Laporan Scrum Master tersimpan.</p>
                 @elseif ($run->status === 'NO_CONSENSUS')
                     <p class="discussion-banner discussion-banner--danger"><strong>NO_CONSENSUS</strong> · Tiga putaran selesai tanpa tiga persetujuan eksplisit yang sama. Tidak ada poin final.</p>
+                @elseif (in_array($run->status, ['FAILED', 'PARTIAL'], true))
+                    <p class="discussion-banner discussion-banner--danger">Diskusi berhenti sebelum selesai. Gunakan Retry untuk membuat run baru tanpa mengubah riwayat ini.</p>
                 @else
                     <p class="discussion-banner">Belum ada poin final yang dapat dieksekusi.</p>
+                @endif
+                @if (in_array($run->status, ['FAILED', 'PARTIAL', 'NO_CONSENSUS'], true) && (int) $run->requested_by === (int) auth()->id() && (int) $run->story_revision === (int) $story->revision)
+                    <form method="POST" action="{{ route('stories.estimations.retry', [$story, $run]) }}">@csrf<button class="button button-ghost" type="submit">Retry diskusi (run baru)</button></form>
                 @endif
                 <ol class="chat-list" aria-label="Pesan run {{ $run->id }}">
                     @forelse ($run->messages as $message)

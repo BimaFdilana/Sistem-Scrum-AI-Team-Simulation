@@ -7,6 +7,7 @@ use App\Models\Story;
 use App\Models\StoryEstimationRun;
 use App\Models\User;
 use Illuminate\Database\QueryException;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -42,10 +43,21 @@ class StoryEstimationService
 
     public function estimate(Story $story, User $requester): StoryEstimationRun
     {
+        [$run, $created] = $this->claimRun($story, $requester);
+        if (! $created) {
+            return $run->fresh(['agentRuns', 'messages']);
+        }
+
+        return $this->estimateExisting($run, $requester);
+    }
+
+    /** Claim exactly one active run; workers call estimateExisting after dispatch. */
+    public function claimRun(Story $story, User $requester): array
+    {
         $story = $story->fresh();
         $snapshot = $this->snapshot($story);
         try {
-            [$run, $created] = DB::transaction(function () use ($story, $requester, $snapshot) {
+            return DB::transaction(function () use ($story, $requester, $snapshot) {
                 $lockedStory = Story::query()->lockForUpdate()->findOrFail($story->id);
                 if ($lockedStory->revision !== $story->revision || $this->snapshot($lockedStory) !== $snapshot
                     || $lockedStory->sprint_id === null
@@ -83,10 +95,21 @@ class StoryEstimationService
             if (! $run) {
                 abort(409, 'Concurrent estimation is changing; retry the request.');
             }
-            $created = false;
+
+            return [$run, false];
         }
-        if (! $created) {
+    }
+
+    public function estimateExisting(StoryEstimationRun $run, User $requester): StoryEstimationRun
+    {
+        $run->refresh();
+        if (! in_array($run->status, ['RUNNING', 'REPORT_PENDING'], true)) {
             return $run->fresh(['agentRuns', 'messages']);
+        }
+        $story = $run->story()->firstOrFail();
+        $snapshot = $this->snapshot($story);
+        if ($run->status === 'REPORT_PENDING') {
+            return $this->report($run, $requester);
         }
         if (! $this->current($run, $snapshot)) {
             return $this->finish($run, 'STALE');
@@ -269,6 +292,9 @@ class StoryEstimationService
                 $prompt = $this->agentPrompt($name, $snapshot, $round, $prior, $run);
                 $raw = $this->agents->sendMessage($slug, $prompt, 'story-estimation-'.$run->id.'-'.$slug);
                 if (! $this->current($run, $snapshot)) {
+                    $entry->forceFill([
+                        'status' => 'FAILED', 'error_code' => 'STALE_OR_CANCELLED', 'completed_at' => now(),
+                    ])->save();
                     break;
                 }
                 $data = $this->validatedResponse($raw, $round);
@@ -287,9 +313,9 @@ class StoryEstimationService
                     'content' => $content, 'estimate_points' => $data['estimate_points'],
                     'explicit_agree' => $data['explicit_agree'] ?? null,
                 ];
-            } catch (Throwable) {
+            } catch (Throwable $exception) {
                 $entry->forceFill([
-                    'status' => 'FAILED', 'error_code' => 'AGENT_REQUEST_OR_RESPONSE_FAILED',
+                    'status' => 'FAILED', 'error_code' => $this->failureCode($exception, $run),
                     'completed_at' => now(),
                 ])->save();
             }
@@ -444,5 +470,30 @@ class StoryEstimationService
             ->update(['status' => $status, 'completed_at' => now()]);
 
         return $run->fresh(['agentRuns', 'messages']);
+    }
+
+    private function failureCode(Throwable $exception, StoryEstimationRun $run): string
+    {
+        if (! $this->current($run)) {
+            return 'STALE_OR_CANCELLED';
+        }
+        if ($exception instanceof ConnectionException || str_contains($exception->getMessage(), 'RUNTIME_CONNECTION_FAILED')) {
+            return 'PROVIDER_CONNECTION';
+        }
+        $message = strtoupper($exception->getMessage());
+        if (str_contains($message, 'TIMEOUT') || str_contains($message, 'TIMED OUT')) {
+            return 'PROVIDER_TIMEOUT';
+        }
+        if (str_contains($message, 'OVERLOAD') || str_contains($message, 'RATE LIMIT') || str_contains($message, '429')) {
+            return 'PROVIDER_OVERLOADED';
+        }
+        if ($exception instanceof \JsonException || str_contains($message, 'JSON') || str_contains($message, 'SCHEMA') || str_contains($message, 'RESPONSE TOO LONG')) {
+            return 'INVALID_JSON_SCHEMA';
+        }
+        if (str_contains($message, 'UNSAFE') || str_contains($message, 'DISCLOSURE') || str_contains($message, 'SAFETY')) {
+            return 'SAFETY_REJECTION';
+        }
+
+        return 'PROVIDER_REQUEST_FAILED';
     }
 }

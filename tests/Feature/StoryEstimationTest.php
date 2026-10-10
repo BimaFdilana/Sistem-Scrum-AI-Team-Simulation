@@ -87,7 +87,7 @@ class StoryEstimationTest extends TestCase
         });
         [$owner, $project, $story] = $this->makeStory();
         $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs')
-            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog')->assertSessionHasErrors('estimation');
+            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog')->assertSessionHas('status');
         $this->assertDatabaseHas('story_estimation_runs', ['story_id' => $story->id, 'status' => 'NO_CONSENSUS', 'consensus_points' => null]);
         $this->assertDatabaseCount('story_estimation_agent_runs', 9);
         $this->assertDatabaseCount('story_estimation_messages', 27);

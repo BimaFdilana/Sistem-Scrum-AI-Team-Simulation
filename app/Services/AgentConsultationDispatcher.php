@@ -67,7 +67,11 @@ class AgentConsultationDispatcher
                         ->post(rtrim($settings['base_url'], '/').'/chat/completions', $body);
                 }
                 if (! $response->successful()) {
-                    $failure = 'RUNTIME_HTTP_ERROR';
+                    $failure = match (true) {
+                        $response->status() === 408 => 'RUNTIME_PROVIDER_TIMEOUT',
+                        $response->status() === 429 || $response->serverError() => 'RUNTIME_PROVIDER_OVERLOADED',
+                        default => 'RUNTIME_HTTP_ERROR',
+                    };
                 } else {
                     // Only response metadata; never requested echoes, top-level model alias, or LLM text.
                     $runtime = $response->json('runtime') ?? $response->json('usage.runtime');

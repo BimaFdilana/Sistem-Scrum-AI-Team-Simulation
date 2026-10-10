@@ -91,12 +91,27 @@
                                             <p class="estimation-stale">Run #{{ $latestEstimationRun->id }} kedaluwarsa karena User Story berubah.</p>
                                         @else
                                             <p class="field-help">Status diskusi: <strong>{{ $latestEstimationRun->status }}</strong> · Revisi {{ $latestEstimationRun->story_revision }}</p>
+                                            @php($failedAgent = $latestEstimationRun->agentRuns->where('status', 'FAILED')->sortByDesc('id')->first())
+                                            @if ($failedAgent)
+                                                @php($failureText = match ($failedAgent->error_code) {
+                                                    'PROVIDER_OVERLOADED' => 'provider sedang sibuk',
+                                                    'PROVIDER_TIMEOUT' => 'provider melewati batas waktu',
+                                                    'PROVIDER_CONNECTION' => 'provider tidak dapat dihubungi',
+                                                    'INVALID_JSON_SCHEMA' => 'jawaban agent tidak valid',
+                                                    'SAFETY_REJECTION' => 'jawaban ditolak kebijakan keamanan',
+                                                    'STALE_OR_CANCELLED' => 'run kedaluwarsa atau dibatalkan',
+                                                    default => 'permintaan agent gagal',
+                                                })
+                                                <p class="field-help"><strong>{{ strtoupper($failedAgent->profile_slug) }} · Putaran {{ $failedAgent->round }}:</strong> {{ $failureText }}. Periksa konfigurasi/koneksi, lalu gunakan Retry bila tersedia.</p>
+                                            @endif
                                             @if ($latestEstimationRun->status === 'COMPLETED')
                                                 <a class="text-link" href="{{ route('chat.index') }}">Buka laporan di chat Scrum Master →</a>
                                             @elseif ($latestEstimationRun->status === 'RUNNING' && $latestEstimationRun->created_at?->lte(now()->subMinutes(30)) && (int) $latestEstimationRun->requested_by === (int) auth()->id())
                                                 <form method="POST" action="{{ route('stories.estimations.cancel', [$story, $latestEstimationRun]) }}">@csrf<button class="button button-ghost" type="submit">Hentikan run lama (lebih dari 30 menit)</button></form>
                                             @elseif ($latestEstimationRun->status === 'REPORT_PENDING')
                                                 <form method="POST" action="{{ route('stories.estimations.report', [$story, $latestEstimationRun]) }}">@csrf<button class="button button-ghost" type="submit">Coba Lagi Laporan Scrum Master</button></form>
+                                            @elseif (in_array($latestEstimationRun->status, ['FAILED', 'PARTIAL', 'NO_CONSENSUS'], true) && (int) $latestEstimationRun->requested_by === (int) auth()->id())
+                                                <form method="POST" action="{{ route('stories.estimations.retry', [$story, $latestEstimationRun]) }}">@csrf<button class="button button-ghost" type="submit">Retry diskusi (run baru)</button></form>
                                             @endif
                                             <p class="field-help">Lihat usulan, tanggapan, dan persetujuan asli setiap agent melalui Lihat Diskusi Tim.</p>
                                         @endif

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\RunStoryEstimationJob;
 use App\Models\Story;
 use App\Models\StoryEstimationRun;
 use App\Services\StoryEstimationService;
@@ -20,19 +21,33 @@ class StoryEstimationController extends Controller
         if (! $story->sprint_id || $story->sprint?->status !== 'PLANNING') {
             return $this->backToBacklog($story)->withErrors(['estimation' => 'Diskusi hanya dapat diminta untuk User Story pada Sprint PLANNING.']);
         }
-        if ($story->estimationRuns()->where('story_revision', $story->revision)->where('status', 'RUNNING')->exists()) {
-            return $this->backToBacklog($story)->withErrors(['estimation' => 'Diskusi story ini masih berlangsung; jangan membuat run ganda.']);
+        [$run, $created] = $estimator->claimRun($story->load('actor'), $request->user());
+        if ($created) {
+            RunStoryEstimationJob::dispatch($run->id, $request->user()->id);
         }
 
-        $run = $estimator->estimate($story->load('actor'), $request->user());
+        return $this->backToBacklog($story)->with('status', $created
+            ? 'Diskusi Fibonacci sedang diproses di latar belakang. Status run: RUNNING.'
+            : 'Diskusi Fibonacci untuk revisi ini sudah berjalan atau selesai. Status run: '.$run->status.'.');
+    }
 
-        return match ($run->status) {
-            'COMPLETED' => $this->backToBacklog($story)->with('status', 'Poin Fibonacci disepakati oleh FE, BE, QA dan dilaporkan Scrum Master ke PO.'),
-            'NO_CONSENSUS' => $this->backToBacklog($story)->withErrors(['estimation' => 'Tim belum mencapai kesepakatan dalam tiga putaran. Tidak ada poin final.']),
-            'REPORT_PENDING' => $this->backToBacklog($story)->withErrors(['estimation' => 'Tim sepakat, tetapi laporan Scrum Master belum tersimpan. Gunakan Coba Lagi Laporan, bukan mengulang diskusi.']),
-            'STALE' => $this->backToBacklog($story)->withErrors(['estimation' => 'Story berubah saat diskusi. Hasil lama tidak berlaku.']),
-            default => $this->backToBacklog($story)->withErrors(['estimation' => 'Diskusi belum selesai. Periksa catatan tim dan status koneksi agent.']),
-        };
+    public function retry(Request $request, Story $story, StoryEstimationRun $run, StoryEstimationService $estimator): RedirectResponse
+    {
+        abort_unless((int) $run->story_id === (int) $story->id, 404);
+        abort_unless($this->schemaReady(), 503);
+        abort_unless((int) $run->requested_by === (int) $request->user()->id, 403);
+        if (! in_array($run->status, ['FAILED', 'PARTIAL', 'NO_CONSENSUS'], true)
+            || $run->story_revision !== $story->revision || $story->sprint?->status !== 'PLANNING') {
+            return $this->backToBacklog($story)->withErrors(['estimation' => 'Run ini belum dapat diulang. Hanya FAILED, PARTIAL, atau NO_CONSENSUS pada revisi aktif yang dapat dicoba lagi.']);
+        }
+
+        [$retry, $created] = $estimator->claimRun($story->load('actor'), $request->user());
+        if (! $created) {
+            return $this->backToBacklog($story)->withErrors(['estimation' => 'Diskusi story ini masih berlangsung; retry tidak membuat run ganda.']);
+        }
+        RunStoryEstimationJob::dispatch($retry->id, $request->user()->id);
+
+        return $this->backToBacklog($story)->with('status', 'Retry Fibonacci dijadwalkan. Status run: RUNNING.');
     }
 
     public function discussion(Request $request, Story $story): View
