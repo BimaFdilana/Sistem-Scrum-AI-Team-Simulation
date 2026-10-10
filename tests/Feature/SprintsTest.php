@@ -118,6 +118,18 @@ class SprintsTest extends TestCase
             ->assertRedirect('/projects/'.$project->id.'/sprint-backlog');
     }
 
+    public function test_sprint_detail_page_renders_approval_errors_without_a_blade_parse_error(): void
+    {
+        $owner = User::factory()->create();
+        $project = $this->createProject();
+        $sprint = $this->createSprint($project);
+
+        $this->actingAs($owner)->get('/sprints/'.$sprint->id)
+            ->assertOk()
+            ->assertSee('Tujuan Sprint')
+            ->assertSee('Stories dalam '.$sprint->name);
+    }
+
     private function createSprint(Project $project): Sprint
     {
         return $project->sprints()->create([

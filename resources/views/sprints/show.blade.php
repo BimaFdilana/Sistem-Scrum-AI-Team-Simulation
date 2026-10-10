@@ -6,7 +6,11 @@
         <a class="text-link" href="{{ route('projects.sprint-backlog.index', $sprint->project) }}">← Kembali ke Sprint Backlog</a>
     </section>
     @if (session('status'))<div class="success-banner" role="status">{{ session('status') }}</div>@endif
-    @foreach (['database', 'story', 'scope', 'start', 'goal'] as $errorKey)@error($errorKey)<div class="form-alert" role="alert">{{ $message }}</div>@enderror @enderror
+    @foreach (['database', 'story', 'scope', 'start', 'goal'] as $errorKey)
+        @error($errorKey)
+            <div class="form-alert" role="alert">{{ $message }}</div>
+        @enderror
+    @endforeach
 
     <section class="sprint-summary empty-panel">
         <div class="panel-heading"><div><p class="section-kicker">SPRINT GOAL</p><h2>Tujuan Sprint</h2></div><span class="scope-pill {{ $sprint->status === 'ACTIVE' ? 'scope-approved' : 'scope-pending' }}">{{ $sprint->status }}</span></div>
