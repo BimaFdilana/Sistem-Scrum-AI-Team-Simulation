@@ -172,7 +172,10 @@ class StoryEstimationService
         $entry->newQuery()->whereKey($entry->id)->whereIn('status', ['QUEUED', 'RUNNING'])->update(['status' => 'FAILED', 'error_code' => $errorCode, 'heartbeat_at' => now(), 'completed_at' => now()]);
         $run = $entry->estimationRun()->first();
         if ($run && in_array($run->status, ['QUEUED', 'RUNNING'], true)) {
-            $run->forceFill(['status' => 'FAILED', 'completed_at' => now()])->save();
+            $roundEntries = $run->agentRuns()->where('round', $entry->round)->get();
+            if ($roundEntries->isNotEmpty() && $roundEntries->every(fn ($roundEntry) => $roundEntry->status === 'FAILED')) {
+                $run->forceFill(['status' => 'FAILED', 'completed_at' => now()])->save();
+            }
         }
     }
 

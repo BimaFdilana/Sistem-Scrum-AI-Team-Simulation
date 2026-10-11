@@ -170,6 +170,23 @@ class StoryEstimationAsyncTest extends TestCase
         Queue::assertPushed(EstimateStoryAgentJob::class, fn ($job) => $job->agentRunId === $failed->id);
     }
 
+    public function test_one_agent_failure_does_not_cancel_round_before_other_agents_finish(): void
+    {
+        [$owner, $project, $story] = $this->makeStory();
+        $run = StoryEstimationRun::query()->create([
+            'story_id' => $story->id, 'requested_by' => $owner->id,
+            'story_revision' => $story->revision, 'status' => 'RUNNING',
+        ]);
+        $failed = $run->agentRuns()->create(['profile_slug' => 'backend-developer', 'round' => 1, 'status' => 'RUNNING']);
+        $run->agentRuns()->create(['profile_slug' => 'frontend-developer', 'round' => 1, 'status' => 'QUEUED']);
+        $run->agentRuns()->create(['profile_slug' => 'qa-engineer', 'round' => 1, 'status' => 'QUEUED']);
+
+        app(StoryEstimationService::class)->failAgent($failed, 'INVALID_JSON_SCHEMA');
+
+        $this->assertSame('RUNNING', $run->fresh()->status);
+        $this->assertSame('FAILED', $failed->fresh()->status);
+    }
+
     public function test_status_endpoint_recovers_agent_without_heartbeat(): void
     {
         [$owner, $project, $story] = $this->makeStory();
