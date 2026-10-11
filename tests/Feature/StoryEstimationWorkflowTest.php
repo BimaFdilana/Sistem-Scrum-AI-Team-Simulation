@@ -110,11 +110,10 @@ class StoryEstimationWorkflowTest extends TestCase
         }
 
         $page = $this->actingAs($owner)->get('/stories/'.$story->id.'/discussion')->assertOk();
-        $page->assertSee('background:var(--panel-raised)', false)
-            ->assertSee('color:var(--text)', false)
-            ->assertSee('chat-bubble--backend', false)
-            ->assertSee('chat-bubble--frontend', false)
-            ->assertSee('chat-bubble--qa', false)
+        $page->assertSee('css/discussion.css', false)
+            ->assertSee('team-message--backend', false)
+            ->assertSee('team-message--frontend', false)
+            ->assertSee('team-message--qa', false)
             ->assertDontSee('background:#fff;', false)
             ->assertDontSee('background:#eef6ff;', false);
     }

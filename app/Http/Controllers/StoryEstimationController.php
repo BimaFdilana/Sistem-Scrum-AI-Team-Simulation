@@ -90,7 +90,7 @@ class StoryEstimationController extends Controller
             'runs' => $runs,
             'currentRun' => $runs->first(fn ($run) => (int) $run->story_revision === (int) $story->revision) ?? $runs->first(),
             'schemaReady' => $ready,
-            'activePage' => 'backlog',
+            'activePage' => 'discussion',
         ]);
     }
 
@@ -102,7 +102,7 @@ class StoryEstimationController extends Controller
         $estimator = app(StoryEstimationService::class);
         $estimator->recoverStale($run);
         $run->load('agentRuns');
-        $round = min(3, (int) ($run->agentRuns->max('round') ?: 1));
+        $round = min(StoryEstimationService::MAX_DISCUSSION_ROUNDS, (int) ($run->agentRuns->max('round') ?: 1));
         $roundRuns = $run->agentRuns->where('round', $round);
         $failed = $run->agentRuns->where('status', 'FAILED')->sortByDesc('id')->first();
         $completed = $roundRuns->where('status', 'COMPLETED')->count();
@@ -112,7 +112,7 @@ class StoryEstimationController extends Controller
             'run_id' => $run->id,
             'status' => $run->status,
             'round' => $round,
-            'total_rounds' => 3,
+            'total_rounds' => StoryEstimationService::MAX_DISCUSSION_ROUNDS,
             'completed_agents' => $completed,
             'total_agents' => 3,
             'active_profile' => $running?->profile_slug,

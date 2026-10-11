@@ -19,6 +19,11 @@ class StoryEstimationAsyncTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_fibonacci_discussion_uses_two_rounds(): void
+    {
+        $this->assertSame(2, StoryEstimationService::MAX_DISCUSSION_ROUNDS);
+    }
+
     public function test_store_claims_queued_run_dispatches_one_advance_job_without_inference(): void
     {
         Queue::fake();

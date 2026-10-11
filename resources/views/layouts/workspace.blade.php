@@ -9,8 +9,11 @@
     @if (in_array(($activePage ?? ''), ['agents', 'agent-activity'], true))
         <link rel="stylesheet" href="/css/agents.css">
     @endif
-    @if (in_array(($activePage ?? ''), ['chat', 'agent-chat'], true))
+    @if (in_array(($activePage ?? ''), ['chat', 'agent-chat', 'discussion'], true))
         <link rel="stylesheet" href="{{ asset('css/chat.css') }}">
+    @endif
+    @if (($activePage ?? '') === 'discussion')
+        <link rel="stylesheet" href="{{ asset('css/discussion.css') }}">
     @endif
     @if (in_array(($activePage ?? ''), ['backlog', 'sprints'], true))
         <link rel="stylesheet" href="{{ asset('css/sprints.css') }}">

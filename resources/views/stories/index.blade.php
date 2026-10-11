@@ -84,7 +84,7 @@
                                     <form method="POST" action="{{ route('stories.estimations.store', $story) }}" data-fibonacci-form data-story-label="{{ $story->display_id }}">
                                         @csrf
                                         <button class="button button-ghost" type="submit" @disabled($latestEstimationRun?->status === 'RUNNING')>Diskusi Fibonacci via Scrum Master</button>
-                                        <p class="field-help">FE, BE dan QA memberi usulan keseluruhan story, saling menanggapi, lalu secara eksplisit menyepakati poin yang sama dalam maksimal tiga putaran. Tanpa kesepakatan, tidak ada poin final.</p>
+                                        <p class="field-help">FE, BE dan QA memberi usulan keseluruhan story, saling menanggapi, lalu secara eksplisit menyepakati poin yang sama dalam maksimal dua putaran. Tanpa kesepakatan, tidak ada poin final.</p>
                                     </form>
                                     @if ($latestEstimationRun)
                                         @if ($latestEstimationRun->story_revision !== $story->revision)
@@ -219,7 +219,7 @@
                 <p id="fibonacci-progress-description" class="section-description">Memulai diskusi dengan Backend, Frontend, dan QA.</p>
                 <div class="fibonacci-progress-track" aria-hidden="true"><span data-fibonacci-progress-bar></span></div>
                 <p class="fibonacci-progress-stage" data-fibonacci-stage>Menunggu worker...</p>
-                <div class="fibonacci-progress-meta"><span data-fibonacci-round>Putaran —/3</span><span data-fibonacci-agents>Agent selesai 0/3</span></div>
+                <div class="fibonacci-progress-meta"><span data-fibonacci-round>Putaran —/2</span><span data-fibonacci-agents>Agent selesai 0/3</span></div>
                 <p class="fibonacci-progress-error" data-fibonacci-error hidden></p>
                 <div class="sprint-modal-actions">
                     <button class="button button-ghost" type="button" data-fibonacci-close>Tutup</button>
@@ -253,14 +253,14 @@
                 const terminal = ['COMPLETED', 'FAILED', 'PARTIAL', 'NO_CONSENSUS', 'STALE', 'CANCELLED'];
                 const setProgress = (data) => {
                     const completed = Number(data.completed_agents || 0);
-                    const percentage = data.status === 'COMPLETED' ? 100 : Math.min(95, Math.max(8, ((data.round - 1) * 3 + completed) / 9 * 100));
+                    const percentage = data.status === 'COMPLETED' ? 100 : Math.min(95, Math.max(8, ((data.round - 1) * 3 + completed) / 6 * 100));
                     bar.style.width = `${percentage}%`;
-                    round.textContent = `Putaran ${data.round || '—'}/3`;
+                    round.textContent = `Putaran ${data.round || '—'}/2`;
                     agents.textContent = `Agent selesai ${completed}/3`;
                     stage.textContent = data.status === 'RUNNING'
                         ? (data.active_profile ? `Menunggu respons ${labels[data.active_profile] || data.active_profile}...` : 'Menjalankan diskusi agent...')
                         : data.status === 'COMPLETED' ? 'Konsensus dan laporan Scrum Master tersimpan.'
-                        : data.status === 'NO_CONSENSUS' ? 'Tiga putaran selesai tanpa konsensus.'
+                        : data.status === 'NO_CONSENSUS' ? 'Dua putaran selesai tanpa konsensus.'
                         : `Diskusi berhenti dengan status ${data.status}.`;
                     if (data.failed_agent) {
                         error.hidden = false;
