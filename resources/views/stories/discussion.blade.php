@@ -117,7 +117,18 @@
 
         <section aria-labelledby="execution-heading" class="team-execution-empty">
             <h2 id="execution-heading">Eksekusi &amp; Revisi QA</h2>
-            <p class="notice-bar">Belum ada eksekusi atau revisi QA. Bagian ini tetap kosong sampai executor terisolasi dan bukti QA tersedia.</p>
+            @forelse ($executions as $execution)
+                <div class="task-row">
+                    <div>
+                        <strong>Eksekusi #{{ $execution->id }}</strong>
+                        <small>{{ str_replace('_', ' ', $execution->status) }} · {{ $execution->tasks_count }} task · {{ $execution->created_at->format('d M Y H:i') }}</small>
+                        @if ($execution->summary)<p>{{ \Illuminate\Support\Str::limit($execution->summary, 200) }}</p>@endif
+                    </div>
+                    <a class="button button-ghost" href="{{ route('stories.executions.show', [$story, $execution]) }}">Lihat</a>
+                </div>
+            @empty
+                <p class="notice-bar">Belum ada eksekusi. Mulai dari Sprint Backlog setelah estimasi disepakati.</p>
+            @endforelse
         </section>
     @endif
 @endsection

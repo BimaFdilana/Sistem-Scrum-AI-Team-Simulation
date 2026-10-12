@@ -89,6 +89,9 @@ class StoryEstimationController extends Controller
             'story' => $story->load('project', 'sprint'),
             'runs' => $runs,
             'currentRun' => $runs->first(fn ($run) => (int) $run->story_revision === (int) $story->revision) ?? $runs->first(),
+            'executions' => \Illuminate\Support\Facades\Schema::hasTable('execution_runs')
+                ? $story->executionRuns()->withCount('tasks')->latest()->get()
+                : collect(),
             'schemaReady' => $ready,
             'activePage' => 'discussion',
         ]);
