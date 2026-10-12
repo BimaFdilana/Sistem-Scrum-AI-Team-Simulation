@@ -17,6 +17,17 @@
     <div class="notice-bar notice-danger"><span class="notice-icon">!</span><p>{{ $errors->first() }}</p></div>
 @endif
 
+@if ($story->isAccepted())
+    <div class="notice-bar"><span class="notice-icon">✓</span><p><strong>Keputusan final PO: {{ $story->acceptanceLabel() }}</strong> ({{ $story->accepted_at?->format('d M Y H:i') }}). Story ini terkunci dan tidak bisa dieksekusi lagi.</p></div>
+@elseif ($run->isTerminal())
+    <div class="notice-bar"><span class="notice-icon">★</span><p><strong>Eksekusi selesai ({{ str_replace('_', ' ', $run->status) }}).</strong> Beri keputusan final sebagai Product Owner:</p></div>
+    <form method="POST" action="{{ route('stories.executions.accept', [$story, $run]) }}" style="display:flex;gap:.5rem;margin-bottom:1rem">
+        @csrf
+        <button class="button button-primary" type="submit" name="status" value="BERHASIL" onclick="return confirm('Terima story ini sebagai BERHASIL? Story akan terkunci dari eksekusi ulang.')">Terima sebagai Berhasil</button>
+        <button class="button button-danger" type="submit" name="status" value="GAGAL" onclick="return confirm('Tandai story ini sebagai GAGAL? Story akan terkunci dari eksekusi ulang.')">Tandai Gagal</button>
+    </form>
+@endif
+
 @if ($run->status === 'AWAITING_PERMISSION')
     <p class="discussion-banner">Menunggu persetujuan PO di menu <a href="{{ route('accepted.index') }}">Accepted</a> sebelum agen mengubah code.</p>
 @elseif ($run->status === 'COMPLETED')

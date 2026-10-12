@@ -49,4 +49,9 @@ class ExecutionRun extends Model
             'QUEUED', 'BREAKDOWN', 'AWAITING_PERMISSION', 'EXECUTING', 'REVIEWING', 'MERGING',
         ], true);
     }
+
+    public function isTerminal(): bool
+    {
+        return in_array($this->status, ['COMPLETED', 'BLOCKED'], true);
+    }
 }

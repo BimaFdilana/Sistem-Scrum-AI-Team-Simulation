@@ -29,6 +29,8 @@ class Story extends Model
         'refined_acceptance_criteria',
         'refined_at',
         'refined_from_run_id',
+        'acceptance_status',
+        'accepted_at',
     ];
 
     protected static function booted(): void
@@ -53,6 +55,9 @@ class Story extends Model
                 $story->refined_acceptance_criteria = null;
                 $story->refined_at = null;
                 $story->refined_from_run_id = null;
+                // Keputusan final ikut ter-reset: revisi baru = pekerjaan baru.
+                $story->acceptance_status = null;
+                $story->accepted_at = null;
             }
         });
     }
@@ -65,7 +70,23 @@ class Story extends Model
             'scope_approved_revision' => 'integer',
             'scope_approved_at' => 'datetime',
             'refined_at' => 'datetime',
+            'accepted_at' => 'datetime',
         ];
+    }
+
+    /** Story terkunci bila PO sudah memberi keputusan final. */
+    public function isAccepted(): bool
+    {
+        return in_array($this->acceptance_status, ['BERHASIL', 'GAGAL'], true);
+    }
+
+    public function acceptanceLabel(): ?string
+    {
+        return match ($this->acceptance_status) {
+            'BERHASIL' => 'Berhasil',
+            'GAGAL' => 'Gagal',
+            default => null,
+        };
     }
 
     /** Versi refined (hasil diskusi SM) menjadi acuan eksekusi bila tersedia. */

@@ -6,6 +6,7 @@ use App\Jobs\BreakdownExecutionJob;
 use App\Models\ExecutionRun;
 use App\Models\Story;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\View\View;
 
 class ExecutionController extends Controller
@@ -13,6 +14,9 @@ class ExecutionController extends Controller
     public function store(Story $story): RedirectResponse
     {
         $story->load('project');
+        if ($story->isAccepted()) {
+            return back()->withErrors(['execution' => 'Story sudah diterima PO ('.$story->acceptanceLabel().') dan tidak bisa dieksekusi lagi.']);
+        }
         if (! $story->estimate_points) {
             return back()->withErrors(['execution' => 'Story belum memiliki estimasi Fibonacci.']);
         }
@@ -46,5 +50,31 @@ class ExecutionController extends Controller
             'run' => $run->load(['tasks', 'messages', 'permissionRequest']),
             'activePage' => 'backlog',
         ]);
+    }
+
+    /** Keputusan final PO: Berhasil / Gagal. Mengunci story dari eksekusi ulang. */
+    public function accept(Request $request, Story $story, ExecutionRun $run): RedirectResponse
+    {
+        abort_unless((int) $run->story_id === (int) $story->id, 404);
+        $status = $request->input('status');
+        if (! in_array($status, ['BERHASIL', 'GAGAL'], true)) {
+            return back()->withErrors(['acceptance' => 'Status keputusan tidak valid.']);
+        }
+        if ($story->isAccepted()) {
+            return back()->withErrors(['acceptance' => 'Story sudah diterima sebelumnya.']);
+        }
+        if (! $run->isTerminal()) {
+            return back()->withErrors(['acceptance' => 'Keputusan final hanya untuk eksekusi yang sudah selesai atau diblokir.']);
+        }
+
+        $story->forceFill([
+            'acceptance_status' => $status,
+            'accepted_at' => now(),
+        ])->save();
+
+        $label = $status === 'BERHASIL' ? 'Berhasil' : 'Gagal';
+
+        return redirect()->route('stories.executions.show', [$story, $run])
+            ->with('status', 'Story diterima PO dengan status '.$label.'. Eksekusi ulang dikunci.');
     }
 }

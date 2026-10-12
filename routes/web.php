@@ -63,7 +63,8 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/stories/{story}/estimation-runs/{run}/report', [StoryEstimationController::class, 'report'])->name('stories.estimations.report');
     Route::post('/stories/{story}/estimation-runs/{run}/cancel', [StoryEstimationController::class, 'cancel'])->name('stories.estimations.cancel');
     Route::post('/stories/{story}/executions', [ExecutionController::class, 'store'])->middleware('throttle:6,1')->name('stories.executions.store');
-    Route::get('/stories/{story}/executions/{execution}', [ExecutionController::class, 'show'])->name('stories.executions.show');
+    Route::get('/stories/{story}/executions/{run}', [ExecutionController::class, 'show'])->name('stories.executions.show');
+    Route::post('/stories/{story}/executions/{run}/accept', [ExecutionController::class, 'accept'])->name('stories.executions.accept');
     Route::get('/accepted', [PermissionRequestController::class, 'index'])->name('accepted.index');
     Route::post('/accepted/{permissionRequest}/approve', [PermissionRequestController::class, 'approve'])->name('accepted.approve');
     Route::post('/accepted/{permissionRequest}/reject', [PermissionRequestController::class, 'reject'])->name('accepted.reject');

@@ -79,7 +79,13 @@
                             @endif
                             <a class="button button-ghost" href="{{ route('stories.discussion.show', $story) }}">Lihat Diskusi Tim</a>
                             @php($latestExecution = $story->relationLoaded('executionRuns') ? $story->executionRuns->first() : null)
-                            @if ($agreed && $latestExecution && $latestExecution->isActive())
+                            @if ($story->isAccepted())
+                                <p class="story-estimate-final"><strong>Keputusan final PO:</strong> {{ $story->acceptanceLabel() }}</p>
+                                <button class="button button-ghost" type="button" disabled title="Story sudah diterima PO ({{ $story->acceptanceLabel() }}) dan terkunci dari eksekusi ulang">Eksekusi User Story — terkunci</button>
+                                @if ($latestExecution)
+                                    <a class="button button-ghost" href="{{ route('stories.executions.show', [$story, $latestExecution]) }}">Riwayat Eksekusi</a>
+                                @endif
+                            @elseif ($agreed && $latestExecution && $latestExecution->isActive())
                                 <a class="button button-ghost" href="{{ route('stories.executions.show', [$story, $latestExecution]) }}">Lihat Eksekusi ({{ str_replace('_', ' ', $latestExecution->status) }})</a>
                             @elseif ($agreed)
                                 <form method="POST" action="{{ route('stories.executions.store', $story) }}" style="display:inline">@csrf<button class="button button-primary" type="submit" onclick="return confirm('Mulai eksekusi user story ini? Scrum Master akan memecah menjadi task dan meminta izin sebelum agen mengubah code.')">Eksekusi User Story</button></form>
