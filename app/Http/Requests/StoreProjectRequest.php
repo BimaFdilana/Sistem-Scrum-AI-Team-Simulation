@@ -3,7 +3,6 @@
 namespace App\Http\Requests;
 
 use App\Services\PublicGithubRepositoryService;
-use App\Support\Archives\ZipArchiveInspector;
 use Illuminate\Contracts\Validation\Validator as ValidatorContract;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -25,14 +24,10 @@ class StoreProjectRequest extends FormRequest
             'project_type' => ['required', Rule::in(['NEW_PROJECT', 'EXISTING_PROJECT'])],
             'stack' => [$existingProject ? 'nullable' : 'required', 'string', 'max:100'],
             'github_repository_url' => [
-                $existingProject ? 'nullable' : 'prohibited',
-                'nullable', 'string', 'max:500',
+                $existingProject ? 'required' : 'prohibited',
+                'string', 'max:500',
             ],
             'github_branch' => ['nullable', 'string', 'max:255', 'regex:/^[A-Za-z0-9._\/-]+$/'],
-            'source_archive' => [
-                $existingProject ? 'nullable' : 'prohibited',
-                'file', 'mimes:zip', 'max:102400',
-            ],
         ];
     }
 
@@ -46,9 +41,6 @@ class StoreProjectRequest extends FormRequest
             'github_repository_url.required' => 'URL repository public GitHub wajib diisi.',
             'github_repository_url.prohibited' => 'Project baru tidak boleh menyertakan repository GitHub.',
             'github_branch.regex' => 'Branch GitHub berisi karakter yang tidak diizinkan.',
-            'source_archive.prohibited' => 'Project baru tidak boleh menyertakan arsip source.',
-            'source_archive.mimes' => 'Source project harus berupa file ZIP.',
-            'source_archive.max' => 'Ukuran ZIP maksimal 100 MB.',
         ];
     }
 
@@ -60,30 +52,13 @@ class StoreProjectRequest extends FormRequest
             }
 
             $github = trim((string) $this->input('github_repository_url'));
-            $archive = $this->file('source_archive');
-            if ($github === '' && ! $archive) {
-                $validator->errors()->add('github_repository_url', 'Masukkan URL repository public GitHub.');
-                $validator->errors()->add('source_archive', 'Upload ZIP legacy atau masukkan URL repository public GitHub.');
-
-                return;
-            }
-            if ($github !== '') {
-                try {
-                    PublicGithubRepositoryService::normalizeUrl($github);
-                } catch (\RuntimeException $exception) {
-                    $validator->errors()->add('github_repository_url', $exception->getMessage());
-                }
-
-                return;
-            }
-
-            if (! $archive || $validator->errors()->has('source_archive')) {
+            if ($github === '' || $validator->errors()->has('github_repository_url')) {
                 return;
             }
             try {
-                app(ZipArchiveInspector::class)->assertSafeMetadata($archive->getRealPath());
-            } catch (\InvalidArgumentException $exception) {
-                $validator->errors()->add('source_archive', $exception->getMessage());
+                PublicGithubRepositoryService::normalizeUrl($github);
+            } catch (\RuntimeException $exception) {
+                $validator->errors()->add('github_repository_url', $exception->getMessage());
             }
         });
     }

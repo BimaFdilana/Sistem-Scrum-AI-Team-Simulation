@@ -44,11 +44,6 @@ class Project extends Model
         return $this->hasOne(Backlog::class);
     }
 
-    public function sourceArchives(): HasMany
-    {
-        return $this->hasMany(SourceArchive::class);
-    }
-
     public function stories(): HasMany
     {
         return $this->hasMany(Story::class);
