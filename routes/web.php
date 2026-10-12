@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\ActorController;
 use App\Http\Controllers\AgentConfigurationController;
+use App\Http\Controllers\AiProviderController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\ProjectController;
@@ -29,6 +30,10 @@ Route::middleware('auth')->group(function (): void {
         ->middleware('throttle:30,1')
         ->name('chat.messages.store');
     Route::get('/agents', [WorkspaceController::class, 'agents'])->name('agents.index');
+    Route::get('/ai-providers', [AiProviderController::class, 'index'])->name('ai-providers.index');
+    Route::get('/ai-providers/{provider}/connect', [AiProviderController::class, 'connect'])->name('ai-providers.connect');
+    Route::post('/ai-providers/{provider}/callback', [AiProviderController::class, 'callback'])->middleware('throttle:20,1')->name('ai-providers.callback');
+    Route::post('/ai-providers/{provider}/disconnect', [AiProviderController::class, 'disconnect'])->name('ai-providers.disconnect');
     Route::get('/agents/{slug}/config', [AgentConfigurationController::class, 'edit'])->name('agents.config.edit');
     Route::put('/agents/{slug}/config', [AgentConfigurationController::class, 'update'])->name('agents.config.update');
     Route::get('/agents/{slug}/config/history', [AgentConfigurationController::class, 'history'])->name('agents.config.history');

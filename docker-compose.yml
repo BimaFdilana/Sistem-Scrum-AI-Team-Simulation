@@ -1,0 +1,77 @@
+# ---------------------------------------------------------------------------
+# ScrumSpace — Laravel + CLIProxyAPI dalam Docker
+# Cara pakai (di VPS):
+#   1. cp .env.docker.example .env   (lalu isi nilai-nilainya)
+#   2. docker compose up -d --build
+#   3. Buka http://<ip-vps>  (atau https://<domain> bila APP_DOMAIN diisi)
+# ---------------------------------------------------------------------------
+
+services:
+  # Aplikasi Laravel (FrankenPHP: web server + PHP 8.5 dalam satu container).
+  # Isi APP_DOMAIN di .env dengan domain kamu untuk HTTPS otomatis.
+  app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SERVER_NAME: ${APP_DOMAIN:-:80}
+      # Di dalam jaringan Docker, gateway CLIProxyAPI dijangkau via nama service:
+      CLIPROXY_BASE_URL: http://cliproxy:8317
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3 (opsional)
+    volumes:
+      - app-database:/app/database
+      - app-storage:/app/storage
+    networks:
+      - scrumnet
+    depends_on:
+      - cliproxy
+
+  # Worker antrean Laravel (job Fibonacci, import GitHub, dsb.)
+  worker:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    command: php artisan queue:work --sleep=3 --tries=3 --max-time=3600
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CLIPROXY_BASE_URL: http://cliproxy:8317
+    volumes:
+      - app-database:/app/database
+      - app-storage:/app/storage
+    networks:
+      - scrumnet
+    depends_on:
+      - app
+
+  # Gateway OAuth AI (Antigravity/Google, Codex/ChatGPT, Claude).
+  # Port TIDAK dipublish: hanya bisa diakses dari dalam jaringan Docker.
+  # Login OAuth tetap lewat menu "AI Providers" di website (copy-paste URL).
+  cliproxy:
+    build:
+      context: ./docker/cliproxy
+      args:
+        CLIPROXY_VERSION: ${CLIPROXY_VERSION:-8.0.23}
+    restart: unless-stopped
+    environment:
+      CLIPROXY_MANAGEMENT_KEY: ${CLIPROXY_MANAGEMENT_KEY:?Isi CLIPROXY_MANAGEMENT_KEY di .env}
+      CLIPROXY_API_KEY: ${CLIPROXY_API_KEY:?Isi CLIPROXY_API_KEY di .env}
+    volumes:
+      - cliproxy-data:/data
+    networks:
+      - scrumnet
+
+volumes:
+  app-database:   # database/database.sqlite
+  app-storage:    # storage/ (log, upload)
+  cliproxy-data:  # config.yaml + token OAuth CLIProxyAPI
+
+networks:
+  scrumnet:

@@ -6,7 +6,7 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ $title ?? 'Workspace' }} · AI Scrum Agent</title>
     <link rel="stylesheet" href="{{ asset('css/workspace.css') }}">
-    @if (in_array(($activePage ?? ''), ['agents', 'agent-activity'], true))
+    @if (in_array(($activePage ?? ''), ['agents', 'agent-activity', 'ai-providers'], true))
         <link rel="stylesheet" href="/css/agents.css">
     @endif
     @if (in_array(($activePage ?? ''), ['chat', 'agent-chat', 'discussion'], true))
@@ -40,6 +40,7 @@
                 <p class="nav-caption">WORKSPACE</p>
                 <a class="nav-link {{ $activePage === 'dashboard' ? 'is-active' : '' }}" href="{{ route('dashboard') }}"><span class="nav-dot"></span>Ringkasan</a>
                 <a class="nav-link {{ in_array($activePage, ['agents', 'agent-chat'], true) ? 'is-active' : '' }}" href="{{ route('agents.index') }}"><span class="nav-dot"></span>Agent</a>
+                <a class="nav-link {{ $activePage === 'ai-providers' ? 'is-active' : '' }}" href="{{ route('ai-providers.index') }}"><span class="nav-dot"></span>AI Providers</a>
                 <a class="nav-link {{ $activePage === 'projects' ? 'is-active' : '' }}" href="{{ route('projects.index') }}"><span class="nav-dot"></span>Projects</a>
                 <a class="nav-link {{ $activePage === 'actors' ? 'is-active' : '' }}" href="{{ route('actors.index') }}"><span class="nav-dot"></span>Aktor</a>
                 <a class="nav-link {{ in_array($activePage, ['backlog', 'sprints'], true) ? 'is-active' : '' }}" href="{{ route('projects.index', ['section' => 'sprint-backlog']) }}"><span class="nav-dot"></span>Sprint Backlog</a>

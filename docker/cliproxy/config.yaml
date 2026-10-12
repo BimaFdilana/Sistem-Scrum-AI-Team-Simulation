@@ -1,0 +1,26 @@
+# Template config CLIProxyAPI (skema v8) untuk Docker.
+# Entrypoint me-render ${...} dari environment lalu menyimpan ke /data/config.yaml
+# (hanya saat pertama kali; file yang sudah ada tidak ditimpa).
+config-version: 8
+
+server:
+  host: ""
+  port: 8317
+
+management:
+  # WAJIB true di Docker: Laravel berjalan di container lain ("remote").
+  # Akses tetap butuh secret-key; port 8317 tidak dipublish ke publik.
+  allow-remote: true
+  # Plaintext di sini akan di-hash otomatis saat pertama dijalankan.
+  secret-key: "${CLIPROXY_MANAGEMENT_KEY}"
+
+oauth:
+  # Token OAuth disimpan di volume agar tidak hilang saat container restart.
+  auth-dir: "/data/auths"
+
+access:
+  api-keys:
+    - "${CLIPROXY_API_KEY}"
+
+routing:
+  strategy: "round-robin"

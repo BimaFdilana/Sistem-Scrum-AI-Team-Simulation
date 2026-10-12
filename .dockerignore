@@ -1,0 +1,14 @@
+.git
+.gitignore
+node_modules
+vendor
+.env
+.env.*
+!.env.example
+!.env.docker.example
+storage/logs/*
+storage/framework/cache/*
+storage/framework/sessions/*
+storage/framework/views/*
+bootstrap/cache/*
+docker/cliproxy/data
