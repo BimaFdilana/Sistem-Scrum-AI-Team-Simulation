@@ -6,6 +6,7 @@ use App\Models\ExecutionRun;
 use App\Models\PermissionRequest;
 use App\Services\ChatDisclosurePolicy;
 use App\Services\HermesClient;
+use App\Support\Agents\AgentSoul;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -39,6 +40,7 @@ class BreakdownExecutionJob implements ShouldQueue
         try {
             $story = $run->story;
             $prompt = implode("\n\n", [
+                AgentSoul::promptLine('scrum-master'),
                 'Kamu Scrum Master. Pecah user story berikut menjadi task-task kecil yang bisa dikerjakan paralel oleh Frontend Developer dan Backend Developer.',
                 'Kembalikan JSON tepat: {"tasks":[{"title":"...","description":"...","assignee":"frontend-developer","files":["path/relatif/file.php"]}, ...]}.',
                 'Aturan: 1-6 task; assignee hanya "frontend-developer" atau "backend-developer"; files = daftar file yang kemungkinan diubah/dibuat (boleh kosong bila belum jelas); description konkret dan bisa dieksekusi.',

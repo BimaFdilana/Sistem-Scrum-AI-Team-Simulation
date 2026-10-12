@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\Agents\AgentSoul;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 use Throwable;
@@ -50,6 +51,10 @@ class AgentProfileClient
             $agent['description'],
             ChatDisclosurePolicy::SAFE_RESPONSE,
         );
+        $soulLine = AgentSoul::promptLine($slug);
+        if ($soulLine !== '') {
+            $systemPrompt .= "\n\n".$soulLine;
+        }
 
         return app(AgentConsultationDispatcher::class)->send($slug, $message, $conversationId, $systemPrompt);
     }

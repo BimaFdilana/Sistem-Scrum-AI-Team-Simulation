@@ -6,6 +6,7 @@ use App\Models\ChatConversation;
 use App\Models\ExecutionRun;
 use App\Services\ChatDisclosurePolicy;
 use App\Services\HermesClient;
+use App\Support\Agents\AgentSoul;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -89,7 +90,8 @@ class MergeExecutionJob implements ShouldQueue
                 'agent_profile' => 'scrum-master',
             ]);
         }
-        $prompt = 'Sebagai Scrum Master, buat ringkasan progress eksekusi user story untuk PO. Singkat, tanpa informasi internal.'
+        $prompt = AgentSoul::promptLine('scrum-master')."\n\n"
+            .'Sebagai Scrum Master, buat ringkasan progress eksekusi user story untuk PO. Singkat, tanpa informasi internal.'
             ."\nStory: ".$run->story->display_id.' — '.$run->story->effectiveTitle()
             ."\nTask selesai:\n".$taskLines;
         try {
