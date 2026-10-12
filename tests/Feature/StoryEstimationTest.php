@@ -56,7 +56,7 @@ class StoryEstimationTest extends TestCase
         $this->assertDatabaseCount('story_estimation_agent_runs', 6);
         $this->assertDatabaseCount('story_estimation_messages', 18);
         $this->assertStringContainsString('ketiganya setuju 5 poin', ChatMessage::query()->where('role', 'assistant')->value('content'));
-        Http::assertSentCount(7);
+        Http::assertSentCount(8);
         $this->get('/agents/backend-developer/activity')->assertOk()->assertSee('REFINEMENT FIBONACCI');
     }
 

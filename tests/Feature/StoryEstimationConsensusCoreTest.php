@@ -288,7 +288,7 @@ class StoryEstimationConsensusCoreTest extends TestCase
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
-        $sm->shouldReceive('sendMessage')->once()->withArgs(function ($prompt) {
+        $sm->shouldReceive('sendMessage')->twice()->withArgs(function ($prompt) {
             $this->assertStringContainsString('Analisis nyata qa-engineer putaran 2', $prompt);
 
             return true;
@@ -331,7 +331,7 @@ class StoryEstimationConsensusCoreTest extends TestCase
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
-        $sm->shouldReceive('sendMessage')->once()->andReturn('Laporan berdasar bukti.');
+        $sm->shouldReceive('sendMessage')->twice()->andReturn('Laporan berdasar bukti.');
         $this->app->instance(HermesClient::class, $sm);
 
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
@@ -362,7 +362,7 @@ class StoryEstimationConsensusCoreTest extends TestCase
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
-        $sm->shouldReceive('sendMessage')->once()->andReturn('Laporan final.');
+        $sm->shouldReceive('sendMessage')->twice()->andReturn('Laporan final.');
         $this->app->instance(HermesClient::class, $sm);
 
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
@@ -387,7 +387,7 @@ class StoryEstimationConsensusCoreTest extends TestCase
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
-        $sm->shouldReceive('sendMessage')->once()->andReturn('Ringkasan deadlock: maksimum 8.');
+        $sm->shouldReceive('sendMessage')->twice()->andReturn('Ringkasan deadlock: maksimum 8.');
         $this->app->instance(HermesClient::class, $sm);
 
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
@@ -417,7 +417,7 @@ class StoryEstimationConsensusCoreTest extends TestCase
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
-        $sm->shouldReceive('sendMessage')->twice()->andReturnUsing(function ($prompt) {
+        $sm->shouldReceive('sendMessage')->times(3)->andReturnUsing(function ($prompt) {
             static $calls = 0;
             $this->assertStringContainsString('Penilaian scope backend-developer', $prompt);
 
@@ -459,7 +459,7 @@ class StoryEstimationConsensusCoreTest extends TestCase
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
-        $sm->shouldReceive('sendMessage')->once()->andReturn('Ringkasan: maksimum 5.');
+        $sm->shouldReceive('sendMessage')->twice()->andReturn('Ringkasan: maksimum 5.');
         $this->app->instance(HermesClient::class, $sm);
 
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
@@ -555,7 +555,7 @@ class StoryEstimationConsensusCoreTest extends TestCase
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
-        $sm->shouldReceive('sendMessage')->once()->andReturn('Laporan dua poin.');
+        $sm->shouldReceive('sendMessage')->twice()->andReturn('Laporan dua poin.');
         $this->app->instance(HermesClient::class, $sm);
         $service = app(StoryEstimationService::class);
 
@@ -579,7 +579,7 @@ class StoryEstimationConsensusCoreTest extends TestCase
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
-        $sm->shouldReceive('sendMessage')->once()->andReturn('Tim sepakat lima poin.');
+        $sm->shouldReceive('sendMessage')->twice()->andReturn('Tim sepakat lima poin.');
         $this->app->instance(HermesClient::class, $sm);
 
         $run = app(StoryEstimationService::class)->estimate($story, $owner);

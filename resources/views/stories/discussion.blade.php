@@ -13,6 +13,64 @@
     @if (! $schemaReady)
         <p class="notice-bar" role="status">Diskusi tim menunggu migrasi database estimasi. Tidak ada pesan yang dibuat-buat.</p>
     @else
+        <section class="story-version" aria-labelledby="story-version-heading">
+            <style>
+                .story-tab-buttons { display: flex; gap: .5rem; }
+                .story-tab-button { padding: .45rem 1rem; border-radius: 999px; border: 1px solid var(--border, #d7dbe3); background: transparent; cursor: pointer; font: inherit; }
+                .story-tab-button.is-active { background: var(--accent, #1a73e8); color: #fff; border-color: transparent; }
+                .story-field { margin: .9rem 0; }
+                .story-field > dt { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; opacity: .65; margin-bottom: .25rem; }
+                .story-field > dd { margin: 0; white-space: pre-line; }
+            </style>
+            <div class="team-discussion-toolbar">
+                <div>
+                    <p class="section-kicker">USER STORY</p>
+                    <h2 id="story-version-heading">Versi User Story</h2>
+                    <p class="section-description">Bandingkan data asli dengan hasil akhir diskusi dari Scrum Master. Eksekusi memakai versi <strong>{{ $story->hasRefinement() ? 'Hasil Diskusi SM' : 'Data Asli' }}</strong>.</p>
+                </div>
+                <div class="story-tab-buttons" role="tablist" aria-label="Versi user story">
+                    <button type="button" role="tab" class="story-tab-button is-active" data-story-tab="original" aria-selected="true">Data Asli</button>
+                    <button type="button" role="tab" class="story-tab-button" data-story-tab="refined" aria-selected="false">Hasil Diskusi SM</button>
+                </div>
+            </div>
+            <div data-story-panel="original" role="tabpanel">
+                <dl>
+                    <div class="story-field"><dt>Saya Ingin (Fitur)</dt><dd>{{ $story->title }}</dd></div>
+                    <div class="story-field"><dt>Agar (Tujuan)</dt><dd>{{ $story->sprint_purpose ?? '—' }}</dd></div>
+                    <div class="story-field"><dt>Acceptance Criteria</dt><dd>{{ $story->acceptance_criteria ?? '—' }}</dd></div>
+                    <div class="story-field"><dt>Aktor</dt><dd>{{ $story->actor?->name ?? '—' }}</dd></div>
+                </dl>
+            </div>
+            <div data-story-panel="refined" role="tabpanel" hidden>
+                @if ($story->hasRefinement())
+                    <p class="notice-bar">Disempurnakan Scrum Master dari Run #{{ $story->refined_from_run_id }} · {{ $story->refined_at?->format('d M Y H:i') }}</p>
+                    <dl>
+                        <div class="story-field"><dt>Saya Ingin (Fitur)</dt><dd>{{ $story->refined_title }}</dd></div>
+                        <div class="story-field"><dt>Agar (Tujuan)</dt><dd>{{ $story->refined_purpose ?? '—' }}</dd></div>
+                        <div class="story-field"><dt>Acceptance Criteria</dt><dd>{{ $story->refined_acceptance_criteria ?? '—' }}</dd></div>
+                    </dl>
+                @else
+                    <p class="notice-bar">Belum ada hasil diskusi. Versi final dari Scrum Master akan muncul di sini setelah laporan kesepakatan tersimpan.</p>
+                @endif
+            </div>
+            <script>
+                (function () {
+                    const buttons = document.querySelectorAll('[data-story-tab]');
+                    const panels = document.querySelectorAll('[data-story-panel]');
+                    buttons.forEach(function (button) {
+                        button.addEventListener('click', function () {
+                            buttons.forEach(function (b) { b.classList.remove('is-active'); b.setAttribute('aria-selected', 'false'); });
+                            panels.forEach(function (p) { p.hidden = true; });
+                            button.classList.add('is-active');
+                            button.setAttribute('aria-selected', 'true');
+                            const panel = document.querySelector('[data-story-panel="' + button.dataset.storyTab + '"]');
+                            if (panel) panel.hidden = false;
+                        });
+                    });
+                })();
+            </script>
+        </section>
+
         <section class="team-discussion-shell" aria-labelledby="fibonacci-heading">
             <div class="team-discussion-toolbar">
                 <div>

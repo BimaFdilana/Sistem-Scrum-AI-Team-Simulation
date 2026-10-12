@@ -24,6 +24,11 @@ class Story extends Model
         'estimate_points',
         'scope_status',
         'revision',
+        'refined_title',
+        'refined_purpose',
+        'refined_acceptance_criteria',
+        'refined_at',
+        'refined_from_run_id',
     ];
 
     protected static function booted(): void
@@ -40,6 +45,15 @@ class Story extends Model
             ])) {
                 $story->estimate_points = null;
             }
+            if ($story->isDirty('revision')) {
+                // Hasil diskusi milik revisi lama; reset agar estimasi & diskusi baru
+                // menghasilkan versi refined yang baru.
+                $story->refined_title = null;
+                $story->refined_purpose = null;
+                $story->refined_acceptance_criteria = null;
+                $story->refined_at = null;
+                $story->refined_from_run_id = null;
+            }
         });
     }
 
@@ -50,7 +64,34 @@ class Story extends Model
             'revision' => 'integer',
             'scope_approved_revision' => 'integer',
             'scope_approved_at' => 'datetime',
+            'refined_at' => 'datetime',
         ];
+    }
+
+    /** Versi refined (hasil diskusi SM) menjadi acuan eksekusi bila tersedia. */
+    public function hasRefinement(): bool
+    {
+        return $this->refined_title !== null;
+    }
+
+    public function effectiveTitle(): string
+    {
+        return $this->refined_title ?? $this->title;
+    }
+
+    public function effectivePurpose(): ?string
+    {
+        return $this->refined_purpose ?? $this->sprint_purpose;
+    }
+
+    public function effectiveAcceptanceCriteria(): ?string
+    {
+        return $this->refined_acceptance_criteria ?? $this->acceptance_criteria;
+    }
+
+    public function refinedFromRun(): BelongsTo
+    {
+        return $this->belongsTo(StoryEstimationRun::class, 'refined_from_run_id');
     }
 
     public function actor(): BelongsTo

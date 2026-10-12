@@ -90,7 +90,7 @@ class MergeExecutionJob implements ShouldQueue
             ]);
         }
         $prompt = 'Sebagai Scrum Master, buat ringkasan progress eksekusi user story untuk PO. Singkat, tanpa informasi internal.'
-            ."\nStory: ".$run->story->display_id.' — '.$run->story->title
+            ."\nStory: ".$run->story->display_id.' — '.$run->story->effectiveTitle()
             ."\nTask selesai:\n".$taskLines;
         try {
             $text = trim($scrumMaster->sendMessage($prompt, $conversation->uuid));

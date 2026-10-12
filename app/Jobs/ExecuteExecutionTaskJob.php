@@ -68,7 +68,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                 $task->status === 'REVISION' && $task->qa_feedback
                     ? 'REVISI (putaran '.($task->revision_count + 1).'): perbaiki berdasarkan feedback QA berikut, lalu kirim ulang SEMUA file yang berubah: '.$task->qa_feedback
                     : 'Task: '.$task->title.' — '.$task->description,
-                'Story: '.$run->story->title.' | Kriteria: '.$run->story->acceptance_criteria,
+                'Story: '.$run->story->effectiveTitle().' | Kriteria: '.$run->story->effectiveAcceptanceCriteria(),
             ]);
             $raw = $agents->sendMessage($task->assignee, $prompt, 'execution-'.$run->id.'-task-'.$task->id.'-r'.$task->revision_count);
             $patch = $this->validatedPatch($raw);

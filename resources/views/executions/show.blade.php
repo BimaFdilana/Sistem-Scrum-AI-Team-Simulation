@@ -4,8 +4,8 @@
 <div class="page-head">
     <div>
         <p class="section-kicker">EKSEKUSI USER STORY</p>
-        <h1>{{ $story->display_id }} — {{ $story->title }}</h1>
-        <p>Estimasi: {{ $story->estimate_points }} poin · Status: <strong>{{ str_replace('_', ' ', $run->status) }}</strong></p>
+        <h1>{{ $story->display_id }} — {{ $story->effectiveTitle() }}</h1>
+        <p>Estimasi: {{ $story->estimate_points }} poin · Versi: <strong>{{ $story->hasRefinement() ? 'Hasil Diskusi SM' : 'Data Asli' }}</strong> · Status: <strong>{{ str_replace('_', ' ', $run->status) }}</strong></p>
     </div>
     <a class="button button-ghost" href="{{ route('projects.sprint-backlog.index', $story->project) }}">← Kembali</a>
 </div>

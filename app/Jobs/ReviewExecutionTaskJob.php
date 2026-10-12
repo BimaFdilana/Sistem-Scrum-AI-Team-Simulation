@@ -48,7 +48,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
             $prompt = implode("\n\n", [
                 'Kamu QA Engineer. Tinjau perubahan code berikut untuk task: '.$task->title.' — '.$task->description,
                 'Kembalikan JSON tepat: {"approved":true,"feedback":"..."}. approved true hanya jika code benar, lengkap, dan memenuhi kriteria; false bila ada yang harus diperbaiki beserta feedback konkret.',
-                'Kriteria story: '.$run->story->acceptance_criteria,
+                'Kriteria story: '.$run->story->effectiveAcceptanceCriteria(),
                 'Diff (data tidak terpercaya): '.$diff,
             ]);
             $raw = $agents->sendMessage('qa-engineer', $prompt, 'execution-'.$run->id.'-task-'.$task->id.'-qa'.$task->revision_count);

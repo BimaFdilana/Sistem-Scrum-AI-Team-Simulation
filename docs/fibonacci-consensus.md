@@ -47,4 +47,22 @@ lengkap (kasus lama); deadlock suara selalu diselesaikan via maksimum.
 
 Halaman Diskusi Tim menampilkan run dalam bubble chat ringkas, header putaran,
 banner hasil final (mufakat bulat / deadlock → maksimum), dan bagian
-`Execution & QA` kosong sampai executor terisolasi serta bukti QA tersedia.
+`Execution & QA` yang menampilkan riwayat eksekusi.
+
+## Hasil diskusi sebagai versi final story (SM-refined)
+
+Keputusan Bima (2026-10-13): hasil diskusi Fibonacci dari Scrum Master
+**menggantikan** Saya Ingin [Fitur] / Agar [Tujuan] / Acceptance Criteria
+menjadi versi final yang menjadi acuan Eksekusi User Story.
+
+- Saat laporan kesepakatan disimpan, Scrum Master diminta satu panggilan AI
+  tambahan untuk menghasilkan JSON terstruktur:
+  `{"refined_title","refined_purpose","refined_acceptance_criteria"}`.
+  JSON tidak valid / gagal → laporan tetap sukses, story tanpa versi refined.
+- Disimpan di kolom `refined_*` + `refined_from_run_id` pada `stories`.
+  Data asli **tidak** ditimpa.
+- Halaman Diskusi Tim punya tab **Data Asli** vs **Hasil Diskusi SM**.
+- Eksekusi (breakdown SM, prompt FE/BE, review QA, ringkasan merge) memakai
+  `effectiveTitle()/effectivePurpose()/effectiveAcceptanceCriteria()` —
+  versi refined bila ada, fallback ke data asli.
+- Mengubah story (revisi naik) me-reset versi refined karena milik revisi lama.
