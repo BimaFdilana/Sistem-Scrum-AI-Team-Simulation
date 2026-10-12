@@ -83,6 +83,11 @@ class Story extends Model
         return $this->hasMany(StoryEstimationRun::class)->latest('id');
     }
 
+    public function executionRuns(): HasMany
+    {
+        return $this->hasMany(ExecutionRun::class)->latest('id');
+    }
+
     public function tasks(): HasMany
     {
         return $this->hasMany(Task::class);

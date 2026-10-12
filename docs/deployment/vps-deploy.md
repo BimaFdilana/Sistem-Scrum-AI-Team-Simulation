@@ -1,15 +1,13 @@
 # Deploy ScrumSpace ke VPS Pribadi (Docker)
 
-Panduan ini memasang **Laravel + CLIProxyAPI** di VPS dengan satu perintah.
-Arsitektur: 3 container — `app` (website), `worker` (antrean job), `cliproxy`
-(gateway OAuth AI). HTTPS otomatis bila kamu punya domain.
+Satu perintah: `./deploy.sh`. Script ini mengecek Docker, membuat `.env`,
+mengisi secret otomatis, lalu build + jalan. Aman dijalankan ulang untuk update.
 
 ## 1. Prasyarat
 
-- VPS Ubuntu 22.04/24.04 (1 vCPU, 2 GB RAM cukup untuk pribadi).
-- (Opsional tapi disarankan) Domain yang A-record-nya mengarah ke IP VPS,
-  mis. `scrum.namadomain.com` — untuk HTTPS otomatis.
-- Port **80** dan **443** terbuka di firewall VPS.
+- VPS Ubuntu 22.04/24.04 (2 vCPU, 4 GB RAM disarankan — scaffold Laravel butuh memori).
+- (Opsional) Domain dengan A-record ke IP VPS untuk HTTPS otomatis.
+- Port **80**, **443**, dan **9110–9130** (demo project) terbuka di firewall.
 
 ## 2. Install Docker di VPS
 
@@ -17,47 +15,20 @@ Arsitektur: 3 container — `app` (website), `worker` (antrean job), `cliproxy`
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
 # logout lalu login lagi agar grup docker aktif
-docker --version
-docker compose version
 ```
 
-## 3. Ambil source & siapkan konfigurasi
+## 3. Deploy
 
 ```bash
 git clone https://github.com/BimaFdilana/Sistem-Scrum-AI-Team-Simulation.git scrumspace
 cd scrumspace
-cp .env.docker.example .env
-nano .env
+./deploy.sh
 ```
 
-Isi yang wajib di `.env`:
-
-| Variabel | Isi |
-|---|---|
-| `APP_DOMAIN` | Domain kamu (mis. `scrum.namadomain.com`) — kosongkan bila akses via IP (HTTP saja) |
-| `APP_URL` | `https://scrum.namadomain.com` (atau `http://<ip-vps>`) |
-| `WORKSPACE_ADMIN_EMAIL` / `WORKSPACE_ADMIN_PASSWORD` | Login admin pertama (password min. 14 karakter) |
-| `CLIPROXY_MANAGEMENT_KEY` | String acak, mis. hasil `openssl rand -hex 16` |
-| `CLIPROXY_API_KEY` | String acak lain, mis. hasil `openssl rand -hex 16` |
-
-`APP_KEY` boleh dikosongkan — dibuat otomatis saat pertama jalan
-(lihat log `app`, lalu salin ke `.env` agar permanen).
-
-## 4. Jalankan
-
-```bash
-docker compose up -d --build
-```
-
-Tunggu ±1 menit (build pertama mengunduh image + install dependency),
-lalu cek:
-
-```bash
-docker compose ps
-docker compose logs -f app   # lihat proses migrasi & APP_KEY bila di-generate
-```
-
-Buka `http://<ip-vps>` atau `https://<domain>` → halaman login muncul.
+Script akan meminta kamu mengisi `WORKSPACE_ADMIN_EMAIL` dan
+`WORKSPACE_ADMIN_PASSWORD` di `.env` bila belum ada (secret lain dibuat
+otomatis). Buka `http://<ip-vps>` atau `https://<domain>` bila `APP_DOMAIN`
+diisi di `.env`.
 
 ## 5. Hubungkan AI Provider (OAuth)
 
@@ -78,7 +49,7 @@ container di-restart.
 ```bash
 cd scrumspace
 git pull
-docker compose up -d --build
+./deploy.sh
 ```
 
 ## 7. Backup

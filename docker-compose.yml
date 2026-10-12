@@ -24,6 +24,7 @@ services:
       - "80:80"
       - "443:443"
       - "443:443/udp" # HTTP/3 (opsional)
+      - "9110-9130:9110-9130" # demo project sementara (satu port per project)
     volumes:
       - app-database:/app/database
       - app-storage:/app/storage

@@ -15,6 +15,10 @@ RUN npm run build
 # ---- Tahap 2: aplikasi ----
 FROM dunglas/frankenphp:1-php8.5
 
+# Tool sistem: git (worktree/clone), unzip (composer), posix (demo server)
+RUN apt-get update && apt-get install -y --no-install-recommends git unzip \
+    && rm -rf /var/lib/apt/lists/*
+
 # Ekstensi PHP yang dibutuhkan Laravel + SQLite
 RUN install-php-extensions \
     pdo_sqlite \
@@ -25,7 +29,8 @@ RUN install-php-extensions \
     bcmath \
     intl \
     opcache \
-    pcntl
+    pcntl \
+    posix
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 

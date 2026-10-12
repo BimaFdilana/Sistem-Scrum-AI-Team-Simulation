@@ -78,7 +78,17 @@
                                 <p class="estimation-stale">Poin lama belum terbukti sebagai kesepakatan tim untuk revisi ini; Eksekusi tetap terkunci.</p>
                             @endif
                             <a class="button button-ghost" href="{{ route('stories.discussion.show', $story) }}">Lihat Diskusi Tim</a>
-                            <button class="button button-ghost" type="button" disabled title="Executor project terisolasi dan persetujuan scope belum tersedia">Eksekusi User Story — belum tersedia</button>
+                            @php($latestExecution = $story->relationLoaded('executionRuns') ? $story->executionRuns->first() : null)
+                            @if ($agreed && $latestExecution && $latestExecution->isActive())
+                                <a class="button button-ghost" href="{{ route('stories.executions.show', [$story, $latestExecution]) }}">Lihat Eksekusi ({{ str_replace('_', ' ', $latestExecution->status) }})</a>
+                            @elseif ($agreed)
+                                <form method="POST" action="{{ route('stories.executions.store', $story) }}" style="display:inline">@csrf<button class="button button-primary" type="submit" onclick="return confirm('Mulai eksekusi user story ini? Scrum Master akan memecah menjadi task dan meminta izin sebelum agen mengubah code.')">Eksekusi User Story</button></form>
+                                @if ($latestExecution)
+                                    <a class="button button-ghost" href="{{ route('stories.executions.show', [$story, $latestExecution]) }}">Riwayat Eksekusi</a>
+                                @endif
+                            @else
+                                <button class="button button-ghost" type="button" disabled title="Eksekusi terkunci sampai estimasi Fibonacci disepakati">Eksekusi User Story — terkunci</button>
+                            @endif
                             @if ($estimationSchemaReady && $sprint->status === 'PLANNING')
                                 <div class="story-estimation-panel">
                                     <form method="POST" action="{{ route('stories.estimations.store', $story) }}" data-fibonacci-form data-story-label="{{ $story->display_id }}">

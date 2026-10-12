@@ -372,7 +372,7 @@ class StoryEstimationConsensusCoreTest extends TestCase
         $this->assertSame(6, $run->agentRuns()->count());
     }
 
-    public function test_disagreement_runs_three_complete_rounds_without_assigning_point(): void
+    public function test_deadlock_applies_maximum_point_and_reports(): void
     {
         [$story, $owner] = $this->story();
         $prompts = [];
@@ -387,14 +387,16 @@ class StoryEstimationConsensusCoreTest extends TestCase
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
-        $sm->shouldNotReceive('sendMessage');
+        $sm->shouldReceive('sendMessage')->once()->andReturn('Ringkasan deadlock: maksimum 8.');
         $this->app->instance(HermesClient::class, $sm);
 
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
 
-        $this->assertSame('NO_CONSENSUS', $run->status);
-        $this->assertNull($run->consensus_points);
-        $this->assertNull($story->fresh()->estimate_points);
+        // Keputusan Bima 2026-10-13 (opsi B): deadlock -> SM terapkan maksimum.
+        $this->assertSame('COMPLETED', $run->status);
+        $this->assertSame(8, $run->consensus_points);
+        $this->assertSame('deadlock_max', $run->consensus_method);
+        $this->assertSame(8, $story->fresh()->estimate_points);
         $this->assertSame(6, $run->agentRuns()->count());
         $this->assertSame(18, $run->messages()->count());
         $this->assertStringContainsString('Alasan qa-engineer ronde 1', $prompts['backend-developer'][1]);
@@ -439,11 +441,11 @@ class StoryEstimationConsensusCoreTest extends TestCase
         $this->assertSame(6, $reported->agentRuns()->count());
         $this->assertSame(18, $reported->messages()->count());
         $this->assertSame(1, ChatMessage::query()->count());
-        $this->assertSame('Berat', StoryEstimationService::category(8));
+        $this->assertSame('Sedang', StoryEstimationService::category(8));
         $this->assertSame('Ringan', StoryEstimationService::category(2));
     }
 
-    public function test_equal_points_without_explicit_agreement_do_not_create_consensus(): void
+    public function test_equal_points_without_explicit_agreement_resolve_via_maximum(): void
     {
         [$story, $owner] = $this->story();
         $agents = Mockery::mock(AgentProfileClient::class);
@@ -457,14 +459,16 @@ class StoryEstimationConsensusCoreTest extends TestCase
         });
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
-        $sm->shouldNotReceive('sendMessage');
+        $sm->shouldReceive('sendMessage')->once()->andReturn('Ringkasan: maksimum 5.');
         $this->app->instance(HermesClient::class, $sm);
 
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
 
-        $this->assertSame('NO_CONSENSUS', $run->status);
-        $this->assertNull($run->consensus_points);
-        $this->assertNull($story->fresh()->estimate_points);
+        // Tanpa explicit_agree bulat = deadlock -> maksimum (keputusan Bima).
+        $this->assertSame('COMPLETED', $run->status);
+        $this->assertSame(5, $run->consensus_points);
+        $this->assertSame('deadlock_max', $run->consensus_method);
+        $this->assertSame(5, $story->fresh()->estimate_points);
     }
 
     public function test_stale_story_prevents_report_retry_and_never_sets_points(): void

@@ -28,6 +28,9 @@ class StoryController extends Controller
         if ($estimationSchemaReady) {
             $storyRelations[] = 'stories.estimationRuns.agentRuns';
         }
+        if (Schema::hasTable('execution_runs')) {
+            $storyRelations[] = 'stories.executionRuns';
+        }
 
         return view('stories.index', [
             'project' => $project->load('backlog'),

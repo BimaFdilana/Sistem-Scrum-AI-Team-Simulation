@@ -60,7 +60,7 @@ class StoryEstimationTest extends TestCase
         $this->get('/agents/backend-developer/activity')->assertOk()->assertSee('REFINEMENT FIBONACCI');
     }
 
-    public function test_no_consensus_after_three_rounds_never_sets_point_or_fabricates_report(): void
+    public function test_deadlock_applies_maximum_and_queues_sm_report(): void
     {
         $this->configureEstimationProfiles();
         Http::fake(function (Request $request) {
@@ -88,12 +88,14 @@ class StoryEstimationTest extends TestCase
         [$owner, $project, $story] = $this->makeStory();
         $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs')
             ->assertRedirect('/projects/'.$project->id.'/sprint-backlog')->assertSessionHas('status');
-        $this->assertDatabaseHas('story_estimation_runs', ['story_id' => $story->id, 'status' => 'NO_CONSENSUS', 'consensus_points' => null]);
+        // Deadlock (3/5/8 tanpa persetujuan bulat) -> SM terapkan maksimum = 8.
+        // Laporan SM gagal (HTTP 500) sehingga run bertahan REPORT_PENDING untuk retry.
+        $this->assertDatabaseHas('story_estimation_runs', ['story_id' => $story->id, 'status' => 'REPORT_PENDING', 'consensus_points' => 8, 'consensus_method' => 'deadlock_max']);
         $this->assertDatabaseCount('story_estimation_agent_runs', 6);
         $this->assertDatabaseCount('story_estimation_messages', 18);
         $this->assertNull($story->fresh()->estimate_points);
         $this->assertDatabaseCount('chat_messages', 0);
-        Http::assertSentCount(6);
+        Http::assertSentCount(7);
     }
 
     public function test_backlog_shows_read_only_discussion_and_hides_manual_point_selection(): void

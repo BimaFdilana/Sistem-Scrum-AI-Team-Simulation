@@ -36,7 +36,23 @@
         </article>
     </section>
 
-    <section class="notice-bar project-gate"><span class="notice-icon">i</span><p><strong>Agent execution masih terkunci.</strong> Isolasi Git worktree per task belum diverifikasi. Chat AI Agent tidak memberi izin kepada agent untuk mengubah source project.</p></section>
+    <section class="notice-bar project-gate"><span class="notice-icon">i</span><p><strong>Demo &amp; unduhan project.</strong> Jalankan demo sementara untuk melihat hasil, atau unduh workspace sebagai ZIP.</p></section>
+
+    <section class="empty-panel">
+        <div class="panel-heading"><div><p class="section-kicker">DEMO PROJECT</p><h2>Pratinjau sementara</h2></div>
+        @if ($demo)
+            <span class="soft-badge">Berjalan · port {{ $demo->port }}</span>
+        @endif
+        </div>
+        @if ($demo && $demoUrl)
+            <p>Demo aktif di <a href="{{ $demoUrl }}" target="_blank" rel="noopener">{{ $demoUrl }}</a> · berhenti otomatis {{ $demo->expires_at?->format('H:i') }}.</p>
+            <form method="POST" action="{{ route('projects.demo.stop', $project) }}">@csrf<button class="button button-ghost" type="submit">Hentikan demo</button></form>
+        @else
+            <p>Jalankan project di server demo sementara (port unik per project).</p>
+            <form method="POST" action="{{ route('projects.demo.start', $project) }}">@csrf<button class="button button-primary" type="submit">Jalankan demo</button></form>
+        @endif
+        <p style="margin-top:12px"><a class="button button-ghost" href="{{ route('projects.download', $project) }}">Download project (ZIP)</a></p>
+    </section>
 
     <section class="backlog-launch empty-panel">
         <div class="panel-heading"><div><p class="section-kicker">SPRINT BACKLOG</p><h2>{{ $project->stories_count }} User Story</h2></div><span class="soft-badge">PO approval required</span></div>

@@ -7,6 +7,7 @@ use App\Jobs\ImportGithubProjectJob;
 use App\Jobs\ScaffoldLaravelProjectJob;
 use App\Models\Project;
 use App\Services\PublicGithubRepositoryService;
+use App\Support\Demo\DemoServerManager;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -63,10 +64,14 @@ class ProjectController extends Controller
                 : 'Project Laravel baru sedang dibuat di latar belakang.');
     }
 
-    public function show(Project $project): View
+    public function show(Project $project, DemoServerManager $demos): View
     {
+        $demo = $demos->runningFor($project);
+
         return view('projects.show', [
             'project' => $project->loadCount('stories'),
+            'demo' => $demo,
+            'demoUrl' => $demo ? $demos->url($demo, request()->getHost()) : null,
             'activePage' => 'projects',
         ]);
     }
