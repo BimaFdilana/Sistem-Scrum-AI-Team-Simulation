@@ -44,6 +44,10 @@ class PublicGithubRepositoryService
             throw new RuntimeException('Branch GitHub tidak valid.');
         }
 
+        // Pra-periksa SEBELUM clone penuh (diskusi Bima 2026-10-13): pastikan
+        // repository adalah project Laravel tanpa mengunduh seluruh source.
+        $this->assertLaravelRepository($url, $branch);
+
         $this->run([
             'git', '-c', 'credential.helper=', 'clone', '--depth', '1', '--no-tags', '--branch', $branch, $url, $root,
         ], base_path());
@@ -65,6 +69,35 @@ class PublicGithubRepositoryService
                 'source_error' => null,
             ])->save();
         });
+    }
+
+    /**
+     * Pra-periksa SEBELUM clone penuh: clone sangat ringan (shallow + sparse,
+     * hanya file di root tanpa isi blob direktori) lalu verifikasi composer.json
+     * memakai laravel/framework. Direktori sementara selalu dibersihkan.
+     */
+    private function assertLaravelRepository(string $url, string $branch): void
+    {
+        $tmp = storage_path('app/private/project-workspaces/.precheck-'.uniqid('', true));
+        try {
+            File::ensureDirectoryExists($tmp, 0700);
+            $this->run([
+                'git', '-c', 'credential.helper=', 'clone',
+                '--depth', '1', '--no-tags', '--filter=blob:none', '--sparse',
+                '--branch', $branch, $url, $tmp,
+            ], base_path());
+            $composerPath = $tmp.'/composer.json';
+            if (! File::exists($composerPath)) {
+                throw new RuntimeException('Repository bukan project Laravel: composer.json tidak ditemukan di root.');
+            }
+            $composer = json_decode((string) File::get($composerPath), true);
+            $requires = array_merge($composer['require'] ?? [], $composer['require-dev'] ?? []);
+            if (! is_array($composer) || ! isset($requires['laravel/framework'])) {
+                throw new RuntimeException('Repository bukan project Laravel: laravel/framework tidak ditemukan di composer.json.');
+            }
+        } finally {
+            File::deleteDirectory($tmp);
+        }
     }
 
     private function assertLaravelProject(string $root): void
@@ -94,11 +127,21 @@ class PublicGithubRepositoryService
     private function run(array $command, string $cwd): string
     {
         $descriptor = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-        $process = proc_open($command, $descriptor, $pipes, $cwd, [
+        // proc_open menimpa environment: teruskan PATH + proxy agar git tetap
+        // bisa keluar lewat egress proxy bila ada (tanpa ini clone selalu gagal).
+        $env = [
             'GIT_TERMINAL_PROMPT' => '0',
             'GIT_CONFIG_NOSYSTEM' => '1',
             'GIT_CONFIG_GLOBAL' => '/dev/null',
-        ]);
+            'PATH' => getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin',
+        ];
+        foreach (['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'no_proxy', 'NO_PROXY'] as $key) {
+            $value = getenv($key);
+            if ($value !== false) {
+                $env[$key] = $value;
+            }
+        }
+        $process = proc_open($command, $descriptor, $pipes, $cwd, $env);
         if (! is_resource($process)) {
             throw new RuntimeException('Git command tidak dapat dijalankan.');
         }

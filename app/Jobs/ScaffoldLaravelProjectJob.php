@@ -92,11 +92,21 @@ class ScaffoldLaravelProjectJob implements ShouldBeUnique, ShouldQueue
     private function run(array $command, string $cwd): string
     {
         $descriptor = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-        $process = proc_open($command, $descriptor, $pipes, $cwd, [
+        // proc_open menimpa environment: teruskan PATH, HOME, dan proxy agar
+        // composer tetap ditemukan dan bisa mengunduh paket lewat proxy bila ada.
+        $env = [
             'COMPOSER_NO_INTERACTION' => '1',
             // Worker dapat berjalan sebagai root (VPS/VM); izinkan eksplisit.
             'COMPOSER_ALLOW_SUPERUSER' => '1',
-        ]);
+            'PATH' => getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin',
+        ];
+        foreach (['HOME', 'http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'no_proxy', 'NO_PROXY'] as $key) {
+            $value = getenv($key);
+            if ($value !== false) {
+                $env[$key] = $value;
+            }
+        }
+        $process = proc_open($command, $descriptor, $pipes, $cwd, $env);
         if (! is_resource($process)) {
             throw new RuntimeException('Composer tidak dapat dijalankan di server.');
         }
