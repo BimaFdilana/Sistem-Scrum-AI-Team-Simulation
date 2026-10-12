@@ -38,10 +38,11 @@ class StoryEstimationService
 
     public static function category(int $point): string
     {
+        // Disepakati Bima (2026-10-13): 1,2,3 = Ringan; 5,8 = Sedang; 13 = Berat.
         return match ($point) {
-            1, 2 => 'Ringan',
-            3, 5 => 'Sedang',
-            8, 13 => 'Berat',
+            1, 2, 3 => 'Ringan',
+            5, 8 => 'Sedang',
+            13 => 'Berat',
             default => throw new RuntimeException('Invalid Fibonacci story point.'),
         };
     }
@@ -99,10 +100,16 @@ class StoryEstimationService
                 return;
             }
             $responses = $locked->messages()->where('round', self::MAX_DISCUSSION_ROUNDS)->where('recipient_slug', 'scrum-master')->get();
-            if ($responses->count() === 3 && $responses->pluck('estimate_points')->unique()->count() === 1
-                && $responses->every(fn ($message) => $message->explicit_agree === true)
-                && $this->receivedPriorRound($locked, self::MAX_DISCUSSION_ROUNDS)) {
-                $locked->forceFill(['consensus_points' => $responses->first()->estimate_points, 'status' => 'REPORT_PENDING'])->save();
+            if ($responses->count() === 3 && $this->receivedPriorRound($locked, self::MAX_DISCUSSION_ROUNDS)) {
+                if ($responses->pluck('estimate_points')->unique()->count() === 1
+                    && $responses->every(fn ($message) => $message->explicit_agree === true)) {
+                    // Mufakat bulat: ketiga spesialis sepakat pada satu angka.
+                    $locked->forceFill(['consensus_points' => $responses->first()->estimate_points, 'consensus_method' => 'unanimous', 'status' => 'REPORT_PENDING'])->save();
+                } else {
+                    // Deadlock (keputusan Bima 2026-10-13, opsi B): Scrum Master
+                    // merangkum hasil dan menerapkan nilai MAKSIMUM sebagai estimasi teraman.
+                    $locked->forceFill(['consensus_points' => $responses->max('estimate_points'), 'consensus_method' => 'deadlock_max', 'status' => 'REPORT_PENDING'])->save();
+                }
                 $reportRunId = $locked->id;
             } else {
                 $locked->forceFill(['status' => 'NO_CONSENSUS', 'completed_at' => now()])->save();
@@ -285,14 +292,24 @@ class StoryEstimationService
                     }
                 }
             }
-            if ($round === self::MAX_DISCUSSION_ROUNDS && count(array_unique(array_column($responses, 'estimate_points'))) === 1
-                && count(array_filter($responses, fn ($data) => $data['explicit_agree'] === true)) === 3
+            if ($round === self::MAX_DISCUSSION_ROUNDS && count($responses) === count(self::SPECIALISTS)
                 && $this->receivedPriorRound($run, $round)) {
                 if (! $this->current($run, $snapshot)) {
                     return $this->finish($run, 'STALE');
                 }
+                if (count(array_unique(array_column($responses, 'estimate_points'))) === 1
+                    && count(array_filter($responses, fn ($data) => $data['explicit_agree'] === true)) === 3) {
+                    // Mufakat bulat: ketiga spesialis sepakat pada satu angka.
+                    $points = reset($responses)['estimate_points'];
+                    $method = 'unanimous';
+                } else {
+                    // Deadlock (keputusan Bima 2026-10-13, opsi B): nilai MAKSIMUM
+                    // sebagai estimasi teraman, dirangkum Scrum Master ke PO.
+                    $points = max(array_column($responses, 'estimate_points'));
+                    $method = 'deadlock_max';
+                }
                 $transitioned = StoryEstimationRun::query()->whereKey($run->id)->where('status', 'RUNNING')
-                    ->update(['consensus_points' => reset($responses)['estimate_points'], 'status' => 'REPORT_PENDING']);
+                    ->update(['consensus_points' => $points, 'consensus_method' => $method, 'status' => 'REPORT_PENDING']);
                 if ($transitioned !== 1) {
                     return $run->fresh(['agentRuns', 'messages']);
                 }
@@ -411,10 +428,20 @@ class StoryEstimationService
                     'point' => $message->estimate_points,
                     'explicit_agree' => $message->explicit_agree,
                 ])->all();
-                $prompt = 'Sebagai Scrum Master, laporkan konsensus Fibonacci kepada PO berdasarkan transkrip asli berikut. '
+                // Scrum Master mengumpulkan hasil tiap spesialis lalu merangkumnya
+                // untuk PO (keputusan Bima 2026-10-13).
+                $finalVotes = $locked->messages()->where('round', self::MAX_DISCUSSION_ROUNDS)
+                    ->where('recipient_slug', 'scrum-master')->orderBy('id')->get()
+                    ->map(fn ($message) => $message->sender_slug.' = '.$message->estimate_points.' poin')->implode('; ');
+                $methodText = $locked->consensus_method === 'deadlock_max'
+                    ? 'Deadlock setelah '.self::MAX_DISCUSSION_ROUNDS.' putaran tanpa mufakat bulat, sehingga Scrum Master menerapkan aturan MAKSIMUM (estimasi teraman) sesuai kesepakatan.'
+                    : 'Mufakat bulat: ketiga spesialis sepakat setelah diskusi.';
+                $prompt = 'Sebagai Scrum Master, kumpulkan hasil estimasi Fibonacci berikut dan rangkum untuk PO berdasarkan transkrip asli. '
                     .'Jangan mengarang diskusi, poin, atau persetujuan. Berikan laporan singkat tanpa informasi internal.'
                     ."\nStory: ".json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
-                    ."\nKonsensus: ".$locked->consensus_points.' ('.self::category($locked->consensus_points).')'
+                    ."\nHasil final: ".$locked->consensus_points.' poin ('.self::category($locked->consensus_points).')'
+                    ."\nCara hasil dicapai: ".$methodText
+                    ."\nEstimasi final tiap spesialis: ".$finalVotes
                     ."\nTranskrip: ".json_encode($transcript, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
                 $summary = trim($this->scrumMaster->sendMessage($prompt, $conversation->uuid));
                 if ($summary === '' || mb_strlen($summary) > 6000
@@ -425,10 +452,13 @@ class StoryEstimationService
                 if (! $this->current($locked) || $sprint->fresh()?->status !== 'PLANNING') {
                     throw new RuntimeException('Sprint or story changed during report.');
                 }
+                $methodLabel = $locked->consensus_method === 'deadlock_max'
+                    ? 'Deadlock — Scrum Master menerapkan maksimum'
+                    : 'Mufakat bulat tim';
                 $conversation->messages()->create([
                     'role' => 'assistant',
                     'content' => 'Refinement Fibonacci — '.$snapshot['story_id'].' · revisi '.$snapshot['revision']
-                        ."\nKonsensus: ".$locked->consensus_points.' poin ('.self::category($locked->consensus_points).")\n"
+                        ."\nHasil final: ".$locked->consensus_points.' poin ('.self::category($locked->consensus_points).') · '.$methodLabel."\n"
                         .$summary,
                 ]);
                 $conversation->touch();
@@ -569,7 +599,7 @@ class StoryEstimationService
 
         return mb_substr(implode("\n\n", [
             'KONFIRMASI FINAL PUTARAN '.self::MAX_DISCUSSION_ROUNDS.': baca ringkasan perbedaan dari putaran sebelumnya dan kandidat berikut, lalu konfirmasi kandidat yang sama setelah membaca diskusi.',
-            'Pilih tepat satu kandidat dari daftar. Jangan biarkan Scrum Master memilih, menghitung rata-rata, atau mengganti poin.',
+            'Pilih tepat satu kandidat dari daftar. Jika ketiga spesialis tidak mencapai mufakat bulat, Scrum Master akan mengumpulkan hasil, merangkumnya, dan menerapkan nilai MAKSIMUM sebagai estimasi teraman — jadi pilih angka yang benar-benar kamu yakini.',
             'Kembalikan JSON tepat {"estimate_points":5,"explicit_agree":true,"rationale":"alasan singkat","response":"tanggapan singkat terhadap evidence tim"}. explicit_agree TRUE hanya jika kamu benar-benar mengonfirmasi kandidat yang sama sebagai kesepakatan final; selain itu FALSE.',
             'Kandidat Fibonacci: ['.implode(',', $points).']',
             'Ringkasan perbedaan berbasis bukti nyata putaran sebelumnya (teks dipotong aman): '.$summary,
@@ -603,8 +633,18 @@ class StoryEstimationService
         foreach ([self::MAX_DISCUSSION_ROUNDS] as $round) {
             $entries = $run->messages()->where('round', $round)
                 ->where('recipient_slug', 'scrum-master')->get();
-            if ($entries->count() !== 3 || $entries->pluck('sender_slug')->unique()->count() !== 3
-                || $entries->pluck('estimate_points')->unique()->all() !== [$run->consensus_points]
+            if ($entries->count() !== 3 || $entries->pluck('sender_slug')->unique()->count() !== 3) {
+                continue;
+            }
+            if ($run->consensus_method === 'deadlock_max') {
+                // Deadlock: bukti = tiga estimasi final asli; poin final = maksimumnya.
+                if ($entries->max('estimate_points') === $run->consensus_points
+                    && $this->receivedPriorRound($run, $round)) {
+                    return true;
+                }
+                continue;
+            }
+            if ($entries->pluck('estimate_points')->unique()->all() !== [$run->consensus_points]
                 || $entries->contains(fn ($message) => $message->explicit_agree !== true)) {
                 continue;
             }

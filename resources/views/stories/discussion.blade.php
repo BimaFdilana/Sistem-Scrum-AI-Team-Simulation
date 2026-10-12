@@ -63,9 +63,9 @@
                     @endif
 
                     @if ($run->status === 'COMPLETED' && $run->consensus_points)
-                        <p class="discussion-banner"><strong>Poin Fibonacci final: {{ $run->consensus_points }}</strong> · Laporan Scrum Master tersimpan.</p>
+                        <p class="discussion-banner"><strong>Poin Fibonacci final: {{ $run->consensus_points }}</strong> · {{ $run->consensus_method === 'deadlock_max' ? 'Deadlock — Scrum Master menerapkan nilai maksimum.' : 'Mufakat bulat tim.' }} Laporan Scrum Master tersimpan.</p>
                     @elseif ($run->status === 'NO_CONSENSUS')
-                        <p class="discussion-banner discussion-banner--danger"><strong>NO_CONSENSUS</strong> · Dua putaran selesai tanpa tiga persetujuan eksplisit yang sama.</p>
+                        <p class="discussion-banner discussion-banner--danger"><strong>NO_CONSENSUS</strong> · Bukti final tidak lengkap; run lama ini tidak menghasilkan poin.</p>
                     @elseif (in_array($run->status, ['FAILED', 'PARTIAL'], true))
                         <p class="discussion-banner discussion-banner--danger">Diskusi berhenti sebelum selesai. Gunakan Retry untuk membuat run baru.</p>
                     @else

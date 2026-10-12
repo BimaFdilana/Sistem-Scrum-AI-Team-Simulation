@@ -1,25 +1,50 @@
-# ScrumSpace — Protokol konsensus Fibonacci
+# ScrumSpace — Protokol estimasi Fibonacci
 
-## Kontrak tiga putaran
+Keputusan Bima (2026-10-13): kesepakatan (mufakat) antar-spesialis, Scrum Master
+mengumpulkan hasil dan merangkumnya untuk PO; poin Fibonacci murni
+`1, 2, 3, 5, 8, 13`; mapping `1,2,3 = Ringan`, `5,8 = Sedang`, `13 = Berat`.
 
-- **Putaran 1 — independen:** Backend, Frontend, dan QA memilih satu poin keseluruhan story dari `1, 2, 3, 5, 8, 13` dan memberi alasan singkat.
-- **Putaran 2 — debat:** setiap spesialis membaca pesan nyata putaran 1 yang lengkap, lalu mengirim JSON ketat `estimate_points`, `rationale`, `response`, dan boolean `explicit_agree`. Pesan peer disimpan sebagai bukti nyata.
-- **Putaran 3 — konfirmasi final:** layanan membangun satu ringkasan deterministik dari evidence putaran 1/2 dan kandidat poin yang benar-benar muncul. Ringkasan, kandidat, snapshot story, dan instruksi final yang sama dikirim identik ke ketiga spesialis. Layanan tidak memilih, merata-ratakan, atau memakai Scrum Master untuk memilih poin.
+## Kontrak dua putaran
 
-Format putaran 3 adalah tepat:
+- **Putaran 1 — independen:** Backend, Frontend, dan QA masing-masing memilih satu
+  poin keseluruhan story dari `[1,2,3,5,8,13]` (validasi ketat: angka di luar
+  daftar ditolak) beserta alasan singkat. Estimasi independen, tanpa melihat
+  pendapat spesialis lain.
+- **Putaran 2 — konfirmasi final:** setiap spesialis membaca pesan nyata putaran 1
+  yang lengkap dari ketiga spesialis, menanggapi/counterargument, lalu
+  mempertahankan atau merevisi poinnya. Respons JSON ketat:
+  `estimate_points`, `rationale`, `response`, dan boolean `explicit_agree`
+  (`true` hanya bila secara tegas menyetujui poinnya sebagai kesepakatan bersama;
+  tidak pernah diinferensikan dari teks).
 
-```json
-{"estimate_points":5,"explicit_agree":true,"rationale":"alasan singkat"}
-```
+Pesan peer (salinan tiap respons ke dua spesialis lain) disimpan sebagai bukti
+nyata di database dan menjadi dasar prompt putaran 2.
 
-`explicit_agree` tidak pernah diinferensikan dari teks. Konsensus hanya sah bila ketiga respons putaran 3 memilih poin Fibonacci identik, ketiganya `explicit_agree: true`, dan masing-masing telah menerima pertukaran putaran 2. Jika tidak, run berakhir `NO_CONSENSUS` setelah tiga putaran; tidak ada fallback manual PO, Scrum Master, maksimum, atau rata-rata.
+## Hasil final: mufakat, lalu Scrum Master merangkum
 
-## Evidence dan batas tampilan
+Setelah putaran 2 selesai dan buktinya lengkap (tiga respons asli + pertukaran
+peer putaran 1):
 
-Pesan asli setiap respons serta salinan peer tetap disimpan persis di database. Untuk prompt berikutnya, layanan merapikan whitespace dan memotong tiap excerpt secara aman; ringkasan final juga memiliki batas total. Batas prompt tidak mengubah evidence database atau transkrip laporan. UI hanya menampilkan peran, putaran, poin, status agreement, waktu, serta rationale/response singkat—bukan prompt, JSON mentah, atau chain-of-thought.
+- **Mufakat bulat** — ketiga spesialis memilih poin identik dan ketiganya
+  `explicit_agree: true` → poin tersebut menjadi hasil final
+  (`consensus_method = 'unanimous'`).
+- **Deadlock** — tidak mufakat bulat → Scrum Master menerapkan nilai **MAKSIMUM**
+  dari tiga estimasi final sebagai estimasi teraman
+  (`consensus_method = 'deadlock_max'`). Ini satu-satunya fallback; tidak ada
+  rata-rata atau pilihan manual PO.
+
+Scrum Master kemudian **mengumpulkan hasil tiap spesialis dan merangkumnya**
+untuk PO via chat: hasil final + kategori kompleksitas + cara hasil dicapai
+(mufakat bulat / deadlock → maksimum) + estimasi final tiap spesialis.
+Ringkasan tidak mengarang diskusi, poin, atau persetujuan.
 
 ## Status dan pelaporan
 
-Run yang mencapai konsensus masuk `REPORT_PENDING`. Scrum Master hanya membuat laporan berdasarkan evidence dan tidak mengubah poin. Story point dan laporan ditulis atomik; kegagalan laporan mempertahankan evidence untuk retry tanpa mengulang spesialis. Run tanpa konsensus tidak mengubah story.
+Run yang mencapai hasil final masuk `REPORT_PENDING`. Story point dan laporan
+ditulis atomik; kegagalan laporan mempertahankan evidence untuk retry tanpa
+mengulang spesialis. Status `NO_CONSENSUS` hanya untuk bukti final yang tidak
+lengkap (kasus lama); deadlock suara selalu diselesaikan via maksimum.
 
-Halaman Diskusi Tim requester-scoped menampilkan run milik requester dalam bubble chat ringkas, header putaran `x/3`, banner final atau `NO_CONSENSUS`, dan bagian `Execution & QA` kosong sampai executor terisolasi serta bukti QA tersedia. Tidak ada migrasi aktif atau perubahan pada run historis yang gagal.
+Halaman Diskusi Tim menampilkan run dalam bubble chat ringkas, header putaran,
+banner hasil final (mufakat bulat / deadlock → maksimum), dan bagian
+`Execution & QA` kosong sampai executor terisolasi serta bukti QA tersedia.

@@ -16,6 +16,7 @@ class StoryEstimationRun extends Model
         'status',
         'summary',
         'consensus_points',
+        'consensus_method',
         'report_sent_at',
         'approved_points',
         'approved_by',

@@ -72,7 +72,7 @@
                             @php($latestEstimationRun = $estimationSchemaReady ? $story->estimationRuns->first() : null)
                             @php($agreed = $latestEstimationRun && $latestEstimationRun->story_revision === $story->revision && $latestEstimationRun->status === 'COMPLETED' && $latestEstimationRun->report_sent_at && $latestEstimationRun->consensus_points === $story->estimate_points)
                             @if ($agreed)
-                                @php($size = in_array($story->estimate_points, [1, 2], true) ? 'Ringan' : (in_array($story->estimate_points, [3, 5], true) ? 'Sedang' : 'Berat'))
+                                @php($size = \App\Services\StoryEstimationService::category($story->estimate_points))
                                 <p class="story-estimate-final"><strong>Poin Fibonacci final · Hasil kesepakatan tim:</strong> {{ $story->estimate_points }} ({{ $size }})</p>
                             @elseif ($story->estimate_points)
                                 <p class="estimation-stale">Poin lama belum terbukti sebagai kesepakatan tim untuk revisi ini; Eksekusi tetap terkunci.</p>
