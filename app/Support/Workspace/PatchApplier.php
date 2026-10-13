@@ -18,9 +18,11 @@ class PatchApplier
     public const MAX_FILE_BYTES = 512000; // 500 KB per file
 
     /**
+     * @param  bool  $allowDelete  false untuk perintah perbaikan: penghapusan file
+     *                            ditolak di level sistem (guardrail anti-destruktif).
      * @return string[] path yang berhasil diterapkan (relatif)
      */
-    public function apply(string $worktreePath, array $files): array
+    public function apply(string $worktreePath, array $files, bool $allowDelete = true): array
     {
         $real = realpath($worktreePath);
         if ($real === false || ! is_dir($real)) {
@@ -32,13 +34,13 @@ class PatchApplier
 
         $applied = [];
         foreach ($files as $index => $file) {
-            $applied[] = $this->applyOne($real, $file, $index);
+            $applied[] = $this->applyOne($real, $file, $index, $allowDelete);
         }
 
         return $applied;
     }
 
-    private function applyOne(string $realWorktree, mixed $file, int $index): string
+    private function applyOne(string $realWorktree, mixed $file, int $index, bool $allowDelete): string
     {
         if (! is_array($file)) {
             throw new RuntimeException("Patch #{$index} bukan array.");
@@ -46,6 +48,9 @@ class PatchApplier
         $action = $file['action'] ?? null;
         if (! in_array($action, ['create', 'update', 'delete'], true)) {
             throw new RuntimeException("Patch #{$index}: action tidak valid.");
+        }
+        if ($action === 'delete' && ! $allowDelete) {
+            throw new RuntimeException("Patch #{$index}: penghapusan file tidak diizinkan pada perintah perbaikan.");
         }
         $relative = $this->safeRelativePath($file['path'] ?? null, $index);
         $target = $realWorktree.DIRECTORY_SEPARATOR.$relative;

@@ -3,14 +3,18 @@
 namespace App\Http\Controllers;
 
 use App\Models\ChatConversation;
+use App\Models\Project;
+use App\Models\RepairOrder;
 use App\Services\ChatDisclosurePolicy;
 use App\Services\HermesClient;
+use App\Services\RepairOrderDetector;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
 use RuntimeException;
+use Throwable;
 
 class ChatController extends Controller
 {
@@ -97,6 +101,16 @@ class ChatController extends Controller
             return $this->messageResponse($conversation, $userMessage, $assistantMessage);
         }
 
+        // Deteksi perintah perbaikan SEBELUM chat biasa: SM mengklasifikasikan
+        // pesan PO, menampilkan ringkasan + tombol konfirmasi. Tidak ada yang
+        // dieksekusi otomatis dari chat.
+        $repair = $this->maybeDetectRepairOrder($hermes, $conversation, $userMessage);
+        if ($repair !== null) {
+            return $this->messageResponse($conversation, $userMessage, $repair['assistant_message'], [
+                'repair_order' => $repair['card'],
+            ]);
+        }
+
         try {
             $content = $hermes->sendMessage($userMessage->content, $conversation->uuid, $image);
         } catch (RuntimeException) {
@@ -131,12 +145,95 @@ class ChatController extends Controller
         return $agent;
     }
 
-    private function messageResponse(ChatConversation $conversation, $userMessage, $assistantMessage): JsonResponse
+    private function messageResponse(ChatConversation $conversation, $userMessage, $assistantMessage, array $extra = []): JsonResponse
     {
-        return response()->json([
+        return response()->json(array_merge([
             'conversation_id' => $conversation->uuid,
             'user_message' => ['role' => $userMessage->role, 'content' => $userMessage->content],
             'assistant_message' => ['role' => $assistantMessage->role, 'content' => $assistantMessage->content],
+        ], $extra));
+    }
+
+    /**
+     * @return array{assistant_message: \App\Models\ChatMessage, card: array}|null
+     */
+    private function maybeDetectRepairOrder(HermesClient $hermes, ChatConversation $conversation, $userMessage): ?array
+    {
+        $detector = app(RepairOrderDetector::class);
+        $text = (string) $userMessage->content;
+
+        if (! $detector->looksLikeCommand($text)) {
+            return null;
+        }
+        $projects = Project::query()->orderBy('name')->get();
+        if ($projects->isEmpty()) {
+            return null;
+        }
+
+        try {
+            $result = $detector->classify($hermes, $text, $projects->pluck('name')->all());
+        } catch (Throwable) {
+            return null; // fail-safe: lanjut sebagai chat biasa
+        }
+        if (! $result['is_repair_order']) {
+            return null;
+        }
+
+        $project = $detector->resolveProject($result['project_name'], $projects);
+        if ($project === null && $projects->count() === 1) {
+            $project = $projects->first();
+        }
+        $needsProject = $project === null; // >1 project & tak disebut -> SM tanya dulu
+
+        $order = RepairOrder::query()->create([
+            'requested_by' => $conversation->user_id,
+            'project_id' => $project?->id,
+            'title' => $result['title'] !== '' ? $result['title'] : Str::limit(trim($text), 80, ''),
+            'summary' => $result['summary'] !== '' ? $result['summary'] : trim($text),
+            'original_message' => trim($text),
+            'scope_risk' => $result['risky'],
+            'risk_note' => $result['risk_note'],
+            'status' => 'DRAFT',
+            'conversation_uuid' => $conversation->uuid,
         ]);
+
+        $lines = [
+            'Saya mendeteksi ini sebagai PERINTAH PERBAIKAN (bukan pertanyaan biasa).',
+            '',
+            'Ringkasan: '.$order->title,
+            $order->summary,
+        ];
+        if ($order->scope_risk) {
+            $lines[] = '';
+            $lines[] = 'Peringatan: perintah ini terdeteksi berisiko — '.($order->risk_note ?? 'mohon periksa cakupannya.').' Saya hanya akan menjalankan bagian yang aman.';
+        }
+        if ($needsProject) {
+            $lines[] = '';
+            $lines[] = 'Project mana yang dimaksud? Pilih di bawah, lalu tekan Konfirmasi.';
+        } else {
+            $lines[] = '';
+            $lines[] = 'Project: '.$project->name.'. Tekan Konfirmasi untuk menyimpan perintah ini ke menu Perintah Perbaikan, atau Batalkan bila saya salah mengenali.';
+        }
+
+        $assistantMessage = $conversation->messages()->create([
+            'role' => 'assistant',
+            'content' => implode("\n", $lines),
+        ]);
+        $conversation->touch();
+
+        return [
+            'assistant_message' => $assistantMessage,
+            'card' => [
+                'id' => $order->id,
+                'title' => $order->title,
+                'summary' => $order->summary,
+                'project_id' => $project?->id,
+                'project_name' => $project?->name,
+                'needs_project' => $needsProject,
+                'projects' => $projects->map(fn (Project $p) => ['id' => $p->id, 'name' => $p->name])->all(),
+                'risky' => $order->scope_risk,
+                'risk_note' => $order->risk_note,
+            ],
+        ];
     }
 }

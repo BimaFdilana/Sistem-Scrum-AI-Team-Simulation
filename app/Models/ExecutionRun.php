@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 class ExecutionRun extends Model
 {
     protected $fillable = [
-        'story_id', 'requested_by', 'status', 'summary', 'error_code', 'completed_at',
+        'story_id', 'repair_order_id', 'requested_by', 'status', 'summary', 'error_code', 'completed_at',
     ];
 
     protected function casts(): array
@@ -21,6 +21,44 @@ class ExecutionRun extends Model
     public function story(): BelongsTo
     {
         return $this->belongsTo(Story::class);
+    }
+
+    public function repairOrder(): BelongsTo
+    {
+        return $this->belongsTo(RepairOrder::class);
+    }
+
+    /** Project target eksekusi: dari story atau dari perintah perbaikan. */
+    public function project(): ?Project
+    {
+        return $this->story?->project ?? $this->repairOrder?->project;
+    }
+
+    /** Label subjek untuk judul/permintaan izin ("US-3 — ..." atau "Perintah #2 — ..."). */
+    public function subjectLabel(): string
+    {
+        if ($this->story) {
+            return $this->story->display_id.' — '.$this->story->effectiveTitle();
+        }
+        if ($this->repairOrder) {
+            return 'Perintah #'.$this->repairOrder->id.' — '.$this->repairOrder->title;
+        }
+
+        return 'Eksekusi #'.$this->id;
+    }
+
+    public function subjectTitle(): string
+    {
+        return $this->story?->effectiveTitle()
+            ?? $this->repairOrder?->title
+            ?? 'Eksekusi #'.$this->id;
+    }
+
+    public function subjectCriteria(): string
+    {
+        return $this->story?->effectiveAcceptanceCriteria()
+            ?? $this->repairOrder?->summary
+            ?? '-';
     }
 
     public function requester(): BelongsTo
@@ -53,5 +91,23 @@ class ExecutionRun extends Model
     public function isTerminal(): bool
     {
         return in_array($this->status, ['COMPLETED', 'BLOCKED'], true);
+    }
+
+    protected static function booted(): void
+    {
+        // Sinkronkan status perintah perbaikan saat execution run-nya terminal.
+        static::updated(function (ExecutionRun $run): void {
+            if (! $run->wasChanged('status') || ! $run->repair_order_id) {
+                return;
+            }
+            $orderStatus = [
+                'COMPLETED' => 'COMPLETED',
+                'BLOCKED' => 'BLOCKED',
+                'FAILED' => 'FAILED',
+            ][$run->status] ?? null;
+            if ($orderStatus !== null) {
+                $run->repairOrder?->forceFill(['status' => $orderStatus])->save();
+            }
+        });
     }
 }

@@ -13,7 +13,7 @@ class PermissionRequestController extends Controller
     public function index(): View
     {
         $requests = PermissionRequest::query()
-            ->with(['run.story', 'requester'])
+            ->with(['run.story', 'run.repairOrder', 'requester'])
             ->orderByRaw("CASE WHEN status = 'PENDING' THEN 0 ELSE 1 END")
             ->latest()
             ->paginate(20);

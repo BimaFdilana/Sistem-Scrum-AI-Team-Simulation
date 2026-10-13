@@ -36,11 +36,16 @@ class MergeExecutionJob implements ShouldQueue
         HermesClient $scrumMaster,
         ChatDisclosurePolicy $disclosure,
     ): void {
-        $run = ExecutionRun::query()->with(['tasks', 'story.project'])->find($this->runId);
+        $run = ExecutionRun::query()->with(['tasks', 'story.project', 'repairOrder.project'])->find($this->runId);
         if (! $run || $run->status !== 'MERGING') {
             return;
         }
-        $baseline = $run->story->project->workspace_path;
+        $baseline = $run->project()?->workspace_path;
+        if (! $baseline) {
+            $run->forceFill(['status' => 'BLOCKED', 'error_code' => 'WORKSPACE_MISSING', 'completed_at' => now()])->save();
+
+            return;
+        }
 
         try {
             foreach ($run->tasks as $task) {
@@ -86,13 +91,13 @@ class MergeExecutionJob implements ShouldQueue
             $conversation = ChatConversation::query()->create([
                 'user_id' => $run->requested_by,
                 'uuid' => (string) Str::uuid(),
-                'title' => 'Eksekusi '.$run->story->display_id,
+                'title' => 'Eksekusi '.$run->subjectLabel(),
                 'agent_profile' => 'scrum-master',
             ]);
         }
         $prompt = AgentSoul::promptLine('scrum-master')."\n\n"
-            .'Sebagai Scrum Master, buat ringkasan progress eksekusi user story untuk PO. Singkat, tanpa informasi internal.'
-            ."\nStory: ".$run->story->display_id.' — '.$run->story->effectiveTitle()
+            .'Sebagai Scrum Master, buat ringkasan progress eksekusi untuk PO. Singkat, tanpa informasi internal.'
+            ."\nSubjek: ".$run->subjectLabel()
             ."\nTask selesai:\n".$taskLines;
         try {
             $text = trim($scrumMaster->sendMessage($prompt, $conversation->uuid));
@@ -103,7 +108,7 @@ class MergeExecutionJob implements ShouldQueue
             }
             $conversation->messages()->create([
                 'role' => 'assistant',
-                'content' => 'Eksekusi '.$run->story->display_id." selesai.\n".$text,
+                'content' => 'Eksekusi '.$run->subjectLabel()." selesai.\n".$text,
             ]);
             $conversation->touch();
 

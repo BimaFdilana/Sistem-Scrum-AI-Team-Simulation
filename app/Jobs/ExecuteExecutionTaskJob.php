@@ -44,8 +44,8 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             || ! in_array($run->status, ['EXECUTING', 'REVIEWING'], true)) {
             return;
         }
-        $project = $run->story->project;
-        $baseline = $project->workspace_path;
+        $project = $run->project();
+        $baseline = $project?->workspace_path;
         if (! $baseline || ! is_dir($baseline)) {
             $this->failRun($run, $task, 'WORKSPACE_MISSING');
 
@@ -64,16 +64,18 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             $prompt = implode("\n\n", [
                 "Kamu {$assigneeName}. Kerjakan task berikut pada project Laravel.",
                 'Kembalikan JSON tepat: {"files":[{"path":"relatif/ke/file.php","action":"create|update|delete","content":"isi lengkap file"}],"summary":"ringkasan perubahan"}.',
-                'Aturan: path relatif dari root project, tanpa .. atau path absolut; action delete tanpa content; maksimal '.PatchApplier::MAX_FILES.' file; tulis code lengkap yang valid, bukan potongan; JANGAN sertakan penjelasan di luar JSON.',
+                'Aturan: path relatif dari root project, tanpa .. atau path absolut; action delete tanpa content; maksimal '.PatchApplier::MAX_FILES.' file; tulis code lengkap yang valid, bukan potongan; JANGAN sertakan penjelasan di luar JSON.'
+                    .($run->repair_order_id ? ' BATASAN PERINTAH PERBAIKAN: dilarang menghapus file (action delete) dan dilarang operasi destruktif terhadap data; lakukan hanya perubahan minimal yang aman.' : ''),
                 $task->status === 'REVISION' && $task->qa_feedback
                     ? 'REVISI (putaran '.($task->revision_count + 1).'): perbaiki berdasarkan feedback QA berikut, lalu kirim ulang SEMUA file yang berubah: '.$task->qa_feedback
                     : 'Task: '.$task->title.' — '.$task->description,
-                'Story: '.$run->story->effectiveTitle().' | Kriteria: '.$run->story->effectiveAcceptanceCriteria(),
+                'Tugas dari: '.$run->subjectTitle().' | Kriteria: '.$run->subjectCriteria(),
             ]);
             $raw = $agents->sendMessage($task->assignee, $prompt, 'execution-'.$run->id.'-task-'.$task->id.'-r'.$task->revision_count);
             $patch = $this->validatedPatch($raw);
 
-            $applied = $patcher->apply($worktree, $patch['files']);
+            // Guardrail perintah perbaikan: penegakan di level sistem, bukan cuma prompt.
+            $applied = $patcher->apply($worktree, $patch['files'], $run->repair_order_id === null);
             $worktrees->commit($worktree, 'Task #'.$task->id.': '.$task->title);
 
             $run->messages()->create([

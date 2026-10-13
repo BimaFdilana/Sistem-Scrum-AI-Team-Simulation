@@ -47,7 +47,11 @@
                 @else
                     <small> diproses {{ $request->resolved_at?->format('d M Y H:i') }}</small>
                 @endif
-                <a class="button button-ghost" href="{{ route('stories.executions.show', [$request->run->story, $request->run]) }}">Lihat eksekusi</a>
+                @if ($request->run->repair_order_id)
+                    <a class="button button-ghost" href="{{ route('repair-orders.executions.show', [$request->run->repairOrder, $request->run]) }}">Lihat eksekusi</a>
+                @else
+                    <a class="button button-ghost" href="{{ route('stories.executions.show', [$request->run->story, $request->run]) }}">Lihat eksekusi</a>
+                @endif
             </div>
         </article>
     @empty
