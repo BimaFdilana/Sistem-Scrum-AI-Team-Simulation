@@ -32,7 +32,7 @@
             @csrf
             <input type="hidden" id="conversationId" value="{{ $conversation?->uuid }}">
             <label class="sr-only" for="chatInput">Pesan untuk {{ $agent['name'] }}</label>
-            <textarea id="chatInput" rows="3" maxlength="8000" placeholder="Tulis pesan untuk {{ $agent['name'] }}…" required {{ $chatAvailable ? '' : 'disabled' }}></textarea>
+            <textarea id="chatInput" rows="3" maxlength="8000" placeholder="Tulis pesan untuk {{ $agent['name'] }}… (Enter untuk kirim, Shift+Enter baris baru)" required {{ $chatAvailable ? '' : 'disabled' }}></textarea>
             <div class="chat-composer-footer">
                 <span id="chatError" class="chat-error" role="status">{{ $chatAvailable ? 'Percakapan tersimpan di workspace.' : 'Chat AI Agent belum tersedia. Pesan belum dapat dikirim.' }}</span>
                 <button class="button button-primary" id="chatSend" type="submit" {{ $chatAvailable ? '' : 'disabled' }}>
@@ -67,6 +67,41 @@
                 article.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             };
 
+            const showTyping = () => {
+                hideTyping();
+                document.getElementById('chatEmpty')?.remove();
+                const article = document.createElement('article');
+                article.className = 'chat-message chat-message-assistant';
+                article.id = 'chatTyping';
+                const label = document.createElement('span');
+                label.className = 'chat-message-label';
+                label.textContent = agentName;
+                const typing = document.createElement('span');
+                typing.className = 'chat-typing';
+                const dots = document.createElement('span');
+                dots.className = 'chat-typing-dots';
+                dots.setAttribute('aria-hidden', 'true');
+                dots.append(document.createElement('i'), document.createElement('i'), document.createElement('i'));
+                const text = document.createElement('span');
+                text.textContent = 'sedang menyiapkan jawaban…';
+                typing.append(dots, text);
+                article.append(label, typing);
+                transcript.append(article);
+                article.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            };
+
+            const hideTyping = () => {
+                document.getElementById('chatTyping')?.remove();
+            };
+
+            // Enter = kirim, Shift+Enter = baris baru.
+            input.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    form.requestSubmit();
+                }
+            });
+
             form.addEventListener('submit', async (event) => {
                 event.preventDefault();
                 const message = input.value.trim();
@@ -75,6 +110,7 @@
                 addMessage('user', message);
                 input.value = '';
                 sendButton.disabled = true;
+                showTyping();
                 error.textContent = `${agentName} sedang menyiapkan jawaban…`;
 
                 try {
@@ -94,9 +130,11 @@
                     if (!response.ok) throw new Error(payload.message || 'Pesan gagal dikirim.');
 
                     conversationId.value = payload.conversation_id;
+                    hideTyping();
                     addMessage('assistant', payload.assistant_message.content);
                     error.textContent = 'Percakapan tersimpan di workspace.';
                 } catch (exception) {
+                    hideTyping();
                     error.textContent = exception.message || 'Koneksi gagal. Coba lagi.';
                 } finally {
                     sendButton.disabled = false;
