@@ -127,20 +127,79 @@ class CliProxyApiClient
     }
 
     /**
-     * Disable (disconnect) a linked account by its auth-file name.
+     * Enable/disable a linked account by its auth-file name.
      */
-    public function disableAccount(string $name): bool
+    public function setAccountDisabled(string $name, bool $disabled): bool
     {
         try {
             $response = $this->management()->patch('/auth-files/status', [
                 'name' => $name,
-                'disabled' => true,
+                'disabled' => $disabled,
             ]);
 
             return $response->successful();
         } catch (Throwable) {
             return false;
         }
+    }
+
+    /** Disable (disconnect) a linked account by its auth-file name. */
+    public function disableAccount(string $name): bool
+    {
+        return $this->setAccountDisabled($name, true);
+    }
+
+    /**
+     * Find the linked account file belonging to a provider slug
+     * (e.g. 'codex', 'antigravity', 'claude').
+     */
+    public function accountForProvider(string $provider): ?array
+    {
+        foreach ($this->accounts()['files'] ?? [] as $account) {
+            if (! is_array($account)) {
+                continue;
+            }
+
+            $haystack = implode(' ', array_filter([
+                $account['provider'] ?? null,
+                $account['type'] ?? null,
+                $account['kind'] ?? null,
+                $account['name'] ?? null,
+                $account['id'] ?? null,
+            ]));
+
+            if ($haystack !== '' && stripos($haystack, $provider) !== false) {
+                return $account;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Tunggu sampai akun provider benar-benar aktif di gateway (ada dan
+     * tidak disabled). Pertukaran kode OAuth bisa berjalan asinkron di
+     * gateway, jadi "callback diterima" belum berarti "akun terhubung".
+     */
+    public function waitForAccountEnabled(string $provider, int $timeoutSeconds = 30, int $intervalSeconds = 3): bool
+    {
+        $deadline = time() + max(0, $timeoutSeconds);
+
+        do {
+            $account = $this->accountForProvider($provider);
+
+            if ($account !== null && ! ($account['disabled'] ?? false)) {
+                return true;
+            }
+
+            if (time() >= $deadline) {
+                break;
+            }
+
+            sleep(min($intervalSeconds, $deadline - time()));
+        } while (true);
+
+        return false;
     }
 
     public function enableAccount(string $name): bool

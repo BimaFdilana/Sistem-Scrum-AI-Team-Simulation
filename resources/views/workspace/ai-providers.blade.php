@@ -49,8 +49,15 @@
                     @if ($connected)
                         <form method="POST" action="{{ route('ai-providers.disconnect', ['provider' => $slug]) }}">
                             @csrf
-                            <button class="button" type="submit" onclick="return confirm('Putus akun {{ $meta['label'] }}?')">Putuskan</button>
+                            <button class="button" type="submit" onclick="return confirm('Putus akun {{ $meta['label'] }}? Kamu bisa mengaktifkannya lagi kapan pun.')">Putuskan</button>
                         </form>
+                    @elseif ($account)
+                        {{-- File akun masih tersimpan tapi dinonaktifkan: aktifkan lagi tanpa OAuth ulang. --}}
+                        <form method="POST" action="{{ route('ai-providers.enable', ['provider' => $slug]) }}">
+                            @csrf
+                            <button class="button button-primary" type="submit">Aktifkan kembali</button>
+                        </form>
+                        <a class="button" href="{{ route('ai-providers.connect', ['provider' => $slug]) }}">Hubungkan ulang</a>
                     @else
                         <a class="button button-primary" href="{{ route('ai-providers.connect', ['provider' => $slug]) }}">Hubungkan <span aria-hidden="true">→</span></a>
                     @endif

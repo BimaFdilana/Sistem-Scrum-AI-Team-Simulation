@@ -18,7 +18,7 @@ class AiProviderController extends Controller
 
         $statuses = [];
         foreach (array_keys($providers) as $slug) {
-            $statuses[$slug] = $this->matchAccount($accounts, $slug);
+            $statuses[$slug] = $client->accountForProvider($slug);
         }
 
         return view('workspace.ai-providers', [
@@ -80,8 +80,16 @@ class AiProviderController extends Controller
         }
 
         if ($client->submitCallback($state, $code)) {
-            return redirect()->route('ai-providers.index')
-                ->with('success', $providers[$provider]['label'].' berhasil terhubung.');
+            // Gateway bisa memproses pertukaran kode secara asinkron — pastikan
+            // akunnya benar-benar aktif sebelum mengklaim "berhasil terhubung".
+            if ($client->waitForAccountEnabled($provider)) {
+                return redirect()->route('ai-providers.index')
+                    ->with('success', $providers[$provider]['label'].' berhasil terhubung.');
+            }
+
+            session()->put("ai_provider_state.{$provider}", $state);
+
+            return back()->with('error', 'Kode login diterima, tetapi akun belum aktif di gateway. Kemungkinan kode sudah dipakai atau kedaluwarsa — ulangi proses login dari awal dan tempel URL callback yang baru.');
         }
 
         session()->put("ai_provider_state.{$provider}", $state);
@@ -94,12 +102,11 @@ class AiProviderController extends Controller
         $providers = config('ai.providers', []);
         abort_unless(isset($providers[$provider]), 404);
 
-        $accounts = $client->accounts()['files'] ?? [];
-        $account = $this->matchAccount($accounts, $provider);
+        $account = $client->accountForProvider($provider);
 
         if ($account && isset($account['name']) && $client->disableAccount($account['name'])) {
             return redirect()->route('ai-providers.index')
-                ->with('success', $providers[$provider]['label'].' diputus.');
+                ->with('success', $providers[$provider]['label'].' diputus. Kamu bisa mengaktifkannya lagi kapan pun tanpa login ulang.');
         }
 
         return redirect()->route('ai-providers.index')
@@ -107,28 +114,26 @@ class AiProviderController extends Controller
     }
 
     /**
-     * Find the linked account file belonging to a provider slug.
+     * Aktifkan kembali akun yang pernah diputus — tanpa OAuth ulang.
      */
-    protected function matchAccount(array $accounts, string $provider): ?array
+    public function enable(string $provider, CliProxyApiClient $client): RedirectResponse
     {
-        foreach ($accounts as $account) {
-            if (! is_array($account)) {
-                continue;
-            }
+        $providers = config('ai.providers', []);
+        abort_unless(isset($providers[$provider]), 404);
 
-            $haystack = implode(' ', array_filter([
-                $account['provider'] ?? null,
-                $account['type'] ?? null,
-                $account['kind'] ?? null,
-                $account['name'] ?? null,
-                $account['id'] ?? null,
-            ]));
+        $account = $client->accountForProvider($provider);
 
-            if ($haystack !== '' && stripos($haystack, $provider) !== false) {
-                return $account;
-            }
+        if (! $account || ! isset($account['name'])) {
+            return redirect()->route('ai-providers.index')
+                ->with('error', 'Tidak ada akun tersimpan untuk '.$providers[$provider]['label'].'. Silakan hubungkan dari awal.');
         }
 
-        return null;
+        if ($client->enableAccount($account['name']) && $client->waitForAccountEnabled($provider, 10)) {
+            return redirect()->route('ai-providers.index')
+                ->with('success', $providers[$provider]['label'].' aktif kembali.');
+        }
+
+        return redirect()->route('ai-providers.index')
+            ->with('error', 'Gagal mengaktifkan akun. Coba hubungkan ulang dari awal.');
     }
 }
