@@ -50,6 +50,21 @@ class AiProviderReconnectTest extends TestCase
         $this->assertNull(app(CliProxyApiClient::class)->accountForProvider('antigravity'));
     }
 
+    public function test_account_for_provider_prefers_enabled_over_disabled(): void
+    {
+        Http::fake([
+            $this->mgmt('/auth-files') => Http::response(['files' => [
+                $this->codexFile(true),   // file lama, dinonaktifkan
+                $this->codexFile(false),  // file baru, aktif
+            ]]),
+        ]);
+
+        $account = app(CliProxyApiClient::class)->accountForProvider('codex');
+
+        $this->assertNotNull($account);
+        $this->assertFalse($account['disabled']);
+    }
+
     public function test_wait_for_account_enabled_detects_disabled(): void
     {
         Http::fake([

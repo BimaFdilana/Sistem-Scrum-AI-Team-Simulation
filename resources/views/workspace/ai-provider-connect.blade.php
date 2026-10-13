@@ -26,6 +26,11 @@
         <article class="story-card">
             <div class="story-card-head"><span class="scope-pill">2</span><strong>Tempel URL callback</strong></div>
             <p class="story-description">Setelah menekan Allow, browser akan mencoba membuka halaman <code>localhost</code> dan gagal — itu normal. <strong>Copy seluruh URL</strong> dari address bar (yang mengandung <code>?code=...</code>) lalu tempel di bawah ini.</p>
+            <ul class="story-description" style="margin-top: 0.5rem; padding-left: 1.25rem; list-style: disc;">
+                <li>Tempel <strong>segera</strong> setelah menekan Allow — jangan jeda lama.</li>
+                <li>Pakai URL dari <strong>percobaan ini</strong>; setiap kode hanya berlaku satu kali.</li>
+                <li>Pastikan URL tercopy <strong>sampai akhir</strong>, tidak terpotong.</li>
+            </ul>
             <form method="POST" action="{{ route('ai-providers.callback', ['provider' => $provider]) }}" style="margin-top: 0.75rem;">
                 @csrf
                 <div class="field-group">

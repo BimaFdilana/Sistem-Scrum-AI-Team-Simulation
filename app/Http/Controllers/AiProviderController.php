@@ -58,6 +58,9 @@ class AiProviderController extends Controller
         $providers = config('ai.providers', []);
         abort_unless(isset($providers[$provider]), 404);
 
+        // Verifikasi aktivasi akun bisa menunggu gateway sampai ~30 detik.
+        set_time_limit(60);
+
         $request->validate([
             'callback_url' => ['required', 'string', 'max:4000'],
         ], [

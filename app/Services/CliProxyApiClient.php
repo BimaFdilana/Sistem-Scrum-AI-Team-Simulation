@@ -151,10 +151,13 @@ class CliProxyApiClient
 
     /**
      * Find the linked account file belonging to a provider slug
-     * (e.g. 'codex', 'antigravity', 'claude').
+     * (e.g. 'codex', 'antigravity', 'claude'). Bila ada beberapa file
+     * (mis. file lama yang diputus + file baru), prioritaskan yang aktif.
      */
     public function accountForProvider(string $provider): ?array
     {
+        $fallback = null;
+
         foreach ($this->accounts()['files'] ?? [] as $account) {
             if (! is_array($account)) {
                 continue;
@@ -168,12 +171,18 @@ class CliProxyApiClient
                 $account['id'] ?? null,
             ]));
 
-            if ($haystack !== '' && stripos($haystack, $provider) !== false) {
+            if ($haystack === '' || stripos($haystack, $provider) === false) {
+                continue;
+            }
+
+            if (! ($account['disabled'] ?? false)) {
                 return $account;
             }
+
+            $fallback ??= $account;
         }
 
-        return null;
+        return $fallback;
     }
 
     /**
