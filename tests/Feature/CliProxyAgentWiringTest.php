@@ -88,4 +88,25 @@ class CliProxyAgentWiringTest extends TestCase
         Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v1/chat/completions')
             && $request['model'] === 'claude-opus-4-6');
     }
+
+    public function test_katalog_model_dikelompokkan_per_provider_oauth(): void
+    {
+        $this->fakeGateway([
+            ['id' => 'gpt-5.6-luna', 'owned_by' => 'openai'],
+            ['id' => 'claude-opus-4-6', 'owned_by' => 'anthropic'],
+            ['id' => 'gemini-2.5-pro', 'owned_by' => 'google'],
+        ]);
+
+        $grouped = app(CliProxyApiClient::class)->modelsByProvider();
+
+        $this->assertSame(['gpt-5.6-luna'], $grouped['codex']);
+        $this->assertSame(['claude-opus-4-6'], $grouped['anthropic']);
+        $this->assertSame(['gemini-2.5-pro'], $grouped['google']);
+
+        $catalog = app(\App\Services\AgentModelCatalog::class)->fetch('qa-engineer');
+
+        $this->assertSame('online', $catalog['status']);
+        $this->assertTrue(collect($catalog['providers'])->firstWhere('slug', 'anthropic')['available']);
+        $this->assertContains('claude-opus-4-6', collect($catalog['providers'])->firstWhere('slug', 'anthropic')['models']);
+    }
 }

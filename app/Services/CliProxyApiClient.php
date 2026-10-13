@@ -263,6 +263,53 @@ class CliProxyApiClient
     }
 
     /**
+     * Model IDs dikelompokkan per provider OAuth: anthropic/codex/google.
+     *
+     * @return array<string, list<string>>
+     */
+    public function modelsByProvider(): array
+    {
+        if (! $this->agentsEnabled()) {
+            return [];
+        }
+        $grouped = ['anthropic' => [], 'codex' => [], 'google' => []];
+        foreach ($this->models() as $m) {
+            foreach (array_keys($grouped) as $provider) {
+                if (self::modelMatchesProvider($m['id'], $m['owned_by'], $provider)) {
+                    $grouped[$provider][] = $m['id'];
+                    break;
+                }
+            }
+        }
+
+        return array_filter($grouped);
+    }
+
+    /**
+     * Model final untuk sebuah peran: hormati pilihan tersimpan (snapshot
+     * terverifikasi dari halaman Konfigurasi Agent) bila modelnya masih
+     * tersedia saat ini; selain itu pakai pemetaan otomatis modelForRole().
+     */
+    public function resolveModel(string $role): ?string
+    {
+        if (! $this->agentsEnabled()) {
+            return null;
+        }
+        $models = $this->models();
+        if ($models === []) {
+            return null;
+        }
+        $snapshot = app(AgentConfiguration::class)->current($role);
+        $saved = is_array($snapshot) ? ($snapshot['model'] ?? null) : null;
+        if (($snapshot['status'] ?? null) === 'verified' && is_string($saved)
+            && in_array($saved, array_column($models, 'id'), true)) {
+            return $saved;
+        }
+
+        return $this->modelForRole($role);
+    }
+
+    /**
      * OpenAI-compatible chat completion via CLIProxyAPI.
      * Returns the assistant text, or null on failure.
      */

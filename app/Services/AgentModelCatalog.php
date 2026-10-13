@@ -14,6 +14,20 @@ class AgentModelCatalog
 
     public function fetch(string $role): array
     {
+        // Jalur OAuth CLIProxyAPI: katalog dibangun dari model akun terhubung.
+        $cliproxy = app(CliProxyApiClient::class);
+        $grouped = $cliproxy->modelsByProvider();
+        if ($grouped !== []) {
+            $names = ['anthropic' => 'Anthropic (Claude)', 'codex' => 'Codex (ChatGPT)', 'google' => 'Google (Gemini)'];
+            $providers = [];
+            foreach ($grouped as $slug => $models) {
+                $providers[] = ['slug' => $slug, 'name' => ($names[$slug] ?? $slug).' — OAuth', 'available' => true, 'models' => $models];
+            }
+
+            return ['status' => 'online', 'providers' => $providers,
+                'capabilities' => ['catalog' => true, 'inference_checked' => true, 'execution_enabled' => false]];
+        }
+
         $settings = $this->settings($role);
         $offline = ['status' => 'offline', 'providers' => [], 'capabilities' => ['catalog' => false, 'inference_checked' => false, 'execution_enabled' => false]];
         if (empty($settings['base_url']) || empty($settings['api_key'])) {

@@ -61,9 +61,10 @@ class AgentProfileClient
             $systemPrompt .= "\n\n".$soulLine;
         }
 
-        // Jalur OAuth CLIProxyAPI: kirim langsung ke gateway dengan model peran.
+        // Jalur OAuth CLIProxyAPI: hormati model tersimpan bila masih tersedia,
+        // selain itu pakai pemetaan otomatis per peran.
         $cliproxy = app(CliProxyApiClient::class);
-        $model = $cliproxy->modelForRole($slug);
+        $model = $cliproxy->resolveModel($slug);
         if ($model !== null) {
             $content = $cliproxy->chat($model, $systemPrompt, $message);
             if ($content === null) {

@@ -51,7 +51,7 @@ POLICY;
     public function sendMessage(string $message, string $conversationId): string
     {
         $cliproxy = app(CliProxyApiClient::class);
-        $model = $cliproxy->smartestModel();
+        $model = $cliproxy->resolveModel('scrum-master');
         if ($model !== null) {
             $soulLine = \App\Support\Agents\AgentSoul::promptLine('scrum-master');
             $systemPrompt = self::DISCLOSURE_POLICY.($soulLine !== '' ? "\n\n".$soulLine : '');
