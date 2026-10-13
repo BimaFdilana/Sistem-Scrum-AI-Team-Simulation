@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Task;
 use App\Models\StoryEstimationAgentRun;
-use App\Services\AgentProfileClient;
+use App\Services\AiStatusService;
 use App\Services\HermesClient;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
@@ -46,20 +46,11 @@ class WorkspaceController extends Controller
         ]);
     }
 
-    public function agents(HermesClient $hermes, AgentProfileClient $profiles): View
+    public function agents(AiStatusService $status): View
     {
-        $agents = config('agents.profiles');
-        $agentConnections = [];
-
-        foreach ($agents as $agent) {
-            $agentConnections[$agent['slug']] = $agent['slug'] === 'scrum-master'
-                ? $hermes->isAvailable()
-                : $profiles->isAvailable($agent['slug']);
-        }
-
         return view('workspace.agents', [
-            'agents' => $agents,
-            'agentConnections' => $agentConnections,
+            'agents' => config('agents.profiles'),
+            'agentStatus' => $status->agents(),
             'activePage' => 'agents',
         ]);
     }

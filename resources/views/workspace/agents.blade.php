@@ -12,14 +12,22 @@
 
     <section class="agent-directory-list">
         @foreach ($agents as $agent)
-            @php($chatAvailable = $agentConnections[$agent['slug']] ?? false)
+            @php($st = $agentStatus[$agent['slug']] ?? ['connected' => false, 'model' => null, 'provider' => null, 'reason' => null])
             @php($chatUrl = $agent['slug'] === 'scrum-master' ? route('chat.index', [], false) : null)
             @php($activityUrl = route('agents.activity', ['slug' => $agent['slug']], false))
             <article class="directory-row">
                 <span class="agent-avatar avatar-{{ $agent['tone'] }}">{{ $agent['initials'] }}</span>
-                <div class="directory-main"><h2>{{ $agent['name'] }}</h2><p>{{ $agent['description'] }}</p></div>
+                <div class="directory-main">
+                    <h2>{{ $agent['name'] }}</h2>
+                    <p>{{ $agent['description'] }}</p>
+                    @if ($st['connected'] && $st['provider'] && $st['model'])
+                        <p><small>via {{ $st['provider'] }} · {{ $st['model'] }}</small></p>
+                    @elseif ($st['reason'])
+                        <p><small>{{ $st['reason'] }}</small></p>
+                    @endif
+                </div>
                 <div class="directory-role"><span>{{ $agent['role'] }}</span></div>
-                <span class="agent-status"><i></i>{{ $agent['slug'] === 'scrum-master' ? ($chatAvailable ? 'Chat aktif' : 'Belum terhubung') : ($chatAvailable ? 'Siap dipanggil Scrum Master' : 'Belum terhubung') }}</span>
+                <span class="agent-status"><i></i>{{ $agent['slug'] === 'scrum-master' ? ($st['connected'] ? 'Chat aktif' : 'Belum terhubung') : ($st['connected'] ? 'Siap dipanggil Scrum Master' : 'Belum terhubung') }}</span>
                 <div class="directory-actions">
                     @if ($chatUrl)
                         <a class="button button-primary" href="{{ $chatUrl }}">Chat dengan Scrum Master <span aria-hidden="true">→</span></a>

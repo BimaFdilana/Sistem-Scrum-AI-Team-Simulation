@@ -84,20 +84,27 @@ class HermesChatTest extends TestCase
             ->assertDontSee('href="'.route('chat.index').'"', false);
     }
 
-    public function test_agents_page_marks_only_the_chat_profile_connected(): void
+    public function test_agents_page_shows_per_profile_chat_status(): void
     {
+        // Status halaman /agents kini dari AiStatusService (jalur OAuth),
+        // bukan server Hermes lama yang sudah dipensiunkan.
         config([
-            'services.hermes.base_url' => 'http://127.0.0.1:8643/v1',
-            'services.hermes.api_key' => 'test-hermes-server-key',
-            'services.hermes.model' => 'scrumagent',
+            'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
+            'ai.cliproxy.management_key' => 'test-mgmt-key',
+            'ai.cliproxy.api_key' => 'test-key',
+            'ai.cliproxy.agents_enabled' => true,
         ]);
 
         Http::fake([
-            'http://127.0.0.1:8643/v1/models' => Http::response(['data' => [['id' => 'scrumagent']]]),
-            'http://127.0.0.1:8644/v1/models' => Http::response([], 401),
-            'http://127.0.0.1:8645/v1/models' => Http::response([], 401),
-            'http://127.0.0.1:8646/v1/models' => Http::response([], 401),
-            'http://127.0.0.1:8647/v1/models' => Http::response([], 401),
+            'http://127.0.0.1:8317/v0/management/auth-files' => Http::response(['files' => [[
+                'id' => 'codex-x.json',
+                'name' => 'codex-x.json',
+                'provider' => 'codex',
+                'disabled' => false,
+            ]]]),
+            'http://127.0.0.1:8317/v1/models' => Http::response(['data' => [
+                ['id' => 'gpt-5.6-sol', 'owned_by' => 'openai'],
+            ]]),
         ]);
 
         $this->actingAs(User::factory()->create())
@@ -105,7 +112,7 @@ class HermesChatTest extends TestCase
             ->assertOk()
             ->assertSee('Scrum Master')
             ->assertSee('Chat aktif')
-            ->assertSee('Belum terhubung');
+            ->assertSee('Siap dipanggil Scrum Master');
     }
 
     public function test_chat_reports_backend_unavailable_without_exposing_the_key(): void

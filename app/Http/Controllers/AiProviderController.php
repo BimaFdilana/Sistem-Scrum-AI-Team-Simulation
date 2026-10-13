@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\AiStatusService;
 use App\Services\CliProxyApiClient;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -9,21 +10,13 @@ use Illuminate\View\View;
 
 class AiProviderController extends Controller
 {
-    public function index(CliProxyApiClient $client): View
+    public function index(CliProxyApiClient $client, AiStatusService $status): View
     {
-        $providers = config('ai.providers', []);
-        $accounts = $client->accounts()['files'] ?? [];
         $gatewayUp = $client->isAvailable();
         $managementUp = $client->isManagementAvailable();
 
-        $statuses = [];
-        foreach (array_keys($providers) as $slug) {
-            $statuses[$slug] = $client->accountForProvider($slug);
-        }
-
         return view('workspace.ai-providers', [
-            'providers' => $providers,
-            'statuses' => $statuses,
+            'providers' => $status->providers(),
             'gatewayUp' => $gatewayUp,
             'managementUp' => $managementUp,
             'activePage' => 'ai-providers',

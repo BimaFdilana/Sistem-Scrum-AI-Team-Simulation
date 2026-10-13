@@ -31,25 +31,25 @@
     </section>
 
     <section class="agent-directory-list">
-        @foreach ($providers as $slug => $meta)
-            @php($account = $statuses[$slug] ?? null)
-            @php($connected = $account && ! ($account['disabled'] ?? false))
+        @foreach ($providers as $slug => $info)
+            @php($connected = $info['connected'])
+            @php($account = $info['account'])
             <article class="directory-row">
-                <span class="agent-avatar avatar-{{ $slug === 'antigravity' ? 'mint' : ($slug === 'codex' ? 'violet' : 'amber') }}">{{ mb_strtoupper(mb_substr($meta['label'], 0, 1)) }}</span>
+                <span class="agent-avatar avatar-{{ $slug === 'antigravity' ? 'mint' : ($slug === 'codex' ? 'violet' : 'amber') }}">{{ mb_strtoupper(mb_substr($info['label'], 0, 1)) }}</span>
                 <div class="directory-main">
-                    <h2>{{ $meta['label'] }}</h2>
-                    <p>{{ $meta['description'] }}</p>
-                    @if ($connected && isset($account['email']))
-                        <p><small>{{ $account['email'] }}</small></p>
+                    <h2>{{ $info['label'] }}</h2>
+                    <p>{{ $info['description'] }}</p>
+                    @if ($connected && $info['email'])
+                        <p><small>{{ $info['email'] }}</small></p>
                     @endif
                 </div>
-                <div class="directory-role"><span>{{ implode(', ', $meta['models']) }}</span></div>
+                <div class="directory-role"><span>{{ implode(', ', $info['models']) }}</span></div>
                 <span class="agent-status"><i></i>{{ $connected ? 'Terhubung' : 'Belum terhubung' }}</span>
                 <div class="directory-actions">
                     @if ($connected)
                         <form method="POST" action="{{ route('ai-providers.disconnect', ['provider' => $slug]) }}">
                             @csrf
-                            <button class="button" type="submit" onclick="return confirm('Putus akun {{ $meta['label'] }}? Kamu bisa mengaktifkannya lagi kapan pun.')">Putuskan</button>
+                            <button class="button" type="submit" onclick="return confirm('Putus akun {{ $info['label'] }}? Kamu bisa mengaktifkannya lagi kapan pun.')">Putuskan</button>
                         </form>
                     @elseif ($account)
                         {{-- File akun masih tersimpan tapi dinonaktifkan: aktifkan lagi tanpa OAuth ulang. --}}
