@@ -1,58 +1,74 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# ScrumSpace — AI Scrum Agent Workspace
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Simulasi tim Scrum yang dijalankan agen AI: **Product Owner** (kamu), **Scrum Master**, dan developer **FE/BE** plus **QA Engineer**. Mulai dari estimasi Fibonacci konsensus, diskusi refinement, sampai eksekusi kode dengan QA review loop dan final acceptance — semua di satu workspace Laravel.
 
-## About Laravel
+## Fitur utama
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+**Estimasi & refinement**
+- Estimasi Fibonacci konsensus: agen FE/BE/QA memberi vote, Scrum Master merangkum hasil kesepakatan (deadlock → nilai maksimum).
+- Poin murni Fibonacci (1, 2, 3, 5, 8, 13) dengan pemetaan kompleksitas Ringan/Sedang/Berat.
+- SM menghasilkan *refined story* terstruktur (tujuan + acceptance criteria) dari hasil diskusi; eksekusi memakai versi refined.
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+**Eksekusi kode oleh agen**
+- Pipeline: breakdown → izin PO (sekali per eksekusi) → FE/BE mengerjakan di git worktree terisolasi → QA review (maks 2 revisi) → merge → final acceptance PO (Berhasil/Gagal mengunci story).
+- Agen mengirim **patch JSON**; sistem yang menerapkannya (path traversal & `.git` diblokir).
+- **Perintah Perbaikan**: PO memerintah dari chat SM ("perbaiki halaman login yang lambat") → SM mengklasifikasikan → kartu konfirmasi → pipeline yang sama.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+**Chat dengan Scrum Master**
+- Chat real-time dengan loading indicator; Enter kirim, Shift+Enter baris baru.
+- Lampiran gambar (JPG/PNG ≤ 5 MB) diteruskan ke AI sebagai vision lalu dibuang — tidak tersimpan di database.
+- Ketahanan AI: retry otomatis dengan backoff untuk gangguan upstream, fallback ke model cadangan, dan pesan error spesifik berbahasa Indonesia.
 
-## Learning Laravel
+**AI Providers (OAuth, tanpa API key)**
+- Hubungkan akun langganan **Google (Gemini)**, **ChatGPT (Codex)**, dan **Claude** lewat login OAuth dari menu AI Providers.
+- Pemetaan peran: FE → Gemini, BE → Codex, QA → Claude, SM → model terpintar yang tersedia (fallback otomatis bila provider belum terhubung).
+- Berjalan lewat [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) sebagai gateway lokal.
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+## Mulai cepat (lokal)
 
 ```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+cp .env.example .env
+composer install
+php artisan key:generate
+php artisan migrate
+php artisan serve
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Jalankan CLIProxyAPI di `127.0.0.1:8317` (lihat `CLIPROXY_*` di `.env.example`), lalu hubungkan provider dari menu **AI Providers**. Login admin memakai `WORKSPACE_ADMIN_PASSWORD` di `.env`.
 
-## Contributing
+## Deploy ke VPS (satu perintah)
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```bash
+./deploy.sh
+```
 
-## Code of Conduct
+Script menyiapkan `.env` + `APP_KEY` otomatis, build image Docker, dan menjalankan app + worker + CLIProxyAPI (`docker-compose.yml`, `restart: unless-stopped`). Aman dijalankan ulang untuk update. Panduan lengkap: [docs/deployment/vps-deploy.md](docs/deployment/vps-deploy.md).
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+## Konfigurasi penting (.env)
 
-## Security Vulnerabilities
+| Variabel | Keterangan |
+|---|---|
+| `CLIPROXY_BASE_URL` | URL gateway CLIProxyAPI |
+| `CLIPROXY_API_KEY` | API key gateway |
+| `CLIPROXY_MANAGEMENT_KEY` | Kunci Management API (untuk OAuth) |
+| `CLIPROXY_CHAT_ATTEMPTS` / `CLIPROXY_CHAT_FALLBACKS` | Retry & fallback model chat AI |
+| `WORKSPACE_ADMIN_PASSWORD` | Password akun admin |
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+Jangan pernah commit `.env` atau menaruh API key/token di chat maupun Git.
 
-## License
+## Dokumentasi
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+- [Desain AI Team](docs/ai-team-design.md) — soul, skill, dan pemetaan model per peran
+- [Konsensus Fibonacci](docs/fibonacci-consensus.md) — aturan estimasi
+- [Konfigurasi Agent](docs/stage2-agent-configuration.md)
+- [Deploy VPS](docs/deployment/vps-deploy.md)
+
+## Testing
+
+```bash
+php artisan test
+```
+
+## Lisensi
+
+MIT.
