@@ -20,6 +20,11 @@ POLICY;
 
     public function isAvailable(): bool
     {
+        // Jalur OAuth CLIProxyAPI: SM memakai model terpintar yang tersedia.
+        if (app(CliProxyApiClient::class)->smartestModel() !== null) {
+            return true;
+        }
+
         $snapshot = app(AgentConfiguration::class)->current('scrum-master');
         if ($snapshot) {
             return $snapshot['status'] === 'verified' && app(AgentModelCatalog::class)->contains(
@@ -45,6 +50,19 @@ POLICY;
 
     public function sendMessage(string $message, string $conversationId): string
     {
+        $cliproxy = app(CliProxyApiClient::class);
+        $model = $cliproxy->smartestModel();
+        if ($model !== null) {
+            $soulLine = \App\Support\Agents\AgentSoul::promptLine('scrum-master');
+            $systemPrompt = self::DISCLOSURE_POLICY.($soulLine !== '' ? "\n\n".$soulLine : '');
+            $content = $cliproxy->chat($model, $systemPrompt, $message);
+            if ($content === null) {
+                throw new \RuntimeException('AI Agent consultation unavailable: CLIPROXY_FAILED');
+            }
+
+            return $content;
+        }
+
         return app(AgentConsultationDispatcher::class)->send('scrum-master', $message, $conversationId, self::DISCLOSURE_POLICY);
     }
 

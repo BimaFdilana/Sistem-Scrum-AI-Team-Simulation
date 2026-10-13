@@ -11,6 +11,11 @@ class AgentProfileClient
 {
     public function isAvailable(string $slug): bool
     {
+        // Jalur OAuth CLIProxyAPI (diuji Bima 2026-10-13): model per peran.
+        if (app(CliProxyApiClient::class)->modelForRole($slug) !== null) {
+            return true;
+        }
+
         app(AgentConfiguration::class)->role($slug);
         $snapshot = app(AgentConfiguration::class)->current($slug);
         if ($snapshot) {
@@ -54,6 +59,20 @@ class AgentProfileClient
         $soulLine = AgentSoul::promptLine($slug);
         if ($soulLine !== '') {
             $systemPrompt .= "\n\n".$soulLine;
+        }
+
+        // Jalur OAuth CLIProxyAPI: kirim langsung ke gateway dengan model peran.
+        $cliproxy = app(CliProxyApiClient::class);
+        $model = $cliproxy->modelForRole($slug);
+        if ($model !== null) {
+            $content = $cliproxy->chat($model, $systemPrompt, $message);
+            if ($content === null) {
+                throw new RuntimeException('AI Agent consultation unavailable: CLIPROXY_FAILED');
+            }
+
+            return app(ChatDisclosurePolicy::class)->containsSensitiveDisclosure($content)
+                ? ChatDisclosurePolicy::SAFE_RESPONSE
+                : $content;
         }
 
         return app(AgentConsultationDispatcher::class)->send($slug, $message, $conversationId, $systemPrompt);

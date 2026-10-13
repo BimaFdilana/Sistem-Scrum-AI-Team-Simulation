@@ -15,6 +15,9 @@ return [
         'management_key' => env('CLIPROXY_MANAGEMENT_KEY'),
         'api_key' => env('CLIPROXY_API_KEY'),
         'timeout' => (int) env('CLIPROXY_TIMEOUT', 15),
+        // Jalur agen (FE/BE/QA/SM) lewat akun OAuth CLIProxyAPI. Dimatikan
+        // saat testing (phpunit.xml) agar tidak bocor ke gateway asli.
+        'agents_enabled' => env('CLIPROXY_AGENTS_ENABLED', true),
     ],
 
     /*

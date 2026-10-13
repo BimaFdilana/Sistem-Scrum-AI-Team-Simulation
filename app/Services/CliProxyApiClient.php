@@ -173,6 +173,160 @@ class CliProxyApiClient
         return $query['code'] ?? null;
     }
 
+    /**
+     * Apakah jalur agen via CLIProxyAPI aktif. Mati saat testing agar
+     * panggilan agen tidak bocor ke gateway asli.
+     */
+    public function agentsEnabled(): bool
+    {
+        return (bool) config('ai.cliproxy.agents_enabled', true);
+    }
+
+    /**
+     * Model IDs available on the OpenAI-compatible inference API.
+     * Cached briefly; empty when gateway unreachable or no account linked.
+     *
+     * @return array<int, array{id: string, owned_by: string}>
+     */
+    public function models(): array
+    {
+        if (! $this->apiKey) {
+            return [];
+        }
+
+        return \Illuminate\Support\Facades\Cache::remember('cliproxy:models', 60, function (): array {
+            try {
+                $response = Http::baseUrl($this->baseUrl)->withToken($this->apiKey)
+                    ->timeout($this->timeout)->acceptJson()->get('/v1/models');
+                if (! $response->successful()) {
+                    return [];
+                }
+                $data = $response->json('data');
+                if (! is_array($data)) {
+                    return [];
+                }
+
+                return array_values(array_filter(array_map(
+                    fn ($m) => isset($m['id']) ? ['id' => (string) $m['id'], 'owned_by' => (string) ($m['owned_by'] ?? '')] : null,
+                    $data
+                )));
+            } catch (Throwable) {
+                return [];
+            }
+        });
+    }
+
+    /**
+     * Pick the best CLIProxyAPI model for an agent role, honoring the role's
+     * preferred_provider from config/agents.php (disetujui Bima 2026-10-13):
+     * QA=anthropic, BE=codex, FE=google, SM=model terpintar yang tersedia.
+     * Returns null when nothing suitable is available.
+     */
+    public function modelForRole(string $role): ?string
+    {
+        if (! $this->agentsEnabled()) {
+            return null;
+        }
+        $models = $this->models();
+        if ($models === []) {
+            return null;
+        }
+        $profile = collect(config('agents.profiles'))->firstWhere('slug', $role);
+        $preferred = strtolower((string) ($profile['preferred_provider'] ?? 'any'));
+
+        $byProvider = fn (string $provider) => array_values(array_filter(
+            $models,
+            fn ($m) => self::modelMatchesProvider($m['id'], $m['owned_by'], $provider)
+        ));
+
+        $candidates = $byProvider($preferred);
+        if ($candidates === [] && $preferred !== 'any') {
+            // Fallback: provider mana pun yang tersedia.
+            $candidates = $models;
+        }
+        if ($candidates === []) {
+            return null;
+        }
+
+        return self::pickBest($candidates);
+    }
+
+    /** Model terpintar yang tersedia (untuk Scrum Master). */
+    public function smartestModel(): ?string
+    {
+        if (! $this->agentsEnabled()) {
+            return null;
+        }
+        $models = $this->models();
+
+        return $models === [] ? null : self::pickBest($models);
+    }
+
+    /**
+     * OpenAI-compatible chat completion via CLIProxyAPI.
+     * Returns the assistant text, or null on failure.
+     */
+    public function chat(string $model, string $systemPrompt, string $userMessage, int $timeout = 120): ?string
+    {
+        if (! $this->agentsEnabled() || ! $this->apiKey) {
+            return null;
+        }
+        try {
+            $response = Http::baseUrl($this->baseUrl)->withToken($this->apiKey)
+                ->timeout($timeout)->acceptJson()->post('/v1/chat/completions', [
+                    'model' => $model,
+                    'stream' => false,
+                    'messages' => [
+                        ['role' => 'system', 'content' => $systemPrompt],
+                        ['role' => 'user', 'content' => $userMessage],
+                    ],
+                ]);
+            if (! $response->successful()) {
+                return null;
+            }
+            $content = $response->json('choices.0.message.content');
+
+            return is_string($content) && trim($content) !== '' ? trim($content) : null;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    private static function modelMatchesProvider(string $id, string $ownedBy, string $provider): bool
+    {
+        $id = strtolower($id);
+        $ownedBy = strtolower($ownedBy);
+
+        return match ($provider) {
+            'anthropic' => str_contains($id, 'claude') || str_contains($ownedBy, 'anthropic'),
+            'codex' => str_contains($id, 'gpt') || str_contains($id, 'codex') || str_contains($ownedBy, 'openai'),
+            'google', 'antigravity', 'gemini' => str_contains($id, 'gemini') || str_contains($ownedBy, 'google'),
+            default => true,
+        };
+    }
+
+    /** Heuristik "terbaik": hindari model image, utamakan flagship. */
+    private static function pickBest(array $models): string
+    {
+        $ids = array_column($models, 'id');
+        $nonImage = array_values(array_filter($ids, fn ($id) => ! str_contains(strtolower($id), 'image')));
+        $pool = $nonImage !== [] ? $nonImage : $ids;
+        $ranked = [
+            'claude-opus', 'claude-sonnet', 'claude',
+            'gpt-5', 'gpt-6', 'gpt-4', 'gpt',
+            'gemini-2.5-pro', 'gemini-3', 'gemini-2.5', 'gemini-3.1-pro', 'gemini',
+        ];
+        foreach ($ranked as $needle) {
+            foreach ($pool as $id) {
+                if (str_contains(strtolower($id), $needle)) {
+                    return $id;
+                }
+            }
+        }
+
+        return $pool[0];
+    }
+
     protected function management()
     {
         return Http::baseUrl($this->baseUrl.'/v0/management')
