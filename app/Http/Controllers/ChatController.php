@@ -52,7 +52,18 @@ class ChatController extends Controller
         $data = $request->validate([
             'message' => ['required', 'string', 'max:8000'],
             'conversation_id' => ['nullable', 'uuid'],
+            // Lampiran gambar: JPG/PNG maks 5MB, diteruskan ke AI lalu dibuang.
+            'image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:5120'],
         ]);
+
+        $image = null;
+        if ($request->hasFile('image')) {
+            $file = $request->file('image');
+            $image = [
+                'data' => base64_encode($file->get()),
+                'mime' => $file->getMimeType(),
+            ];
+        }
 
         $user = $request->user();
         $conversation = isset($data['conversation_id'])
@@ -70,7 +81,8 @@ class ChatController extends Controller
 
         $userMessage = $conversation->messages()->create([
             'role' => 'user',
-            'content' => trim($data['message']),
+            // Gambar tidak disimpan; hanya penanda bahwa pesan disertai gambar.
+            'content' => trim($data['message']).($image !== null ? "\n[lampiran gambar]" : ''),
         ]);
 
         $safeResponse = $disclosurePolicy->safeResponseFor($userMessage->content);
@@ -86,7 +98,7 @@ class ChatController extends Controller
         }
 
         try {
-            $content = $hermes->sendMessage($userMessage->content, $conversation->uuid);
+            $content = $hermes->sendMessage($userMessage->content, $conversation->uuid, $image);
         } catch (RuntimeException) {
             return response()->json([
                 'conversation_id' => $conversation->uuid,

@@ -33,11 +33,19 @@
             <input type="hidden" id="conversationId" value="{{ $conversation?->uuid }}">
             <label class="sr-only" for="chatInput">Pesan untuk {{ $agent['name'] }}</label>
             <textarea id="chatInput" rows="3" maxlength="8000" placeholder="Tulis pesan untuk {{ $agent['name'] }}… (Enter untuk kirim, Shift+Enter baris baru)" required {{ $chatAvailable ? '' : 'disabled' }}></textarea>
+            <div class="chat-attach-preview" id="attachPreview" hidden>
+                <img id="attachThumb" alt="Pratinjau gambar terlampir">
+                <button type="button" class="chat-attach-remove" id="attachRemove" aria-label="Hapus gambar">×</button>
+            </div>
+            <input type="file" id="chatImage" accept="image/jpeg,image/png" hidden>
             <div class="chat-composer-footer">
                 <span id="chatError" class="chat-error" role="status">{{ $chatAvailable ? 'Percakapan tersimpan di workspace.' : 'Chat AI Agent belum tersedia. Pesan belum dapat dikirim.' }}</span>
-                <button class="button button-primary" id="chatSend" type="submit" {{ $chatAvailable ? '' : 'disabled' }}>
-                    Kirim <span aria-hidden="true">→</span>
-                </button>
+                <span class="chat-composer-actions">
+                    <button type="button" class="button" id="attachButton" aria-label="Lampirkan gambar" title="Lampirkan gambar (JPG/PNG, maks 5 MB)" {{ $chatAvailable ? '' : 'disabled' }}>🖼️</button>
+                    <button class="button button-primary" id="chatSend" type="submit" {{ $chatAvailable ? '' : 'disabled' }}>
+                        Kirim <span aria-hidden="true">→</span>
+                    </button>
+                </span>
             </div>
         </form>
     </section>
@@ -52,17 +60,63 @@
             const sendButton = document.getElementById('chatSend');
             const error = document.getElementById('chatError');
             const csrf = document.querySelector('meta[name="csrf-token"]').content;
+            const attachButton = document.getElementById('attachButton');
+            const attachInput = document.getElementById('chatImage');
+            const attachPreview = document.getElementById('attachPreview');
+            const attachThumb = document.getElementById('attachThumb');
+            const attachRemove = document.getElementById('attachRemove');
+            let attachedFile = null;
+            let attachedUrl = null;
 
-            const addMessage = (role, content) => {
+            const clearAttachment = () => {
+                attachedFile = null;
+                attachInput.value = '';
+                if (attachedUrl) URL.revokeObjectURL(attachedUrl);
+                attachedUrl = null;
+                attachPreview.hidden = true;
+            };
+
+            attachButton.addEventListener('click', () => attachInput.click());
+            attachRemove.addEventListener('click', clearAttachment);
+            attachInput.addEventListener('change', () => {
+                const file = attachInput.files[0];
+                if (!file) return;
+                if (!['image/jpeg', 'image/png'].includes(file.type)) {
+                    error.textContent = 'Hanya gambar JPG/PNG yang didukung.';
+                    attachInput.value = '';
+                    return;
+                }
+                if (file.size > 5 * 1024 * 1024) {
+                    error.textContent = 'Ukuran gambar maksimal 5 MB.';
+                    attachInput.value = '';
+                    return;
+                }
+                clearAttachment();
+                attachedFile = file;
+                attachedUrl = URL.createObjectURL(file);
+                attachThumb.src = attachedUrl;
+                attachPreview.hidden = false;
+                error.textContent = 'Gambar terlampir. Tulis pertanyaan lalu kirim.';
+            });
+
+            const addMessage = (role, content, imageUrl = null) => {
                 document.getElementById('chatEmpty')?.remove();
                 const article = document.createElement('article');
                 article.className = `chat-message chat-message-${role}`;
                 const label = document.createElement('span');
                 label.className = 'chat-message-label';
                 label.textContent = role === 'assistant' ? agentName : 'Anda';
+                article.append(label);
+                if (imageUrl) {
+                    const img = document.createElement('img');
+                    img.src = imageUrl;
+                    img.alt = 'Gambar terlampir';
+                    img.className = 'chat-message-image';
+                    article.append(img);
+                }
                 const paragraph = document.createElement('p');
                 paragraph.textContent = content;
-                article.append(label, paragraph);
+                article.append(paragraph);
                 transcript.append(article);
                 article.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             };
@@ -107,25 +161,43 @@
                 const message = input.value.trim();
                 if (!message || sendButton.disabled) return;
 
-                addMessage('user', message);
+                addMessage('user', message, attachedUrl);
+                attachedUrl = null; // URL dipakai bubble pesan; jangan revoke di clearAttachment
+                const fileToSend = attachedFile;
+                attachedFile = null;
+                attachInput.value = '';
+                attachPreview.hidden = true;
                 input.value = '';
                 sendButton.disabled = true;
                 showTyping();
                 error.textContent = `${agentName} sedang menyiapkan jawaban…`;
 
                 try {
-                    const response = await fetch(form.action, {
-                        method: 'POST',
-                        headers: {
-                            'Accept': 'application/json',
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': csrf,
-                        },
-                        body: JSON.stringify({
-                            message,
-                            conversation_id: conversationId.value || null,
-                        }),
-                    });
+                    let response;
+                    if (fileToSend) {
+                        const payload = new FormData();
+                        payload.append('message', message);
+                        payload.append('image', fileToSend);
+                        if (conversationId.value) payload.append('conversation_id', conversationId.value);
+                        response = await fetch(form.action, {
+                            method: 'POST',
+                            headers: { 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf },
+                            body: payload,
+                        });
+                    } else {
+                        response = await fetch(form.action, {
+                            method: 'POST',
+                            headers: {
+                                'Accept': 'application/json',
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': csrf,
+                            },
+                            body: JSON.stringify({
+                                message,
+                                conversation_id: conversationId.value || null,
+                            }),
+                        });
+                    }
                     const payload = await response.json();
                     if (!response.ok) throw new Error(payload.message || 'Pesan gagal dikirim.');
 

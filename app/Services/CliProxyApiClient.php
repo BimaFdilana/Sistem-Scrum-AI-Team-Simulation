@@ -312,12 +312,20 @@ class CliProxyApiClient
     /**
      * OpenAI-compatible chat completion via CLIProxyAPI.
      * Returns the assistant text, or null on failure.
+     *
+     * @param array{data: string, mime: string}|null $image lampiran gambar (base64); diteruskan lalu dibuang.
      */
-    public function chat(string $model, string $systemPrompt, string $userMessage, int $timeout = 120): ?string
+    public function chat(string $model, string $systemPrompt, string $userMessage, int $timeout = 120, ?array $image = null): ?string
     {
         if (! $this->agentsEnabled() || ! $this->apiKey) {
             return null;
         }
+        $userContent = $image !== null
+            ? [
+                ['type' => 'text', 'text' => $userMessage],
+                ['type' => 'image_url', 'image_url' => ['url' => 'data:'.$image['mime'].';base64,'.$image['data']]],
+            ]
+            : $userMessage;
         try {
             $response = Http::baseUrl($this->baseUrl)->withToken($this->apiKey)
                 ->timeout($timeout)->acceptJson()->post('/v1/chat/completions', [
@@ -325,7 +333,7 @@ class CliProxyApiClient
                     'stream' => false,
                     'messages' => [
                         ['role' => 'system', 'content' => $systemPrompt],
-                        ['role' => 'user', 'content' => $userMessage],
+                        ['role' => 'user', 'content' => $userContent],
                     ],
                 ]);
             if (! $response->successful()) {

@@ -48,14 +48,14 @@ POLICY;
         }
     }
 
-    public function sendMessage(string $message, string $conversationId): string
+    public function sendMessage(string $message, string $conversationId, ?array $image = null): string
     {
         $cliproxy = app(CliProxyApiClient::class);
         $model = $cliproxy->resolveModel('scrum-master');
         if ($model !== null) {
             $soulLine = \App\Support\Agents\AgentSoul::promptLine('scrum-master');
             $systemPrompt = self::DISCLOSURE_POLICY.($soulLine !== '' ? "\n\n".$soulLine : '');
-            $content = $cliproxy->chat($model, $systemPrompt, $message);
+            $content = $cliproxy->chat($model, $systemPrompt, $message, 120, $image);
             if ($content === null) {
                 throw new \RuntimeException('AI Agent consultation unavailable: CLIPROXY_FAILED');
             }

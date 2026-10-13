@@ -5,12 +5,16 @@ namespace Tests\Feature;
 use App\Services\AgentProfileClient;
 use App\Services\CliProxyApiClient;
 use App\Services\HermesClient;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class CliProxyAgentWiringTest extends TestCase
 {
+    use RefreshDatabase;
     protected function setUp(): void
     {
         parent::setUp();
@@ -108,5 +112,64 @@ class CliProxyAgentWiringTest extends TestCase
         $this->assertSame('online', $catalog['status']);
         $this->assertTrue(collect($catalog['providers'])->firstWhere('slug', 'anthropic')['available']);
         $this->assertContains('claude-opus-4-6', collect($catalog['providers'])->firstWhere('slug', 'anthropic')['models']);
+    }
+
+    public function test_chat_mengirim_blok_vision_bila_ada_gambar(): void
+    {
+        $this->fakeGateway([
+            ['id' => 'gpt-5.6-luna', 'owned_by' => 'openai'],
+        ]);
+
+        $content = app(CliProxyApiClient::class)->chat(
+            'gpt-5.6-luna', 'sys', 'Apa isi gambar ini?',
+            120, ['data' => base64_encode('fake-bytes'), 'mime' => 'image/png']
+        );
+
+        $this->assertSame('Jawaban AI', $content);
+        Http::assertSent(function ($request) {
+            $userContent = $request['messages'][1]['content'];
+
+            return is_array($userContent)
+                && $userContent[0] === ['type' => 'text', 'text' => 'Apa isi gambar ini?']
+                && $userContent[1]['type'] === 'image_url'
+                && str_starts_with($userContent[1]['image_url']['url'], 'data:image/png;base64,');
+        });
+    }
+
+    public function test_chat_dengan_gambar_diteruskan_lalu_dibuang(): void
+    {
+        $this->fakeGateway([
+            ['id' => 'gpt-5.6-luna', 'owned_by' => 'openai'],
+        ]);
+
+        $image = UploadedFile::fake()->image('mockup.png', 100, 100)->size(100);
+
+        $this->actingAs(User::factory()->create())
+            ->post('/chat/messages', ['message' => 'Tolong review mockup ini.', 'image' => $image])
+            ->assertOk()
+            ->assertJsonPath('assistant_message.content', 'Jawaban AI');
+
+        // Gambar tidak disimpan; hanya penanda di pesan.
+        $this->assertDatabaseHas('chat_messages', [
+            'role' => 'user',
+            'content' => "Tolong review mockup ini.\n[lampiran gambar]",
+        ]);
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/v1/chat/completions')
+            && is_array($request['messages'][1]['content'])
+            && $request['messages'][1]['content'][1]['type'] === 'image_url');
+    }
+
+    public function test_chat_menolak_gambar_lebih_dari_5mb(): void
+    {
+        $this->fakeGateway([
+            ['id' => 'gpt-5.6-luna', 'owned_by' => 'openai'],
+        ]);
+
+        $image = UploadedFile::fake()->image('besar.png')->size(6000);
+
+        $this->actingAs(User::factory()->create())
+            ->post('/chat/messages', ['message' => 'Lihat ini.', 'image' => $image])
+            ->assertRedirect()
+            ->assertSessionHasErrors('image');
     }
 }
