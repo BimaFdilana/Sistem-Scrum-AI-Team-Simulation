@@ -32,7 +32,6 @@ class AiStatusService
                 'models' => $meta['models'] ?? [],
                 'connected' => $connected,
                 'email' => $connected ? ($account['email'] ?? null) : null,
-                // File akun (bisa disabled) — untuk tombol "Aktifkan kembali".
                 'account' => $account,
             ];
         }

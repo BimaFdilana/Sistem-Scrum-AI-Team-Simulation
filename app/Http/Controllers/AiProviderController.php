@@ -115,28 +115,4 @@ class AiProviderController extends Controller
         return redirect()->route('ai-providers.index')
             ->with('error', 'Gagal memutus akun. Coba lagi.');
     }
-
-    /**
-     * Aktifkan kembali akun yang pernah diputus — tanpa OAuth ulang.
-     */
-    public function enable(string $provider, CliProxyApiClient $client): RedirectResponse
-    {
-        $providers = config('ai.providers', []);
-        abort_unless(isset($providers[$provider]), 404);
-
-        $account = $client->accountForProvider($provider);
-
-        if (! $account || ! isset($account['name'])) {
-            return redirect()->route('ai-providers.index')
-                ->with('error', 'Tidak ada akun tersimpan untuk '.$providers[$provider]['label'].'. Silakan hubungkan dari awal.');
-        }
-
-        if ($client->enableAccount($account['name']) && $client->waitForAccountEnabled($provider, 10)) {
-            return redirect()->route('ai-providers.index')
-                ->with('success', $providers[$provider]['label'].' aktif kembali.');
-        }
-
-        return redirect()->route('ai-providers.index')
-            ->with('error', 'Gagal mengaktifkan akun. Coba hubungkan ulang dari awal.');
-    }
 }

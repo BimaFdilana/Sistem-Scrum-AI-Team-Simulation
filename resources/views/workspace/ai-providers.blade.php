@@ -33,7 +33,6 @@
     <section class="agent-directory-list">
         @foreach ($providers as $slug => $info)
             @php($connected = $info['connected'])
-            @php($account = $info['account'])
             <article class="directory-row">
                 <span class="agent-avatar avatar-{{ $slug === 'antigravity' ? 'mint' : ($slug === 'codex' ? 'violet' : 'amber') }}">{{ mb_strtoupper(mb_substr($info['label'], 0, 1)) }}</span>
                 <div class="directory-main">
@@ -51,13 +50,6 @@
                             @csrf
                             <button class="button" type="submit" onclick="return confirm('Putus akun {{ $info['label'] }}? Kamu bisa mengaktifkannya lagi kapan pun.')">Putuskan</button>
                         </form>
-                    @elseif ($account)
-                        {{-- File akun masih tersimpan tapi dinonaktifkan: aktifkan lagi tanpa OAuth ulang. --}}
-                        <form method="POST" action="{{ route('ai-providers.enable', ['provider' => $slug]) }}">
-                            @csrf
-                            <button class="button button-primary" type="submit">Aktifkan kembali</button>
-                        </form>
-                        <a class="button" href="{{ route('ai-providers.connect', ['provider' => $slug]) }}">Hubungkan ulang</a>
                     @else
                         <a class="button button-primary" href="{{ route('ai-providers.connect', ['provider' => $slug]) }}">Hubungkan <span aria-hidden="true">→</span></a>
                     @endif

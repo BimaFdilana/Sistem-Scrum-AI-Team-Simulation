@@ -226,11 +226,6 @@ class CliProxyApiClient
         return false;
     }
 
-    public function enableAccount(string $name): bool
-    {
-        return $this->setAccountDisabled($name, false);
-    }
-
     /**
      * Extract the OAuth `code` (or `error`) from a pasted callback URL.
      */

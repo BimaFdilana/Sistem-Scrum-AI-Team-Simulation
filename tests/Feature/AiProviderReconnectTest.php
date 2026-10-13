@@ -65,7 +65,7 @@ class AiProviderReconnectTest extends TestCase
         $this->assertFalse($account['disabled']);
     }
 
-    public function test_disconnect_and_enable_forget_models_cache(): void
+    public function test_disconnect_forgets_models_cache(): void
     {
         Http::fake([
             $this->mgmt('/auth-files/status') => Http::response(['status' => 'ok']),
@@ -78,7 +78,7 @@ class AiProviderReconnectTest extends TestCase
         $this->assertNull(\Illuminate\Support\Facades\Cache::get('cliproxy:models'));
 
         \Illuminate\Support\Facades\Cache::put('cliproxy:models', [['id' => 'x', 'owned_by' => 'openai']], 60);
-        $this->assertTrue($client->enableAccount('codex-a.json'));
+        $this->assertTrue($client->setAccountDisabled('codex-a.json', false));
         $this->assertNull(\Illuminate\Support\Facades\Cache::get('cliproxy:models'));
     }
 
@@ -119,37 +119,6 @@ class AiProviderReconnectTest extends TestCase
         ]);
 
         $this->assertTrue(app(CliProxyApiClient::class)->waitForAccountEnabled('codex', 0));
-    }
-
-    public function test_enable_reactivates_disabled_account_without_oauth(): void
-    {
-        $calls = 0;
-        Http::fake(function ($request) use (&$calls) {
-            $url = $request->url();
-            if (str_ends_with($url, '/auth-files/status')) {
-                $calls++;
-                $this->assertFalse($request['disabled']);
-
-                return Http::response(['status' => 'ok', 'disabled' => false]);
-            }
-            if (str_ends_with($url, '/auth-files')) {
-                // Panggilan pertama (dari enable()): masih disabled.
-                // Polling berikutnya: sudah aktif.
-                static $n = 0;
-                $n++;
-
-                return Http::response(['files' => [$this->codexFile($n === 1)]]);
-            }
-
-            return Http::response(null, 404);
-        });
-
-        $response = $this->actingAs(User::factory()->create())
-            ->post('/ai-providers/codex/enable');
-
-        $response->assertRedirect(route('ai-providers.index'));
-        $response->assertSessionHas('success');
-        $this->assertSame(1, $calls);
     }
 
     public function test_callback_does_not_claim_success_when_account_stays_disabled(): void
