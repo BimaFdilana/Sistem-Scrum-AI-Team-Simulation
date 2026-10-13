@@ -82,6 +82,27 @@ class AiProviderReconnectTest extends TestCase
         $this->assertNull(\Illuminate\Support\Facades\Cache::get('cliproxy:models'));
     }
 
+    public function test_disconnect_clears_provider_cache_and_pending_oauth_state(): void
+    {
+        Http::fake([
+            $this->mgmt('/auth-files/status') => Http::response(['status' => 'ok']),
+            $this->mgmt('/auth-files') => Http::response(['files' => [$this->codexFile(false)]]),
+        ]);
+
+        \Illuminate\Support\Facades\Cache::put('cliproxy:models', [['id' => 'x', 'owned_by' => 'openai']], 60);
+
+        $response = $this->actingAs(User::factory()->create())
+            ->withSession(['ai_provider_state.codex' => 'state-lama'])
+            ->post('/ai-providers/codex/disconnect');
+
+        $response->assertRedirect(route('ai-providers.index'));
+        $response->assertSessionHas('success');
+        // Cache model terhapus ...
+        $this->assertNull(\Illuminate\Support\Facades\Cache::get('cliproxy:models'));
+        // ... dan sisa OAuth state ikut dibersihkan.
+        $this->assertFalse(session()->has('ai_provider_state.codex'));
+    }
+
     public function test_wait_for_account_enabled_detects_disabled(): void
     {
         Http::fake([

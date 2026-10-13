@@ -103,6 +103,11 @@ class AiProviderController extends Controller
         $account = $client->accountForProvider($provider);
 
         if ($account && isset($account['name']) && $client->disableAccount($account['name'])) {
+            // Clean slate: hapus sisa status OAuth yang tertunda agar
+            // penghubungan ulang ke provider yang sama mulai dari nol.
+            // (Cache katalog model sudah dihapus di dalam disableAccount.)
+            session()->forget("ai_provider_state.{$provider}");
+
             return redirect()->route('ai-providers.index')
                 ->with('success', $providers[$provider]['label'].' diputus. Kamu bisa mengaktifkannya lagi kapan pun tanpa login ulang.');
         }
