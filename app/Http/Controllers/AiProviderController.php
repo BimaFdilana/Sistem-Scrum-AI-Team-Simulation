@@ -51,8 +51,8 @@ class AiProviderController extends Controller
         $providers = config('ai.providers', []);
         abort_unless(isset($providers[$provider]), 404);
 
-        // Verifikasi aktivasi akun bisa menunggu gateway sampai ~30 detik.
-        set_time_limit(60);
+        // Verifikasi token refresh bisa menunggu gateway sampai ~60 detik.
+        set_time_limit(120);
 
         $request->validate([
             'callback_url' => ['required', 'string', 'max:4000'],
@@ -79,13 +79,22 @@ class AiProviderController extends Controller
         }
 
         if ($client->submitCallback($state, $code)) {
-            // Gateway bisa memproses pertukaran kode secara asinkron — pastikan
-            // akunnya benar-benar aktif sebelum mengklaim "berhasil terhubung".
-            if ($client->waitForAccountEnabled($provider)) {
-                $client->forgetModelsCache();
+            // Tunggu bukti nyata pertukaran kode berhasil (file token ditulis),
+            // bukan sekadar "callback diterima".
+            $account = $client->waitForTokenRefresh($provider, 60);
 
-                return redirect()->route('ai-providers.index')
-                    ->with('success', $providers[$provider]['label'].' berhasil terhubung.');
+            if ($account !== null) {
+                // Gateway tidak mengaktifkan otomatis akun yang pernah diputus.
+                if (($account['disabled'] ?? false) && isset($account['name'])) {
+                    $client->setAccountDisabled($account['name'], false);
+                }
+
+                if ($client->waitForAccountEnabled($provider, 10)) {
+                    $client->forgetModelsCache();
+
+                    return redirect()->route('ai-providers.index')
+                        ->with('success', $providers[$provider]['label'].' berhasil terhubung.');
+                }
             }
 
             session()->put("ai_provider_state.{$provider}", $state);

@@ -201,6 +201,41 @@ class CliProxyApiClient
     }
 
     /**
+     * Tunggu sampai gateway selesai memproses OAuth: file akun baru muncul
+     * atau file lama ditulis ulang (token refresh). Kembalikan akunnya,
+     * atau null bila timeout. Ini sinyal "pertukaran kode BERHASIL" yang
+     * sebenarnya — bukan sekadar "callback diterima".
+     */
+    public function waitForTokenRefresh(string $provider, int $timeoutSeconds = 60, int $intervalSeconds = 3): ?array
+    {
+        $before = $this->accountForProvider($provider);
+        $beforeModtime = is_string($before['modtime'] ?? null) ? $before['modtime'] : null;
+        $deadline = time() + max(0, $timeoutSeconds);
+
+        do {
+            $account = $this->accountForProvider($provider);
+
+            if ($account !== null) {
+                $afterModtime = is_string($account['modtime'] ?? null) ? $account['modtime'] : null;
+                $isNew = $before === null;
+                $wasRewritten = $beforeModtime !== null && $afterModtime !== null && $afterModtime !== $beforeModtime;
+
+                if ($isNew || $wasRewritten) {
+                    return $account;
+                }
+            }
+
+            if (time() >= $deadline) {
+                break;
+            }
+
+            sleep(min($intervalSeconds, max(1, $deadline - time())));
+        } while (true);
+
+        return null;
+    }
+
+    /**
      * Tunggu sampai akun provider benar-benar aktif di gateway (ada dan
      * tidak disabled). Pertukaran kode OAuth bisa berjalan asinkron di
      * gateway, jadi "callback diterima" belum berarti "akun terhubung".

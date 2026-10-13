@@ -122,11 +122,15 @@ class AiProviderReconnectTest extends TestCase
     {
         // Simulasi kasus Bima: state di session berasal dari link login yang
         // lebih baru, tapi user menyelesaikan OAuth di tab lama.
+        $freshAccount = $this->codexFile(false);
+        $freshAccount['modtime'] = '2026-10-13T20:33:59+07:00';
+
         $client = \Mockery::mock(CliProxyApiClient::class)->makePartial();
         $client->shouldReceive('submitCallback')
             ->once()
             ->with('state-dari-url-lama', 'kode-abc')
             ->andReturn(true);
+        $client->shouldReceive('waitForTokenRefresh')->once()->andReturn($freshAccount);
         $client->shouldReceive('waitForAccountEnabled')->once()->andReturn(true);
         $client->shouldReceive('forgetModelsCache')->once();
         $this->app->instance(CliProxyApiClient::class, $client);
@@ -141,6 +145,63 @@ class AiProviderReconnectTest extends TestCase
         $response->assertSessionHas('success');
 
         \Mockery::close();
+    }
+
+    public function test_callback_enables_previously_disconnected_account_after_token_refresh(): void
+    {
+        // Kasus nyata Bima 20:33: OAuth sukses (token refresh) tapi file akun
+        // masih disabled — controller harus mengaktifkannya otomatis.
+        $refreshedAccount = $this->codexFile(true);
+        $refreshedAccount['modtime'] = '2026-10-13T20:33:59+07:00';
+
+        $client = \Mockery::mock(CliProxyApiClient::class)->makePartial();
+        $client->shouldReceive('submitCallback')->once()->andReturn(true);
+        $client->shouldReceive('waitForTokenRefresh')->once()->andReturn($refreshedAccount);
+        $client->shouldReceive('setAccountDisabled')->once()->with($refreshedAccount['name'], false)->andReturn(true);
+        $client->shouldReceive('waitForAccountEnabled')->once()->andReturn(true);
+        $client->shouldReceive('forgetModelsCache')->once();
+        $this->app->instance(CliProxyApiClient::class, $client);
+
+        $response = $this->actingAs(User::factory()->create())
+            ->withSession(['ai_provider_state.codex' => 'state-123'])
+            ->post('/ai-providers/codex/callback', [
+                'callback_url' => 'http://localhost:8317/callback?code=kode-abc&state=state-123',
+            ]);
+
+        $response->assertRedirect(route('ai-providers.index'));
+        $response->assertSessionHas('success', 'ChatGPT (Codex) berhasil terhubung.');
+
+        \Mockery::close();
+    }
+
+    public function test_wait_for_token_refresh_detects_rewritten_file(): void
+    {
+        $old = $this->codexFile(true);
+        $old['modtime'] = '2026-10-13T20:00:00+07:00';
+        $new = $this->codexFile(true);
+        $new['modtime'] = '2026-10-13T20:33:59+07:00';
+
+        $calls = 0;
+        Http::fake(function () use (&$calls, $old, $new) {
+            $calls++;
+
+            return Http::response(['files' => [$calls === 1 ? $old : $new]]);
+        });
+
+        $account = app(CliProxyApiClient::class)->waitForTokenRefresh('codex', 10, 1);
+
+        $this->assertNotNull($account);
+        $this->assertSame('2026-10-13T20:33:59+07:00', $account['modtime']);
+    }
+
+    public function test_wait_for_token_refresh_times_out_when_nothing_changes(): void
+    {
+        Http::fake([
+            $this->mgmt('/auth-files') => Http::response(['files' => [$this->codexFile(true)]]),
+        ]);
+
+        // Tanpa modtime di respons, file lama yang tak berubah = bukan refresh.
+        $this->assertNull(app(CliProxyApiClient::class)->waitForTokenRefresh('codex', 0));
     }
 
     public function test_wait_for_account_enabled_detects_disabled(): void
@@ -170,11 +231,11 @@ class AiProviderReconnectTest extends TestCase
             $this->mgmt('/auth-files') => Http::response(['files' => [$this->codexFile(true)]]),
         ]);
 
-        // waitForAccountEnabled default 30 detik terlalu lama untuk test;
+        // waitForTokenRefresh default 60 detik terlalu lama untuk test;
         // pakai mock parsial agar polling langsung gagal.
         $client = \Mockery::mock(CliProxyApiClient::class)->makePartial();
         $client->shouldReceive('submitCallback')->once()->andReturn(true);
-        $client->shouldReceive('waitForAccountEnabled')->once()->andReturn(false);
+        $client->shouldReceive('waitForTokenRefresh')->once()->andReturn(null);
         $this->app->instance(CliProxyApiClient::class, $client);
 
         $response = $this->actingAs(User::factory()->create())
