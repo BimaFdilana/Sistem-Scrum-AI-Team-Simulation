@@ -65,6 +65,23 @@ class AiProviderReconnectTest extends TestCase
         $this->assertFalse($account['disabled']);
     }
 
+    public function test_disconnect_and_enable_forget_models_cache(): void
+    {
+        Http::fake([
+            $this->mgmt('/auth-files/status') => Http::response(['status' => 'ok']),
+        ]);
+
+        $client = app(CliProxyApiClient::class);
+
+        \Illuminate\Support\Facades\Cache::put('cliproxy:models', [['id' => 'x', 'owned_by' => 'openai']], 60);
+        $this->assertTrue($client->disableAccount('codex-a.json'));
+        $this->assertNull(\Illuminate\Support\Facades\Cache::get('cliproxy:models'));
+
+        \Illuminate\Support\Facades\Cache::put('cliproxy:models', [['id' => 'x', 'owned_by' => 'openai']], 60);
+        $this->assertTrue($client->enableAccount('codex-a.json'));
+        $this->assertNull(\Illuminate\Support\Facades\Cache::get('cliproxy:models'));
+    }
+
     public function test_wait_for_account_enabled_detects_disabled(): void
     {
         Http::fake([

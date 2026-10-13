@@ -86,6 +86,8 @@ class AiProviderController extends Controller
             // Gateway bisa memproses pertukaran kode secara asinkron — pastikan
             // akunnya benar-benar aktif sebelum mengklaim "berhasil terhubung".
             if ($client->waitForAccountEnabled($provider)) {
+                $client->forgetModelsCache();
+
                 return redirect()->route('ai-providers.index')
                     ->with('success', $providers[$provider]['label'].' berhasil terhubung.');
             }

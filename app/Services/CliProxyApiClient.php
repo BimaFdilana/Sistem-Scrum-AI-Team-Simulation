@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Throwable;
 
@@ -137,10 +138,24 @@ class CliProxyApiClient
                 'disabled' => $disabled,
             ]);
 
-            return $response->successful();
+            if ($response->successful()) {
+                // Status akun berubah → katalog model basi, paksa refresh
+                // agar halaman Agent langsung mencerminkan kondisi baru.
+                $this->forgetModelsCache();
+
+                return true;
+            }
+
+            return false;
         } catch (Throwable) {
             return false;
         }
+    }
+
+    /** Hapus cache katalog model agar diambil ulang dari gateway. */
+    public function forgetModelsCache(): void
+    {
+        Cache::forget('cliproxy:models');
     }
 
     /** Disable (disconnect) a linked account by its auth-file name. */
@@ -213,16 +228,7 @@ class CliProxyApiClient
 
     public function enableAccount(string $name): bool
     {
-        try {
-            $response = $this->management()->patch('/auth-files/status', [
-                'name' => $name,
-                'disabled' => false,
-            ]);
-
-            return $response->successful();
-        } catch (Throwable) {
-            return false;
-        }
+        return $this->setAccountDisabled($name, false);
     }
 
     /**
