@@ -18,6 +18,11 @@ return [
         // Jalur agen (FE/BE/QA/SM) lewat akun OAuth CLIProxyAPI. Dimatikan
         // saat testing (phpunit.xml) agar tidak bocor ke gateway asli.
         'agents_enabled' => env('CLIPROXY_AGENTS_ENABLED', true),
+        // Ketahanan chat: berapa kali mencoba per model (backoff 1s,2s,4s…)
+        // dan berapa model cadangan dari provider yang sama bila model utama
+        // tak ditemukan/terus gagal.
+        'chat_attempts' => (int) env('CLIPROXY_CHAT_ATTEMPTS', 3),
+        'chat_fallbacks' => (int) env('CLIPROXY_CHAT_FALLBACKS', 2),
     ],
 
     /*

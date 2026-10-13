@@ -66,14 +66,14 @@ class AgentProfileClient
         $cliproxy = app(CliProxyApiClient::class);
         $model = $cliproxy->resolveModel($slug);
         if ($model !== null) {
-            $content = $cliproxy->chat($model, $systemPrompt, $message);
-            if ($content === null) {
-                throw new RuntimeException('AI Agent consultation unavailable: CLIPROXY_FAILED');
+            $result = $cliproxy->chatResilient($model, $systemPrompt, $message);
+            if ($result['text'] === null) {
+                throw new \App\Exceptions\AiUnavailableException($result['error'] ?? 'UNKNOWN');
             }
 
-            return app(ChatDisclosurePolicy::class)->containsSensitiveDisclosure($content)
+            return app(ChatDisclosurePolicy::class)->containsSensitiveDisclosure($result['text'])
                 ? ChatDisclosurePolicy::SAFE_RESPONSE
-                : $content;
+                : $result['text'];
         }
 
         return app(AgentConsultationDispatcher::class)->send($slug, $message, $conversationId, $systemPrompt);

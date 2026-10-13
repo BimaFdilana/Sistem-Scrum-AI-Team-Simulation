@@ -312,14 +312,65 @@ class CliProxyApiClient
     /**
      * OpenAI-compatible chat completion via CLIProxyAPI.
      * Returns the assistant text, or null on failure.
+     * Punya ketahanan: retry + fallback model (lihat chatResilient).
      *
      * @param array{data: string, mime: string}|null $image lampiran gambar (base64); diteruskan lalu dibuang.
      */
     public function chat(string $model, string $systemPrompt, string $userMessage, int $timeout = 120, ?array $image = null): ?string
     {
+        return $this->chatResilient($model, $systemPrompt, $userMessage, $timeout, $image)['text'];
+    }
+
+    /**
+     * Chat dengan ketahanan terhadap gangguan upstream:
+     * - Coba ulang (backoff) untuk kegagalan transient: 429/502/503, timeout,
+     *   gateway tak terjangkau, respons kosong.
+     * - Pindah ke model cadangan dari provider yang sama bila model utama
+     *   tidak ditemukan atau terus gagal (model image dikecualikan).
+     * - Berhenti langsung untuk kegagalan permanen: 401 (auth), 400.
+     *
+     * @param array{data: string, mime: string}|null $image
+     * @return array{text: ?string, error: ?string, model: ?string}
+     */
+    public function chatResilient(string $model, string $systemPrompt, string $userMessage, int $timeout = 120, ?array $image = null): array
+    {
         if (! $this->agentsEnabled() || ! $this->apiKey) {
-            return null;
+            return ['text' => null, 'error' => 'DISABLED', 'model' => null];
         }
+        $maxAttempts = max(1, (int) config('ai.cliproxy.chat_attempts', 3));
+        $maxFallbacks = max(0, (int) config('ai.cliproxy.chat_fallbacks', 2));
+
+        $lastError = 'UNKNOWN';
+        foreach (array_slice($this->fallbackCandidates($model), 0, $maxFallbacks + 1) as $candidate) {
+            for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+                $outcome = $this->attemptChat($candidate, $systemPrompt, $userMessage, $timeout, $image);
+                if ($outcome['status'] === 'ok') {
+                    return ['text' => $outcome['text'], 'error' => null, 'model' => $candidate];
+                }
+                $lastError = $outcome['error'];
+                if ($outcome['status'] === 'permanent') {
+                    return ['text' => null, 'error' => $lastError, 'model' => null];
+                }
+                if ($outcome['status'] === 'not_found') {
+                    break; // coba model cadangan berikutnya
+                }
+                if ($attempt < $maxAttempts) {
+                    sleep((int) min(2 ** ($attempt - 1), 8)); // 1s, 2s, 4s, maks 8s
+                }
+            }
+        }
+
+        return ['text' => null, 'error' => $lastError, 'model' => null];
+    }
+
+    /**
+     * Satu percobaan chat. Tidak pernah melempar exception.
+     *
+     * @param array{data: string, mime: string}|null $image
+     * @return array{status: 'ok'|'transient'|'permanent'|'not_found', text: ?string, error: string}
+     */
+    private function attemptChat(string $model, string $systemPrompt, string $userMessage, int $timeout, ?array $image): array
+    {
         $userContent = $image !== null
             ? [
                 ['type' => 'text', 'text' => $userMessage],
@@ -336,15 +387,76 @@ class CliProxyApiClient
                         ['role' => 'user', 'content' => $userContent],
                     ],
                 ]);
-            if (! $response->successful()) {
-                return null;
-            }
-            $content = $response->json('choices.0.message.content');
+        } catch (Throwable $e) {
+            // Timeout cURL (28) vs koneksi gagal dibedakan dari pesan exception.
+            $error = str_contains(strtolower($e->getMessage()), 'timed out') ? 'TIMEOUT' : 'GATEWAY_UNREACHABLE';
 
-            return is_string($content) && trim($content) !== '' ? trim($content) : null;
-        } catch (Throwable) {
-            return null;
+            return ['status' => 'transient', 'text' => null, 'error' => $error];
         }
+
+        $status = $response->status();
+        if ($status === 401) {
+            return ['status' => 'permanent', 'text' => null, 'error' => 'AUTH_FAILED'];
+        }
+        if ($status === 404) {
+            return ['status' => 'not_found', 'text' => null, 'error' => 'MODEL_NOT_FOUND'];
+        }
+        if ($status === 400) {
+            return ['status' => 'permanent', 'text' => null, 'error' => 'BAD_REQUEST'];
+        }
+        if ($status === 429) {
+            return ['status' => 'transient', 'text' => null, 'error' => 'RATE_LIMITED'];
+        }
+        if ($status >= 500) {
+            return ['status' => 'transient', 'text' => null, 'error' => 'UPSTREAM_OVERLOADED'];
+        }
+        if (! $response->successful()) {
+            return ['status' => 'transient', 'text' => null, 'error' => 'UPSTREAM_OVERLOADED'];
+        }
+        $content = $response->json('choices.0.message.content');
+        if (! is_string($content) || trim($content) === '') {
+            return ['status' => 'transient', 'text' => null, 'error' => 'EMPTY_RESPONSE'];
+        }
+
+        return ['status' => 'ok', 'text' => trim($content), 'error' => ''];
+    }
+
+    /**
+     * Kandidat model: utama dulu, lalu model chat lain dari provider yang sama.
+     * Model image-* dikecualikan (bukan untuk chat).
+     *
+     * @return string[]
+     */
+    private function fallbackCandidates(string $model): array
+    {
+        $candidates = [$model];
+        $models = $this->models();
+        $primary = null;
+        foreach ($models as $m) {
+            if ($m['id'] === $model) {
+                $primary = $m;
+                break;
+            }
+        }
+        if ($primary === null) {
+            return $candidates;
+        }
+        foreach (['codex', 'google', 'anthropic'] as $provider) {
+            if (! self::modelMatchesProvider($primary['id'], $primary['owned_by'], $provider)) {
+                continue;
+            }
+            foreach ($models as $m) {
+                if ($m['id'] === $model
+                    || ! self::modelMatchesProvider($m['id'], $m['owned_by'], $provider)
+                    || str_contains(strtolower($m['id']), 'image')) {
+                    continue;
+                }
+                $candidates[] = $m['id'];
+            }
+            break;
+        }
+
+        return array_values(array_unique($candidates));
     }
 
     private static function modelMatchesProvider(string $id, string $ownedBy, string $provider): bool

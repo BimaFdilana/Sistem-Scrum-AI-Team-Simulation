@@ -53,6 +53,10 @@ class ChatController extends Controller
 
     public function store(Request $request, HermesClient $hermes, ChatDisclosurePolicy $disclosurePolicy): JsonResponse
     {
+        // Chat menunggu AI (termasuk retry + fallback bila upstream gangguan);
+        // beri batas jujur 5 menit, bukan default PHP 30 detik.
+        set_time_limit(300);
+
         $data = $request->validate([
             'message' => ['required', 'string', 'max:8000'],
             'conversation_id' => ['nullable', 'uuid'],
@@ -113,6 +117,11 @@ class ChatController extends Controller
 
         try {
             $content = $hermes->sendMessage($userMessage->content, $conversation->uuid, $image);
+        } catch (\App\Exceptions\AiUnavailableException $e) {
+            return response()->json([
+                'conversation_id' => $conversation->uuid,
+                'message' => $this->aiErrorMessage($e->errorCode),
+            ], $e->errorCode === 'TIMEOUT' ? 504 : 503);
         } catch (RuntimeException) {
             return response()->json([
                 'conversation_id' => $conversation->uuid,
@@ -143,6 +152,19 @@ class ChatController extends Controller
         abort_if(! $agent || $slug === 'scrum-master', 404);
 
         return $agent;
+    }
+
+    /** Pesan kesalahan yang jujur dan spesifik per penyebab, bukan satu kalimat generik. */
+    private function aiErrorMessage(string $errorCode): string
+    {
+        return match ($errorCode) {
+            'UPSTREAM_OVERLOADED', 'RATE_LIMITED' => 'Server AI sedang penuh. Tunggu 1–2 menit lalu coba lagi.',
+            'TIMEOUT' => 'AI terlalu lama merespons. Coba lagi sebentar.',
+            'AUTH_FAILED' => 'Kunci akses AI bermasalah. Periksa kembali koneksi provider di menu AI Providers.',
+            'GATEWAY_UNREACHABLE' => 'Gateway AI tidak dapat dihubungi. Pastikan layanan CLIProxyAPI berjalan.',
+            'MODEL_NOT_FOUND' => 'Model AI tidak tersedia. Pilih model lain di konfigurasi agen.',
+            default => 'AI Agent belum dapat dihubungi. Coba lagi sebentar.',
+        };
     }
 
     private function messageResponse(ChatConversation $conversation, $userMessage, $assistantMessage, array $extra = []): JsonResponse

@@ -127,6 +127,11 @@ class CliProxyAgentWiringTest extends TestCase
 
         $this->assertSame('Jawaban AI', $content);
         Http::assertSent(function ($request) {
+            // chatResilient juga mengambil katalog model (untuk fallback);
+            // assertion ini hanya untuk request chat completions.
+            if (! str_ends_with($request->url(), '/v1/chat/completions')) {
+                return false;
+            }
             $userContent = $request['messages'][1]['content'];
 
             return is_array($userContent)

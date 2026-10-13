@@ -55,12 +55,12 @@ POLICY;
         if ($model !== null) {
             $soulLine = \App\Support\Agents\AgentSoul::promptLine('scrum-master');
             $systemPrompt = self::DISCLOSURE_POLICY.($soulLine !== '' ? "\n\n".$soulLine : '');
-            $content = $cliproxy->chat($model, $systemPrompt, $message, 120, $image);
-            if ($content === null) {
-                throw new \RuntimeException('AI Agent consultation unavailable: CLIPROXY_FAILED');
+            $result = $cliproxy->chatResilient($model, $systemPrompt, $message, 120, $image);
+            if ($result['text'] === null) {
+                throw new \App\Exceptions\AiUnavailableException($result['error'] ?? 'UNKNOWN');
             }
 
-            return $content;
+            return $result['text'];
         }
 
         return app(AgentConsultationDispatcher::class)->send('scrum-master', $message, $conversationId, self::DISCLOSURE_POLICY);
