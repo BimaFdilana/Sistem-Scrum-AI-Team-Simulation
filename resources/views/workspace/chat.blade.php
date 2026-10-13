@@ -314,8 +314,15 @@
                             }),
                         });
                     }
-                    const payload = await response.json();
-                    if (!response.ok) throw new Error(payload.message || 'Pesan gagal dikirim.');
+                    // Tunnel kadang memutus respons AI yang lambat -> body kosong.
+                    // Jangan tampilkan error mentah JS ke pengguna.
+                    const payload = await response.json().catch(() => null);
+                    if (!response.ok) {
+                        throw new Error((payload && payload.message) || 'Pesan gagal dikirim (kode ' + response.status + '). Coba lagi.');
+                    }
+                    if (!payload || !payload.assistant_message) {
+                        throw new Error('Balasan AI tidak terbaca utuh (koneksi tunnel terputus). Muat ulang halaman — balasan mungkin sudah tersimpan.');
+                    }
 
                     conversationId.value = payload.conversation_id;
                     hideTyping();

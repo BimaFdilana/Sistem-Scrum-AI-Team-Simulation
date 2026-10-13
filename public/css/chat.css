@@ -10,3 +10,4 @@
 .repair-card-actions{display:flex;gap:8px;margin-top:12px}
 .repair-card-note{margin-top:10px!important;font-size:13px;color:var(--accent)}
 .repair-card-link{display:inline-block;margin-top:6px;font-size:13px;color:var(--accent)}
+.chat-attach-preview[hidden]{display:none}
