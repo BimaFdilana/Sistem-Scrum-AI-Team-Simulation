@@ -60,19 +60,22 @@ class AiProviderController extends Controller
             'callback_url.required' => 'Tempel URL callback dari address bar browser kamu.',
         ]);
 
-        $state = session()->pull("ai_provider_state.{$provider}");
+        $callbackUrl = $request->string('callback_url')->toString();
+        $code = CliProxyApiClient::extractCode($callbackUrl);
+
+        if (! $code) {
+            return back()->with('error', 'URL tersebut tidak mengandung kode otorisasi (parameter ?code=...). Pastikan kamu meng-copy seluruh URL dari address bar setelah menekan Allow/Izinkan.');
+        }
+
+        // Utamakan state dari URL yang ditempel: itulah alur login yang
+        // benar-benar diselesaikan user. State session hanya cadangan bila
+        // URL tidak membawanya (mis. user membuka beberapa tab login).
+        $state = CliProxyApiClient::extractState($callbackUrl)
+            ?? session()->pull("ai_provider_state.{$provider}");
 
         if (! $state) {
             return redirect()->route('ai-providers.connect', ['provider' => $provider])
-                ->with('error', 'Sesi login kedaluwarsa. Silakan mulai lagi dari tombol Hubungkan.');
-        }
-
-        $code = CliProxyApiClient::extractCode($request->string('callback_url')->toString());
-
-        if (! $code) {
-            session()->put("ai_provider_state.{$provider}", $state);
-
-            return back()->with('error', 'URL tersebut tidak mengandung kode otorisasi (parameter ?code=...). Pastikan kamu meng-copy seluruh URL dari address bar setelah menekan Allow/Izinkan.');
+                ->with('error', 'Sesi login kedaluwarsa dan URL tidak mengandung state. Silakan mulai lagi dari tombol Hubungkan.');
         }
 
         if ($client->submitCallback($state, $code)) {

@@ -231,6 +231,21 @@ class CliProxyApiClient
      */
     public static function extractCode(string $callbackUrl): ?string
     {
+        return self::extractCallbackParam($callbackUrl, 'code');
+    }
+
+    /**
+     * Extract the OAuth `state` from a pasted callback URL. Dipakai agar
+     * callback memakai state dari alur login yang benar-benar diselesaikan
+     * user (bukan state basi di session bila user membuka beberapa tab).
+     */
+    public static function extractState(string $callbackUrl): ?string
+    {
+        return self::extractCallbackParam($callbackUrl, 'state');
+    }
+
+    protected static function extractCallbackParam(string $callbackUrl, string $param): ?string
+    {
         $parts = parse_url(trim($callbackUrl));
 
         if (! isset($parts['query'])) {
@@ -238,8 +253,9 @@ class CliProxyApiClient
         }
 
         parse_str($parts['query'], $query);
+        $value = $query[$param] ?? null;
 
-        return $query['code'] ?? null;
+        return is_string($value) && $value !== '' ? $value : null;
     }
 
     /**

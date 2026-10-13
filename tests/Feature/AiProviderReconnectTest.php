@@ -103,6 +103,46 @@ class AiProviderReconnectTest extends TestCase
         $this->assertFalse(session()->has('ai_provider_state.codex'));
     }
 
+    public function test_extract_state_reads_state_from_callback_url(): void
+    {
+        $this->assertSame(
+            'state-xyz',
+            CliProxyApiClient::extractState('http://localhost:8317/callback?code=abc&state=state-xyz')
+        );
+        $this->assertNull(
+            CliProxyApiClient::extractState('http://localhost:8317/callback?code=abc')
+        );
+        $this->assertSame(
+            'kode-123',
+            CliProxyApiClient::extractCode('http://localhost:8317/callback?code=kode-123&state=state-xyz')
+        );
+    }
+
+    public function test_callback_prefers_pasted_state_over_stale_session_state(): void
+    {
+        // Simulasi kasus Bima: state di session berasal dari link login yang
+        // lebih baru, tapi user menyelesaikan OAuth di tab lama.
+        $client = \Mockery::mock(CliProxyApiClient::class)->makePartial();
+        $client->shouldReceive('submitCallback')
+            ->once()
+            ->with('state-dari-url-lama', 'kode-abc')
+            ->andReturn(true);
+        $client->shouldReceive('waitForAccountEnabled')->once()->andReturn(true);
+        $client->shouldReceive('forgetModelsCache')->once();
+        $this->app->instance(CliProxyApiClient::class, $client);
+
+        $response = $this->actingAs(User::factory()->create())
+            ->withSession(['ai_provider_state.codex' => 'state-session-baru'])
+            ->post('/ai-providers/codex/callback', [
+                'callback_url' => 'http://localhost:8317/callback?code=kode-abc&state=state-dari-url-lama',
+            ]);
+
+        $response->assertRedirect(route('ai-providers.index'));
+        $response->assertSessionHas('success');
+
+        \Mockery::close();
+    }
+
     public function test_wait_for_account_enabled_detects_disabled(): void
     {
         Http::fake([
