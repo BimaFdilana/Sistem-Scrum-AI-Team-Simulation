@@ -264,7 +264,8 @@ class AgentConfigurationTest extends TestCase
     {
         $owner = User::factory()->create();
         $path = tempnam((string) getenv('TMPDIR'), 'stage2-restart-');
-        $this->assertStringStartsWith('/home/sipua/.hermes/cache/scratch/stage2-agent-config-20261008/tmp/', $path);
+        $expectedTmp = rtrim((string) (getenv('TMPDIR') ?: sys_get_temp_dir()), '/') . '/';
+        $this->assertStringStartsWith($expectedTmp, $path);
         config(['database.connections.stage2_restart' => ['driver' => 'sqlite', 'database' => $path, 'prefix' => '', 'foreign_key_constraints' => true], 'database.default' => 'stage2_restart']);
         try {
             $migration = require database_path('migrations/2026_10_08_000001_create_agent_configuration_tables.php');
