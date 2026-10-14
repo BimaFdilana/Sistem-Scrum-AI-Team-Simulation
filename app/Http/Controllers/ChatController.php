@@ -60,13 +60,17 @@ class ChatController extends Controller
         $data = $request->validate([
             'message' => ['required', 'string', 'max:8000'],
             'conversation_id' => ['nullable', 'uuid'],
-            // Lampiran gambar: JPG/PNG maks 5MB, diteruskan ke AI lalu dibuang.
+            // Lampiran gambar: JPG/PNG maks 5MB. Disimpan permanen di storage
+            // agar tidak hilang setelah dikirim ke AI sebagai prompt vision.
             'image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:5120'],
         ]);
 
         $image = null;
+        $imagePath = null;
         if ($request->hasFile('image')) {
             $file = $request->file('image');
+            // Simpan permanen: storage/app/public/chat-images/
+            $imagePath = $file->store('chat-images', 'public');
             $image = [
                 'data' => base64_encode($file->get()),
                 'mime' => $file->getMimeType(),
@@ -89,8 +93,8 @@ class ChatController extends Controller
 
         $userMessage = $conversation->messages()->create([
             'role' => 'user',
-            // Gambar tidak disimpan; hanya penanda bahwa pesan disertai gambar.
             'content' => trim($data['message']).($image !== null ? "\n[lampiran gambar]" : ''),
+            'image_path' => $imagePath,
         ]);
 
         $safeResponse = $disclosurePolicy->safeResponseFor($userMessage->content);
@@ -174,7 +178,11 @@ class ChatController extends Controller
     {
         return response()->json(array_merge([
             'conversation_id' => $conversation->uuid,
-            'user_message' => ['role' => $userMessage->role, 'content' => $userMessage->content],
+            'user_message' => [
+                'role' => $userMessage->role,
+                'content' => $userMessage->content,
+                'image_url' => $userMessage->imageUrl(),
+            ],
             'assistant_message' => ['role' => $assistantMessage->role, 'content' => $assistantMessage->content],
         ], $extra));
     }

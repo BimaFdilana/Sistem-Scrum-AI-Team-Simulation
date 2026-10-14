@@ -17,6 +17,9 @@
             @forelse ($messages as $message)
                 <article class="chat-message chat-message-{{ $message->role }}">
                     <span class="chat-message-label">{{ $message->role === 'assistant' ? $agent['name'] : 'Anda' }}</span>
+                    @if($message->imageUrl())
+                        <img src="{{ $message->imageUrl() }}" alt="Gambar terlampir" class="chat-message-image">
+                    @endif
                     <p>{{ $message->content }}</p>
                 </article>
             @empty
@@ -326,6 +329,12 @@
 
                     conversationId.value = payload.conversation_id;
                     hideTyping();
+                    // Ganti URL gambar sementara (object URL) dengan URL permanen
+                    // dari server agar gambar tidak hilang saat halaman dimuat ulang.
+                    if (payload.user_message?.image_url) {
+                        const lastUserMsg = transcript.querySelector('article.chat-message-user:last-of-type img.chat-message-image');
+                        if (lastUserMsg) lastUserMsg.src = payload.user_message.image_url;
+                    }
                     addMessage('assistant', payload.assistant_message.content);
                     if (payload.repair_order) addRepairCard(payload.repair_order);
                     error.textContent = 'Percakapan tersimpan di workspace.';
