@@ -231,6 +231,94 @@ class RepairOrderTest extends TestCase
             ->assertSessionHasErrors('execution');
     }
 
+    public function test_retry_failed_order_back_to_confirmed_and_can_run_again(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create();
+        $project = $this->makeProject();
+        $order = RepairOrder::query()->create([
+            'requested_by' => $owner->id, 'project_id' => $project->id,
+            'title' => 'T', 'summary' => 'S', 'original_message' => 'perbaiki T', 'status' => 'FAILED',
+        ]);
+        ExecutionRun::query()->create([
+            'story_id' => null, 'repair_order_id' => $order->id,
+            'requested_by' => $owner->id, 'status' => 'FAILED',
+        ]);
+
+        // Coba lagi mengembalikan ke CONFIRMED.
+        $this->actingAs($owner)->post("/repair-orders/{$order->id}/retry")->assertRedirect();
+        $this->assertSame('CONFIRMED', $order->fresh()->status);
+
+        // Bisa dijalankan lagi seperti biasa.
+        $this->actingAs($owner)->post("/repair-orders/{$order->id}/run")->assertRedirect();
+        $this->assertSame('RUNNING', $order->fresh()->status);
+        $this->assertSame(2, ExecutionRun::query()->where('repair_order_id', $order->id)->count());
+        Queue::assertPushed(BreakdownExecutionJob::class);
+    }
+
+    public function test_retry_blocked_order(): void
+    {
+        $owner = User::factory()->create();
+        $project = $this->makeProject();
+        $order = RepairOrder::query()->create([
+            'requested_by' => $owner->id, 'project_id' => $project->id,
+            'title' => 'T', 'summary' => 'S', 'original_message' => 'perbaiki T', 'status' => 'BLOCKED',
+        ]);
+
+        $this->actingAs($owner)->post("/repair-orders/{$order->id}/retry")->assertRedirect();
+        $this->assertSame('CONFIRMED', $order->fresh()->status);
+    }
+
+    public function test_retry_rejected_unless_failed_or_blocked(): void
+    {
+        $owner = User::factory()->create();
+        $project = $this->makeProject();
+        $make = fn (string $status) => RepairOrder::query()->create([
+            'requested_by' => $owner->id, 'project_id' => $project->id,
+            'title' => 'T', 'summary' => 'S', 'original_message' => 'perbaiki T', 'status' => $status,
+        ]);
+
+        foreach (['DRAFT', 'CONFIRMED', 'RUNNING', 'COMPLETED', 'CANCELLED'] as $status) {
+            $order = $make($status);
+            $this->actingAs($owner)->post("/repair-orders/{$order->id}/retry")
+                ->assertSessionHasErrors('execution');
+            $this->assertSame($status, $order->fresh()->status);
+        }
+    }
+
+    public function test_retry_rejected_when_already_accepted(): void
+    {
+        $owner = User::factory()->create();
+        $project = $this->makeProject();
+        $order = RepairOrder::query()->create([
+            'requested_by' => $owner->id, 'project_id' => $project->id,
+            'title' => 'T', 'summary' => 'S', 'original_message' => 'perbaiki T', 'status' => 'FAILED',
+            'acceptance_status' => 'GAGAL', 'accepted_at' => now(),
+        ]);
+
+        $this->actingAs($owner)->post("/repair-orders/{$order->id}/retry")
+            ->assertSessionHasErrors('execution');
+        $this->assertSame('FAILED', $order->fresh()->status);
+    }
+
+    public function test_retry_rejected_while_run_active(): void
+    {
+        $owner = User::factory()->create();
+        $project = $this->makeProject();
+        $order = RepairOrder::query()->create([
+            'requested_by' => $owner->id, 'project_id' => $project->id,
+            'title' => 'T', 'summary' => 'S', 'original_message' => 'perbaiki T', 'status' => 'BLOCKED',
+        ]);
+        ExecutionRun::query()->create([
+            'story_id' => null, 'repair_order_id' => $order->id,
+            'requested_by' => $owner->id, 'status' => 'EXECUTING',
+        ]);
+
+        $this->actingAs($owner)->post("/repair-orders/{$order->id}/retry")
+            ->assertSessionHasErrors('execution');
+        $this->assertSame('BLOCKED', $order->fresh()->status);
+    }
+
     protected function tearDown(): void
     {
         Mockery::close();

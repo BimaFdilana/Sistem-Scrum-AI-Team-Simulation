@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Jobs\BreakdownExecutionJob;
 use App\Models\ExecutionRun;
+use App\Models\PermissionRequest;
 use App\Models\Story;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -23,6 +24,10 @@ class ExecutionController extends Controller
         if (! $story->project?->workspace_path || ! is_dir($story->project->workspace_path)) {
             return back()->withErrors(['execution' => 'Baseline project belum siap (tunggu scaffold/clone selesai).']);
         }
+        // Kedaluwarsakan permintaan izin yang menggantung > 24 jam dulu,
+        // agar tidak memblokir eksekusi baru secara permanen.
+        PermissionRequest::expireStale();
+
         $active = ExecutionRun::query()->where('story_id', $story->id)
             ->whereIn('status', ['QUEUED', 'BREAKDOWN', 'AWAITING_PERMISSION', 'EXECUTING', 'REVIEWING', 'MERGING'])
             ->exists();

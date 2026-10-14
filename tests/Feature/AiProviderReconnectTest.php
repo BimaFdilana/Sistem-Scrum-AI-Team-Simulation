@@ -126,6 +126,7 @@ class AiProviderReconnectTest extends TestCase
         $freshAccount['modtime'] = '2026-10-13T20:33:59+07:00';
 
         $client = \Mockery::mock(CliProxyApiClient::class)->makePartial();
+        $client->shouldReceive('isAvailable')->andReturn(true);
         $client->shouldReceive('submitCallback')
             ->once()
             ->with('state-dari-url-lama', 'kode-abc')
@@ -155,6 +156,7 @@ class AiProviderReconnectTest extends TestCase
         $refreshedAccount['modtime'] = '2026-10-13T20:33:59+07:00';
 
         $client = \Mockery::mock(CliProxyApiClient::class)->makePartial();
+        $client->shouldReceive('isAvailable')->andReturn(true);
         $client->shouldReceive('submitCallback')->once()->andReturn(true);
         $client->shouldReceive('waitForTokenRefresh')->once()->andReturn($refreshedAccount);
         $client->shouldReceive('setAccountDisabled')->once()->with($refreshedAccount['name'], false)->andReturn(true);
@@ -234,6 +236,7 @@ class AiProviderReconnectTest extends TestCase
         // waitForTokenRefresh default 60 detik terlalu lama untuk test;
         // pakai mock parsial agar polling langsung gagal.
         $client = \Mockery::mock(CliProxyApiClient::class)->makePartial();
+        $client->shouldReceive('isAvailable')->andReturn(true);
         $client->shouldReceive('submitCallback')->once()->andReturn(true);
         $client->shouldReceive('waitForTokenRefresh')->once()->andReturn(null);
         $this->app->instance(CliProxyApiClient::class, $client);

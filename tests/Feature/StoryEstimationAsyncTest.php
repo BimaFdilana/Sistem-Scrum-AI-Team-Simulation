@@ -245,4 +245,65 @@ class StoryEstimationAsyncTest extends TestCase
 
         return [$owner, $project, $story];
     }
+
+    public function test_store_recovers_stale_running_and_claims_new_run(): void
+    {
+        Queue::fake();
+        [$owner, $project, $story] = $this->makeStory();
+        $stale = StoryEstimationRun::query()->create([
+            'story_id' => $story->id, 'requested_by' => $owner->id,
+            'story_revision' => $story->revision, 'status' => 'RUNNING',
+        ]);
+        $stale->agentRuns()->create([
+            'profile_slug' => 'backend-developer', 'round' => 1, 'status' => 'RUNNING',
+            'started_at' => now()->subMinutes(6), 'heartbeat_at' => now()->subMinutes(6),
+        ]);
+
+        $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs')
+            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog')->assertSessionHas('status');
+
+        // Run lama yang macet ditandai FAILED, lalu run baru diklaim.
+        $this->assertSame('FAILED', $stale->fresh()->status);
+        $new = StoryEstimationRun::query()->where('id', '!=', $stale->id)->firstOrFail();
+        $this->assertSame('QUEUED', $new->status);
+        Queue::assertPushed(AdvanceStoryEstimationJob::class, fn ($job) => $job->runId === $new->id);
+    }
+
+    public function test_store_keeps_genuinely_active_run_without_recreating(): void
+    {
+        Queue::fake();
+        [$owner, $project, $story] = $this->makeStory();
+        $active = StoryEstimationRun::query()->create([
+            'story_id' => $story->id, 'requested_by' => $owner->id,
+            'story_revision' => $story->revision, 'status' => 'RUNNING',
+        ]);
+        $active->agentRuns()->create([
+            'profile_slug' => 'backend-developer', 'round' => 1, 'status' => 'RUNNING',
+            'started_at' => now(), 'heartbeat_at' => now(),
+        ]);
+
+        $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs')
+            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog')->assertSessionHas('status');
+
+        $this->assertSame('RUNNING', $active->fresh()->status);
+        $this->assertSame(1, StoryEstimationRun::query()->count());
+        Queue::assertNotPushed(AdvanceStoryEstimationJob::class);
+    }
+
+    public function test_discussion_page_recovers_stale_running_run(): void
+    {
+        [$owner, $project, $story] = $this->makeStory();
+        $run = StoryEstimationRun::query()->create([
+            'story_id' => $story->id, 'requested_by' => $owner->id,
+            'story_revision' => $story->revision, 'status' => 'RUNNING',
+        ]);
+        $run->agentRuns()->create([
+            'profile_slug' => 'qa-engineer', 'round' => 1, 'status' => 'RUNNING',
+            'started_at' => now()->subMinutes(6), 'heartbeat_at' => now()->subMinutes(6),
+        ]);
+
+        $this->actingAs($owner)->get('/stories/'.$story->id.'/discussion')->assertOk();
+
+        $this->assertSame('FAILED', $run->fresh()->status);
+    }
 }

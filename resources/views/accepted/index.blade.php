@@ -44,6 +44,7 @@
                 @if ($request->status === 'PENDING')
                     <form method="POST" action="{{ route('accepted.approve', $request) }}" style="display:inline">@csrf<button class="button button-primary" type="submit">Setujui</button></form>
                     <form method="POST" action="{{ route('accepted.reject', $request) }}" style="display:inline">@csrf<button class="button button-ghost" type="submit" onclick="return confirm('Tolak permintaan izin ini? Eksekusi akan dibatalkan.')">Tolak</button></form>
+                    <form method="POST" action="{{ route('accepted.cancel', $request) }}" style="display:inline">@csrf<button class="button button-ghost" type="submit" onclick="return confirm('Batalkan permintaan izin ini? Story bisa dieksekusi ulang dari awal.')">Batalkan</button></form>
                 @else
                     <small> diproses {{ $request->resolved_at?->format('d M Y H:i') }}</small>
                 @endif

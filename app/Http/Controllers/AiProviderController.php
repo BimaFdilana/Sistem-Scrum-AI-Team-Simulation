@@ -67,6 +67,13 @@ class AiProviderController extends Controller
             return back()->with('error', 'URL tersebut tidak mengandung kode otorisasi (parameter ?code=...). Pastikan kamu meng-copy seluruh URL dari address bar setelah menekan Allow/Izinkan.');
         }
 
+        // Bedakan gateway mati vs kode invalid: bila gateway tidak terjangkau,
+        // kode belum terpakai sehingga user cukup coba lagi dengan URL yang sama
+        // setelah gateway pulih — tidak perlu mengulang login dari awal.
+        if (! $client->isAvailable()) {
+            return back()->with('error', 'Gateway AI tidak dapat dihubungi saat ini. Kode login kamu belum terpakai — tunggu gateway pulih lalu tempel URL yang sama lagi, tidak perlu login ulang dari awal.');
+        }
+
         // Utamakan state dari URL yang ditempel: itulah alur login yang
         // benar-benar diselesaikan user. State session hanya cadangan bila
         // URL tidak membawanya (mis. user membuka beberapa tab login).

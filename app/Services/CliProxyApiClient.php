@@ -21,6 +21,9 @@ class CliProxyApiClient
 
     protected int $timeout;
 
+    /** Memoize hasil accounts() selama satu request (hindari N+1 HTTP ke gateway). */
+    protected ?array $accountsCache = null;
+
     public function __construct()
     {
         $this->baseUrl = rtrim((string) config('ai.cliproxy.base_url'), '/');
@@ -61,15 +64,31 @@ class CliProxyApiClient
      * List linked OAuth accounts: ['files' => [...]].
      * Each file carries id/email/status/disabled plus provider info.
      */
-    public function accounts(): array
+    public function accounts(bool $fresh = false): array
     {
+        if ($fresh) {
+            $this->forgetAccountsCache();
+        }
+
+        if ($this->accountsCache !== null) {
+            return $this->accountsCache;
+        }
+
         try {
             $response = $this->management()->get('/auth-files');
 
-            return $response->successful() ? (array) $response->json() : ['files' => []];
+            $this->accountsCache = $response->successful() ? (array) $response->json() : ['files' => []];
         } catch (Throwable) {
-            return ['files' => []];
+            $this->accountsCache = ['files' => []];
         }
+
+        return $this->accountsCache;
+    }
+
+    /** Paksa refresh cache accounts() (mis. setelah connect/disconnect). */
+    public function forgetAccountsCache(): void
+    {
+        $this->accountsCache = null;
     }
 
     /**
@@ -156,6 +175,7 @@ class CliProxyApiClient
     public function forgetModelsCache(): void
     {
         Cache::forget('cliproxy:models');
+        $this->forgetAccountsCache();
     }
 
     /** Disable (disconnect) a linked account by its auth-file name. */
@@ -169,11 +189,11 @@ class CliProxyApiClient
      * (e.g. 'codex', 'antigravity', 'claude'). Bila ada beberapa file
      * (mis. file lama yang diputus + file baru), prioritaskan yang aktif.
      */
-    public function accountForProvider(string $provider): ?array
+    public function accountForProvider(string $provider, bool $fresh = false): ?array
     {
         $fallback = null;
 
-        foreach ($this->accounts()['files'] ?? [] as $account) {
+        foreach ($this->accounts($fresh)['files'] ?? [] as $account) {
             if (! is_array($account)) {
                 continue;
             }
@@ -208,12 +228,12 @@ class CliProxyApiClient
      */
     public function waitForTokenRefresh(string $provider, int $timeoutSeconds = 60, int $intervalSeconds = 3): ?array
     {
-        $before = $this->accountForProvider($provider);
+        $before = $this->accountForProvider($provider, true);
         $beforeModtime = is_string($before['modtime'] ?? null) ? $before['modtime'] : null;
         $deadline = time() + max(0, $timeoutSeconds);
 
         do {
-            $account = $this->accountForProvider($provider);
+            $account = $this->accountForProvider($provider, true);
 
             if ($account !== null) {
                 $afterModtime = is_string($account['modtime'] ?? null) ? $account['modtime'] : null;
@@ -245,7 +265,7 @@ class CliProxyApiClient
         $deadline = time() + max(0, $timeoutSeconds);
 
         do {
-            $account = $this->accountForProvider($provider);
+            $account = $this->accountForProvider($provider, true);
 
             if ($account !== null && ! ($account['disabled'] ?? false)) {
                 return true;
@@ -314,26 +334,42 @@ class CliProxyApiClient
             return [];
         }
 
-        return \Illuminate\Support\Facades\Cache::remember('cliproxy:models', 60, function (): array {
-            try {
-                $response = Http::baseUrl($this->baseUrl)->withToken($this->apiKey)
-                    ->timeout($this->timeout)->acceptJson()->get('/v1/models');
-                if (! $response->successful()) {
-                    return [];
-                }
-                $data = $response->json('data');
-                if (! is_array($data)) {
-                    return [];
-                }
+        // Jangan cache hasil kosong: bila gateway hiccup sesaat, [] yang
+        // ter-cache 60 detik membuat semua agent tampil "terputus" walau
+        // gateway sudah pulih. Hanya hasil non-kosong yang disimpan.
+        $cached = \Illuminate\Support\Facades\Cache::get('cliproxy:models');
+        if (is_array($cached) && $cached !== []) {
+            return $cached;
+        }
 
-                return array_values(array_filter(array_map(
-                    fn ($m) => isset($m['id']) ? ['id' => (string) $m['id'], 'owned_by' => (string) ($m['owned_by'] ?? '')] : null,
-                    $data
-                )));
-            } catch (Throwable) {
+        $result = $this->fetchModels();
+        if ($result !== []) {
+            \Illuminate\Support\Facades\Cache::put('cliproxy:models', $result, 60);
+        }
+
+        return $result;
+    }
+
+    private function fetchModels(): array
+    {
+        try {
+            $response = Http::baseUrl($this->baseUrl)->withToken($this->apiKey)
+                ->timeout($this->timeout)->acceptJson()->get('/v1/models');
+            if (! $response->successful()) {
                 return [];
             }
-        });
+            $data = $response->json('data');
+            if (! is_array($data)) {
+                return [];
+            }
+
+            return array_values(array_filter(array_map(
+                fn ($m) => isset($m['id']) ? ['id' => (string) $m['id'], 'owned_by' => (string) ($m['owned_by'] ?? '')] : null,
+                $data
+            )));
+        } catch (Throwable) {
+            return [];
+        }
     }
 
     /**
@@ -460,9 +496,17 @@ class CliProxyApiClient
         $maxAttempts = max(1, (int) config('ai.cliproxy.chat_attempts', 3));
         $maxFallbacks = max(0, (int) config('ai.cliproxy.chat_fallbacks', 2));
 
+        // Budget waktu absolut: seluruh loop retry tidak boleh melebihi ini,
+        // agar tidak menabrak set_time_limit() di controller (fatal error
+        // tanpa pesan bersih bila upstream hang).
+        $deadline = microtime(true) + (int) config('ai.cliproxy.chat_deadline', 240);
+
         $lastError = 'UNKNOWN';
         foreach (array_slice($this->fallbackCandidates($model), 0, $maxFallbacks + 1) as $candidate) {
             for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+                if (microtime(true) >= $deadline) {
+                    return ['text' => null, 'error' => $lastError === 'UNKNOWN' ? 'TIMEOUT' : $lastError, 'model' => null];
+                }
                 $outcome = $this->attemptChat($candidate, $systemPrompt, $userMessage, $timeout, $image);
                 if ($outcome['status'] === 'ok') {
                     return ['text' => $outcome['text'], 'error' => null, 'model' => $candidate];

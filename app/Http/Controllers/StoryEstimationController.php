@@ -24,6 +24,15 @@ class StoryEstimationController extends Controller
             return $this->backToBacklog($story)->withErrors(['estimation' => 'Diskusi hanya dapat diminta untuk User Story pada Sprint PLANNING.']);
         }
         [$run, $created] = $estimator->claimRun($story->load('actor'), $request->user());
+        if (! $created) {
+            // Run lama bisa macet di RUNNING bila worker mati (mis. VM restart)
+            // tanpa user pernah membuka endpoint status. Pulihkan agar story
+            // tidak terkunci; bila ternyata sudah FAILED, klaim run baru.
+            $estimator->recoverStale($run);
+            if ($run->fresh()?->status === 'FAILED') {
+                [$run, $created] = $estimator->claimRun($story->load('actor'), $request->user());
+            }
+        }
         if ($created) {
             AdvanceStoryEstimationJob::dispatch($run->id);
         }
@@ -85,10 +94,18 @@ class StoryEstimationController extends Controller
                 'messages' => fn ($query) => $query->where('recipient_slug', 'scrum-master'),
             ])->latest('created_at')->get() : collect();
 
+        $currentRun = $runs->first(fn ($run) => (int) $run->story_revision === (int) $story->revision) ?? $runs->first();
+        if ($ready && $currentRun && in_array($currentRun->status, ['QUEUED', 'RUNNING'], true)) {
+            // Pulihkan run yang macet (worker mati tanpa user membuka endpoint
+            // status) agar halaman menampilkan status yang akurat.
+            app(StoryEstimationService::class)->recoverStale($currentRun);
+            $currentRun->refresh();
+        }
+
         return view('stories.discussion', [
             'story' => $story->load('project', 'sprint'),
             'runs' => $runs,
-            'currentRun' => $runs->first(fn ($run) => (int) $run->story_revision === (int) $story->revision) ?? $runs->first(),
+            'currentRun' => $currentRun,
             'executions' => \Illuminate\Support\Facades\Schema::hasTable('execution_runs')
                 ? $story->executionRuns()->withCount('tasks')->latest()->get()
                 : collect(),

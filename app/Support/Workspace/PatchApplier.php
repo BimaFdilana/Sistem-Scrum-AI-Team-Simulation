@@ -18,8 +18,27 @@ class PatchApplier
     public const MAX_FILE_BYTES = 512000; // 500 KB per file
 
     /**
+     * Pola destruktif yang ditolak mentah-mentah pada perintah perbaikan
+     * ($allowDelete = false). Guardrail sistem: larangan "operasi destruktif"
+     * tidak boleh hanya hidup di prompt AI — harus di-enforce di sini.
+     * key = label untuk pesan error, value = regex (case-insensitive).
+     */
+    private const DESTRUCTIVE_PATTERNS = [
+        'penghapusan tabel (dropIfExists)' => '/dropifexists\s*\(/i',
+        'penghapusan tabel (Schema::drop)' => '/schema::drop\s*\(/i',
+        'penghapusan kolom/tabel (->drop())' => '/->drop\s*\(/i',
+        'pengosongan tabel (truncate)' => '/truncate\s*\(/i',
+        // DB::table('x')->delete() TANPA where di antaranya = hapus massal.
+        // Varian ber-where (mis. ->where(...)->delete()) tidak cocok pola ini.
+        'hapus massal tanpa filter (DB::table()->delete())' => '/DB::table\s*\([^)]*\)\s*->delete\s*\(/i',
+        'hapus massal tanpa filter (::query()->delete())' => '/::query\s*\(\s*\)\s*->delete\s*\(/i',
+    ];
+
+    /**
      * @param  bool  $allowDelete  false untuk perintah perbaikan: penghapusan file
-     *                            ditolak di level sistem (guardrail anti-destruktif).
+     *                            ditolak di level sistem (guardrail anti-destruktif),
+     *                            dan isi patch dipindai untuk pola destruktif
+     *                            (drop tabel, truncate, hapus massal).
      * @return string[] path yang berhasil diterapkan (relatif)
      */
     public function apply(string $worktreePath, array $files, bool $allowDelete = true): array
@@ -54,6 +73,7 @@ class PatchApplier
         }
         $relative = $this->safeRelativePath($file['path'] ?? null, $index);
         $target = $realWorktree.DIRECTORY_SEPARATOR.$relative;
+        $this->assertInsideWorktree($realWorktree, $target, $index);
 
         if ($action === 'delete') {
             if (File::exists($target) && ! File::isDirectory($target)) {
@@ -72,6 +92,9 @@ class PatchApplier
         }
         if (str_contains($content, "\0")) {
             throw new RuntimeException("Patch #{$index}: content mengandung null byte.");
+        }
+        if (! $allowDelete) {
+            $this->assertNotDestructive($content, $index);
         }
 
         File::ensureDirectoryExists(dirname($target), 0755);
@@ -100,10 +123,57 @@ class PatchApplier
             }
             $segments[] = $segment;
         }
-        if ($segments === [] || strtolower($segments[0]) === '.git') {
-            throw new RuntimeException("Patch #{$index}: path tidak diizinkan.");
+        if ($segments === []) {
+            throw new RuntimeException("Patch #{$index}: path kosong.");
+        }
+        foreach ($segments as $segment) {
+            if (strtolower($segment) === '.git') {
+                throw new RuntimeException("Patch #{$index}: path tidak diizinkan.");
+            }
         }
 
         return implode('/', $segments);
+    }
+
+    /**
+     * Pastikan target akhir tetap di dalam worktree walau ada symlink di
+     * tengah path. Resolve leluhur terdalam yang sudah ada (symlink ikut
+     * ter-resolve oleh realpath), lalu pastikan berawalan worktree.
+     * Dipanggil SEBELUM menulis/menghapus apa pun.
+     */
+    private function assertInsideWorktree(string $realWorktree, string $target, int $index): void
+    {
+        $probe = dirname($target);
+        while (! file_exists($probe)) {
+            $parent = dirname($probe);
+            if ($parent === $probe) {
+                break; // sudah di root filesystem
+            }
+            $probe = $parent;
+        }
+        $realParent = realpath($probe);
+        $prefix = rtrim($realWorktree, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR;
+        $resolved = $realParent === false
+            ? ''
+            : rtrim($realParent, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR;
+        if (! str_starts_with($resolved, $prefix)) {
+            throw new RuntimeException("Patch #{$index}: path keluar dari worktree (symlink tidak diizinkan).");
+        }
+    }
+
+    /**
+     * Tolak isi patch yang mengandung pola destruktif pada perintah perbaikan.
+     * Hanya aktif bila $allowDelete = false (konteks repair order); eksekusi
+     * normal tetap boleh membawa migrasi.
+     */
+    private function assertNotDestructive(string $content, int $index): void
+    {
+        foreach (self::DESTRUCTIVE_PATTERNS as $label => $pattern) {
+            if (preg_match($pattern, $content) === 1) {
+                throw new RuntimeException(
+                    "Patch #{$index}: ditolak guardrail anti-destruktif — terdeteksi {$label} pada perintah perbaikan."
+                );
+            }
+        }
     }
 }

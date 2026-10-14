@@ -71,11 +71,13 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/repair-orders/{repairOrder}/confirm', [RepairOrderController::class, 'confirm'])->middleware('throttle:20,1')->name('repair-orders.confirm');
     Route::post('/repair-orders/{repairOrder}/cancel', [RepairOrderController::class, 'cancel'])->middleware('throttle:20,1')->name('repair-orders.cancel');
     Route::post('/repair-orders/{repairOrder}/run', [RepairOrderController::class, 'run'])->middleware('throttle:6,1')->name('repair-orders.run');
+    Route::post('/repair-orders/{repairOrder}/retry', [RepairOrderController::class, 'retry'])->middleware('throttle:6,1')->name('repair-orders.retry');
     Route::get('/repair-orders/{repairOrder}/executions/{run}', [RepairOrderController::class, 'showExecution'])->name('repair-orders.executions.show');
     Route::post('/repair-orders/{repairOrder}/executions/{run}/accept', [RepairOrderController::class, 'accept'])->name('repair-orders.executions.accept');
     Route::get('/accepted', [PermissionRequestController::class, 'index'])->name('accepted.index');
     Route::post('/accepted/{permissionRequest}/approve', [PermissionRequestController::class, 'approve'])->name('accepted.approve');
     Route::post('/accepted/{permissionRequest}/reject', [PermissionRequestController::class, 'reject'])->name('accepted.reject');
+    Route::post('/accepted/{permissionRequest}/cancel', [PermissionRequestController::class, 'cancel'])->name('accepted.cancel');
     Route::post('/projects/{project}/demo/start', [DemoController::class, 'start'])->middleware('throttle:6,1')->name('projects.demo.start');
     Route::post('/projects/{project}/demo/stop', [DemoController::class, 'stop'])->name('projects.demo.stop');
     Route::get('/projects/{project}/download', [ProjectDownloadController::class, 'download'])->name('projects.download');

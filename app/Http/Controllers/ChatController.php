@@ -163,6 +163,9 @@ class ChatController extends Controller
             'AUTH_FAILED' => 'Kunci akses AI bermasalah. Periksa kembali koneksi provider di menu AI Providers.',
             'GATEWAY_UNREACHABLE' => 'Gateway AI tidak dapat dihubungi. Pastikan layanan CLIProxyAPI berjalan.',
             'MODEL_NOT_FOUND' => 'Model AI tidak tersedia. Pilih model lain di konfigurasi agen.',
+            'DISABLED' => 'Jalur AI sedang dimatikan oleh admin. Hubungi admin untuk mengaktifkannya.',
+            'BAD_REQUEST' => 'Permintaan ke AI tidak valid. Coba ulangi dengan pesan yang berbeda.',
+            'EMPTY_RESPONSE' => 'AI mengembalikan respons kosong. Coba lagi sebentar.',
             default => 'AI Agent belum dapat dihubungi. Coba lagi sebentar.',
         };
     }

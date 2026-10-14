@@ -90,7 +90,10 @@ class ExecutionRun extends Model
 
     public function isTerminal(): bool
     {
-        return in_array($this->status, ['COMPLETED', 'BLOCKED'], true);
+        // FAILED ikut terminal: run yang gagal di tengah jalan (AI timeout,
+        // izin ditolak, workspace hilang) harus bisa ditutup PO dengan
+        // keputusan final, bukan menggantung selamanya.
+        return in_array($this->status, ['COMPLETED', 'BLOCKED', 'FAILED'], true);
     }
 
     protected static function booted(): void

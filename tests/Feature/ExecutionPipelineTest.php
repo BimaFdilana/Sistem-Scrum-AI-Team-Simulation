@@ -95,4 +95,55 @@ class ExecutionPipelineTest extends TestCase
     {
         $this->assertSame(2, \App\Jobs\ReviewExecutionTaskJob::MAX_REVISIONS);
     }
+
+    public function test_failed_execution_task_cleans_up_orphan_worktree_and_branch(): void
+    {
+        $baseline = storage_path('framework/testing/worktree-cleanup-'.uniqid());
+        mkdir($baseline, 0700, true);
+        file_put_contents($baseline.'/README.md', 'baseline');
+        $worktrees = new \App\Support\Workspace\WorktreeManager;
+        $worktrees->ensureRepo($baseline);
+
+        $owner = User::factory()->create();
+        $project = Project::query()->create([
+            'name' => 'WT', 'project_type' => 'NEW_PROJECT', 'stack' => 'Laravel',
+            'status' => 'BASELINE_READY', 'workspace_path' => $baseline,
+        ]);
+        $story = Story::query()->create([
+            'project_id' => $project->id, 'title' => 'S', 'estimate_points' => 5,
+        ]);
+        $run = ExecutionRun::query()->create([
+            'story_id' => $story->id, 'requested_by' => $owner->id, 'status' => 'EXECUTING',
+        ]);
+        $task = $run->tasks()->create([
+            'title' => 'T1', 'description' => 'D1', 'assignee' => 'backend-developer', 'status' => 'PENDING',
+        ]);
+
+        // AI gagal setelah worktree dibuat.
+        $this->mock(\App\Services\AgentProfileClient::class, function ($mock): void {
+            $mock->shouldReceive('sendMessage')->andThrow(new \RuntimeException('AI down'));
+        });
+
+        $branch = 'exec-'.$run->id.'-task-'.$task->id;
+        $worktreePath = dirname($baseline).'/worktrees/'.$branch;
+
+        try {
+            (new ExecuteExecutionTaskJob($run->id, $task->id))->handle(
+                app(\App\Services\AgentProfileClient::class),
+                $worktrees,
+                app(PatchApplier::class),
+            );
+            $this->fail('Job seharusnya melempar ulang exception.');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('AI down', $e->getMessage());
+        }
+
+        $this->assertSame('FAILED', $task->fresh()->status);
+        $this->assertSame('FAILED', $run->fresh()->status);
+        $this->assertSame('EXECUTION_FAILED', $run->fresh()->error_code);
+        // Worktree yatim harus dibersihkan: direktori hilang, branch terhapus.
+        $this->assertDirectoryDoesNotExist($worktreePath);
+        $branches = trim((string) shell_exec('git -C '.escapeshellarg($baseline).' branch --list '.escapeshellarg($branch)));
+        $this->assertSame('', $branches);
+    }
 }

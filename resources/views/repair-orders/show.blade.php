@@ -28,6 +28,9 @@
     @if ($order->status === 'CONFIRMED' && ! $order->isAccepted())
         <form method="POST" action="{{ route('repair-orders.run', $order) }}" style="margin-top:1rem">@csrf<button class="button button-primary" type="submit" onclick="return confirm('Jalankan perintah ini? Tim AI akan mengerjakannya via pipeline FE/BE → QA → merge.')">Jalankan perintah</button></form>
     @endif
+    @if (in_array($order->status, ['FAILED', 'BLOCKED'], true) && ! $order->isAccepted())
+        <form method="POST" action="{{ route('repair-orders.retry', $order) }}" style="margin-top:1rem">@csrf<button class="button button-primary" type="submit" onclick="return confirm('Kembalikan perintah ke status siap dijalankan?')">Coba lagi</button></form>
+    @endif
 </section>
 
 <section class="empty-panel">

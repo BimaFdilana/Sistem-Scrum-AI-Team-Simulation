@@ -118,6 +118,28 @@ class RepairOrderController extends Controller
             ->with('status', 'Perintah dijalankan. Scrum Master sedang memecah perintah menjadi task.');
     }
 
+    /** PO mengulang perintah yang gagal/diblokir: kembalikan ke status siap dijalankan. */
+    public function retry(RepairOrder $repairOrder): RedirectResponse
+    {
+        if (! in_array($repairOrder->status, ['FAILED', 'BLOCKED'], true)) {
+            return back()->withErrors(['execution' => 'Hanya perintah yang gagal atau diblokir yang bisa diulang.']);
+        }
+        if ($repairOrder->isAccepted()) {
+            return back()->withErrors(['execution' => 'Perintah sudah diterima PO ('.$repairOrder->acceptanceLabel().') dan tidak bisa diulang.']);
+        }
+        $active = ExecutionRun::query()->where('repair_order_id', $repairOrder->id)
+            ->whereIn('status', ['QUEUED', 'BREAKDOWN', 'AWAITING_PERMISSION', 'EXECUTING', 'REVIEWING', 'MERGING'])
+            ->exists();
+        if ($active) {
+            return back()->withErrors(['execution' => 'Masih ada eksekusi yang berjalan untuk perintah ini.']);
+        }
+
+        $repairOrder->forceFill(['status' => 'CONFIRMED'])->save();
+
+        return redirect()->route('repair-orders.show', $repairOrder)
+            ->with('status', 'Perintah dikembalikan ke status siap dijalankan. Tekan "Jalankan perintah" untuk mencoba lagi.');
+    }
+
     public function showExecution(RepairOrder $repairOrder, ExecutionRun $run): View
     {
         abort_unless((int) $run->repair_order_id === (int) $repairOrder->id, 404);

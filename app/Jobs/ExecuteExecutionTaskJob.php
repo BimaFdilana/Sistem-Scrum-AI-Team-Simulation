@@ -90,7 +90,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             $run->forceFill(['status' => 'REVIEWING'])->save();
             ReviewExecutionTaskJob::dispatch($run->id, $task->id);
         } catch (Throwable $exception) {
-            $this->failRun($run, $task, 'EXECUTION_FAILED');
+            $this->failRun($run, $task, 'EXECUTION_FAILED', $worktrees, $baseline);
             throw $exception;
         }
     }
@@ -111,9 +111,20 @@ class ExecuteExecutionTaskJob implements ShouldQueue
         return ['files' => array_values($data['files']), 'summary' => trim($data['summary'])];
     }
 
-    private function failRun(ExecutionRun $run, ExecutionTask $task, string $code): void
+    private function failRun(ExecutionRun $run, ExecutionTask $task, string $code, ?WorktreeManager $worktrees = null, ?string $baseline = null): void
     {
         $task->forceFill(['status' => 'FAILED'])->save();
         $run->forceFill(['status' => 'FAILED', 'error_code' => $code, 'completed_at' => now()])->save();
+
+        // Bersihkan worktree yatim: worktree + branch dibuat sebelum pemanggilan
+        // AI; bila gagal setelahnya, direktori worktrees/ dan branch exec-*-task-*
+        // menumpuk bila tidak dihapus di sini.
+        if ($worktrees !== null && $baseline !== null && $task->worktree_path && $task->branch) {
+            try {
+                $worktrees->remove($baseline, $task->worktree_path, $task->branch);
+            } catch (Throwable) {
+                // Best-effort: jangan menutupi error asli yang memicu failRun.
+            }
+        }
     }
 }

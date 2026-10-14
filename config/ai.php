@@ -23,6 +23,9 @@ return [
         // tak ditemukan/terus gagal.
         'chat_attempts' => (int) env('CLIPROXY_CHAT_ATTEMPTS', 3),
         'chat_fallbacks' => (int) env('CLIPROXY_CHAT_FALLBACKS', 2),
+        // Budget waktu absolut (detik) untuk seluruh loop retry chatResilient.
+        // Mencegah fatal error PHP bila upstream hang (harus < set_time_limit controller).
+        'chat_deadline' => (int) env('CLIPROXY_CHAT_DEADLINE', 240),
     ],
 
     /*
