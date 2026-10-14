@@ -30,6 +30,32 @@ Script akan meminta kamu mengisi `WORKSPACE_ADMIN_EMAIL` dan
 otomatis). Buka `http://<ip-vps>` atau `https://<domain>` bila `APP_DOMAIN`
 diisi di `.env`.
 
+## 4. Pre-flight check & rollback
+
+Sebelum mengubah apa pun, `./deploy.sh` menjalankan **pre-flight check**:
+Docker & daemon, ruang disk, RAM, port 80/443/9110–9130, validitas
+`docker-compose.yml`, dan variabel wajib di `.env`. Kalau ada masalah, script
+**berhenti dengan pesan Bahasa Indonesia + cara memperbaikinya** — bukan error
+misterius di tengah build.
+
+Cek saja tanpa deploy:
+
+```bash
+./deploy.sh --preflight
+```
+
+Tiap deploy otomatis:
+1. **Backup** data (database + storage + token OAuth) ke `backup/deploy-<waktu>.tar.gz`.
+2. **Catat titik rollback** (commit git sebelum deploy) di `.deploy-state`.
+
+Kalau deploy baru bermasalah, kembali ke versi sebelumnya:
+
+```bash
+./rollback.sh
+```
+
+Data tidak ikut hilang: volume Docker sengaja tidak dihapus saat rollback.
+
 ## 5. Hubungkan AI Provider (OAuth)
 
 1. Login sebagai admin → menu **AI Providers**.

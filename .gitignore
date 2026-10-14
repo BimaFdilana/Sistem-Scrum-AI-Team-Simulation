@@ -28,6 +28,8 @@ Thumbs.db
 
 # Local secrets, databases and private runtime artifacts
 .env.*
+.deploy-state
+/backup/
 !.env.example
 /database/*.sqlite
 /database/*.sqlite-*
