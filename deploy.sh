@@ -60,7 +60,11 @@ preflight() {
     ok "openssl & curl tersedia"
 
     # 5. Ruang disk cukup? (butuh ~3 GB untuk image + build)
-    disk_kb=$(df -k --output=avail /var/lib/docker 2>/dev/null | tail -1 || df -k --output=avail / | tail -1)
+    # (|| true di dalam substitusi: dengan pipefail, df yang gagal membuat
+    # status substitusi non-nol dan set -e langsung mematikan script —
+    # fallback di baris berikut tidak akan pernah tercapai tanpanya.)
+    disk_kb=$(df -k --output=avail /var/lib/docker 2>/dev/null | tail -1 || true)
+    [ -n "$disk_kb" ] || disk_kb=$(df -k --output=avail / | tail -1)
     disk_gb=$((disk_kb / 1024 / 1024))
     [ "$disk_gb" -ge 3 ] \
         || fail "Ruang disk tersisa ${disk_gb} GB, butuh minimal 3 GB." \
@@ -109,9 +113,15 @@ preflight() {
     ok "konfigurasi docker compose valid"
 
     # 10. Variabel wajib terisi
+    # (Mode --preflight tidak membuat file apa pun, jadi .env yang belum ada
+    # dilaporkan di sini; pada mode deploy penuh .env sudah dibuat sebelum
+    # preflight berjalan.)
+    [ -f .env ] \
+        || fail "File .env belum ada." \
+                "Salin dari contoh:  cp .env.docker.example .env  |  lalu isi WORKSPACE_ADMIN_EMAIL & WORKSPACE_ADMIN_PASSWORD di dalamnya."
     missing=()
     for v in WORKSPACE_ADMIN_EMAIL WORKSPACE_ADMIN_PASSWORD; do
-        [ -f .env ] && grep -q "^$v=.\+" .env 2>/dev/null || missing+=("$v")
+        grep -q "^$v=.\+" .env 2>/dev/null || missing+=("$v")
     done
     if [ "${#missing[@]}" -gt 0 ]; then
         fail "Variabel wajib belum diisi di .env: ${missing[*]}" \
@@ -176,11 +186,13 @@ if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
 fi
 
 say "1/6  Pre-flight check..."
+# .env harus sudah ada sebelum pre-flight: cek variabel wajib butuh file-nya.
+# (Mode --preflight murni memeriksa; ia tidak membuat file, jadi kasus .env
+# belum ada ditangani pesannya di dalam preflight().)
+[ -f .env ] || { cp .env.docker.example .env; echo "     .env dibuat dari contoh."; }
 preflight
 
-say "2/6  Siapkan .env..."
-[ -f .env ] || { cp .env.docker.example .env; echo "     .env dibuat dari contoh."; }
-
+say "2/6  Siapkan secret..."
 set_var() { # $1=NAME $2=value
     if grep -q "^$1=" .env; then
         sed -i "s|^$1=.*|$1=$2|" .env

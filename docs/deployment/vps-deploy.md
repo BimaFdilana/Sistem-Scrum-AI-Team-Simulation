@@ -25,10 +25,13 @@ cd scrumspace
 ./deploy.sh
 ```
 
-Script akan meminta kamu mengisi `WORKSPACE_ADMIN_EMAIL` dan
-`WORKSPACE_ADMIN_PASSWORD` di `.env` bila belum ada (secret lain dibuat
-otomatis). Buka `http://<ip-vps>` atau `https://<domain>` bila `APP_DOMAIN`
-diisi di `.env`.
+Deploy pertama: script membuatkan `.env` dari contoh, lalu **berhenti**
+dan memintamu mengisi `WORKSPACE_ADMIN_EMAIL` dan
+`WORKSPACE_ADMIN_PASSWORD` di dalamnya — dua nilai ini wajib (tidak ada
+nilai default; contohnya memang dikosongkan agar tidak terpakai tanpa
+sengaja). Secret lain (`APP_KEY`, kunci CLIProxyAPI) dibuat otomatis.
+Setelah diisi, jalankan `./deploy.sh` lagi. Buka `http://<ip-vps>` atau
+`https://<domain>` bila `APP_DOMAIN` diisi di `.env`.
 
 ## 4. Pre-flight check & rollback
 
