@@ -21,7 +21,17 @@ fi
 # 3. Migrasi (idempotent)
 php artisan migrate --force --no-interaction
 
-# 4. Cache konfigurasi untuk performa
+# 4. Seed admin pertama (idempotent: no-op bila admin sudah ada).
+#    WAJIB jalan di sini — tanpa ini, deploy segar tidak punya user admin
+#    dan Bima tidak bisa login. Gagalnya seed tidak boleh mematikan container.
+if php artisan db:seed --force --no-interaction; then
+  echo ">>> admin workspace siap."
+else
+  echo ">>> PERINGATAN: db:seed gagal — login admin mungkin belum tersedia."
+  echo ">>> Cek manual: docker compose exec app php artisan db:seed"
+fi
+
+# 5. Cache konfigurasi untuk performa (setelah seed, agar config ter-cache)
 php artisan optimize --no-interaction >/dev/null 2>&1 || true
 
 exec "$@"

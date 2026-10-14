@@ -127,6 +127,10 @@ preflight() {
         fail "Variabel wajib belum diisi di .env: ${missing[*]}" \
              "Isi nilainya di file .env, lalu jalankan ./deploy.sh lagi."
     fi
+    pass="$(grep '^WORKSPACE_ADMIN_PASSWORD=' .env | cut -d= -f2-)"
+    [ "${#pass}" -ge 14 ] \
+        || fail "WORKSPACE_ADMIN_PASSWORD kurang dari 14 karakter." \
+                "Seeder admin menolak password < 14 karakter — pakai yang lebih panjang, lalu jalankan ./deploy.sh lagi."
     ok "variabel wajib terisi"
 
     echo ""
