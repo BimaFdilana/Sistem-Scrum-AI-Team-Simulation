@@ -10,6 +10,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
 
@@ -67,12 +68,51 @@ class ScaffoldLaravelProjectJob implements ShouldBeUnique, ShouldQueue
                 'status' => 'BASELINE_READY',
                 'source_error' => null,
             ])->save();
+
+            $this->syncToGithub($project);
         } catch (Throwable $exception) {
             $project->forceFill([
                 'status' => 'SOURCE_REJECTED',
                 'source_error' => mb_substr($exception->getMessage(), 0, 255),
             ])->save();
             throw $exception;
+        }
+    }
+
+    /**
+     * Fase 2: buatkan repo GitHub + push baseline. Graceful: bila GitHub
+     * belum terhubung atau gagal, project tetap BASELINE_READY (tanpa GitHub).
+     */
+    protected function syncToGithub(Project $project): void
+    {
+        try {
+            $service = app(\App\Services\GithubProjectService::class);
+            if (! $service->isConnected()) {
+                Log::info('GitHub belum terhubung — project baru dilewati tanpa sinkronisasi', [
+                    'project_id' => $project->id,
+                ]);
+
+                return;
+            }
+
+            $repoName = \Illuminate\Support\Str::slug($project->name, '-');
+            if ($repoName === '') {
+                $repoName = 'project-'.$project->id;
+            }
+
+            $result = $service->ensureRepoForNewProject($project->fresh(), $repoName);
+            $service->pushBaseline($project->fresh(), $result['owner'], $result['repo']);
+
+            $project->forceFill([
+                'github_owner' => $result['owner'],
+                'github_repo' => $result['repo'],
+            ])->save();
+        } catch (Throwable $exception) {
+            // Jangan gagalkan project — catat saja, baseline lokal tetap valid.
+            Log::warning('Sinkronisasi GitHub project baru gagal (project tetap jalan tanpa GitHub)', [
+                'project_id' => $project->id,
+                'error' => $exception->getMessage(),
+            ]);
         }
     }
 

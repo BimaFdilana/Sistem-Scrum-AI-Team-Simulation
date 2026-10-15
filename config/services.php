@@ -42,6 +42,13 @@ return [
         'timeout' => (int) env('HERMES_API_TIMEOUT', 120),
     ],
 
+    'github' => [
+        // Personal Access Token (PAT) PO. Bisa juga diatur via UI
+        // Settings > GitHub (disimpan terenkripsi di database, prioritas
+        // lebih tinggi dari env ini).
+        'token' => env('GITHUB_PAT'),
+    ],
+
     'agent_profiles' => [
         'backend-developer' => [
             'base_url' => env('AI_AGENT_BACKEND_API_BASE_URL'),

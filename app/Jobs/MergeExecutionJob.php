@@ -66,6 +66,10 @@ class MergeExecutionJob implements ShouldQueue
                 'summary' => $summary,
                 'completed_at' => now(),
             ])->save();
+
+            // Fase 3 GitHub: push hasil merge lokal ke story branch di GitHub.
+            $this->pushStoryBranch($run, $baseline);
+
             $run->messages()->create([
                 'sender_slug' => 'scrum-master',
                 'recipient_slug' => 'po',
@@ -79,6 +83,50 @@ class MergeExecutionJob implements ShouldQueue
                 'completed_at' => now(),
             ])->save();
             throw $exception;
+        }
+    }
+
+    /**
+     * Fase 3 GitHub: push hasil merge lokal ke GitHub.
+     * - Untuk story: push main lokal → story branch.
+     * - Untuk repair order dengan target_branch: push main lokal → target branch.
+     * Graceful: gagal → log saja, tidak menggagalkan eksekusi.
+     */
+    private function pushStoryBranch(ExecutionRun $run, string $baseline): void
+    {
+        $targetBranch = $run->github_branch;
+
+        // Repair order untuk demo/integration: target branch dari order.
+        if (! filled($targetBranch) && $run->repair_order_id) {
+            $order = $run->repairOrder;
+            if ($order && filled($order->target_branch)) {
+                $targetBranch = $order->target_branch;
+            }
+        }
+
+        if (! filled($targetBranch)) {
+            return;
+        }
+
+        try {
+            $project = $run->project();
+            if (! $project || ! filled($project->github_owner) || ! filled($project->github_repo)) {
+                return;
+            }
+
+            $service = app(\App\Services\GithubProjectService::class);
+            if (! $service->isConnected()) {
+                return;
+            }
+
+            // Push main lokal → target branch di GitHub (story branch / integration).
+            $service->pushBranch($baseline, $project->github_owner, $project->github_repo, 'main', $targetBranch);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Push branch ke GitHub gagal', [
+                'run_id' => $run->id,
+                'branch' => $targetBranch,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 

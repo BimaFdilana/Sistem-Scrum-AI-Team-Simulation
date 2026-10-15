@@ -46,6 +46,7 @@
                 <a class="nav-link {{ in_array($activePage, ['backlog', 'sprints'], true) ? 'is-active' : '' }}" href="{{ route('projects.index', ['section' => 'sprint-backlog']) }}"><span class="nav-dot"></span>Sprint Backlog</a>
                 <a class="nav-link {{ $activePage === 'repair-orders' ? 'is-active' : '' }}" href="{{ route('repair-orders.index') }}"><span class="nav-dot"></span>Perintah Perbaikan</a>
                 <a class="nav-link {{ $activePage === 'accepted' ? 'is-active' : '' }}" href="{{ route('accepted.index') }}"><span class="nav-dot"></span>Accepted</a>
+                <a class="nav-link {{ $activePage === 'github-settings' ? 'is-active' : '' }}" href="{{ route('settings.github.edit') }}"><span class="nav-dot"></span>GitHub</a>
             </nav>
 
             <div class="sidebar-bottom">

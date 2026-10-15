@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class DemoServer extends Model
 {
     protected $fillable = [
-        'project_id', 'port', 'pid', 'status', 'started_at', 'expires_at',
+        'project_id', 'port', 'pid', 'status', 'started_at', 'expires_at', 'worktree_path',
     ];
 
     protected function casts(): array

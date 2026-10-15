@@ -32,8 +32,20 @@ class DemoServerManager
         if ($this->runningFor($project)) {
             throw new RuntimeException('Demo project ini sudah berjalan.');
         }
-        $docroot = rtrim((string) $project->workspace_path, '/').'/public';
+
+        // Fase 3 GitHub: bila project terhubung GitHub dan branch integration ada,
+        // demo jalan dari kode integration terbaru (worktree terpisah).
+        // Bila tidak, perilaku lama: dari baseline lokal.
+        $worktreePath = $this->prepareIntegrationWorktree($project);
+        $docroot = $worktreePath !== null
+            ? rtrim($worktreePath, '/').'/public'
+            : rtrim((string) $project->workspace_path, '/').'/public';
+
         if (! is_dir($docroot)) {
+            // Bersihkan worktree bila docroot tidak valid.
+            if ($worktreePath !== null) {
+                $this->removeWorktree($project, $worktreePath);
+            }
             throw new RuntimeException('Baseline project belum siap untuk demo.');
         }
 
@@ -45,10 +57,16 @@ class DemoServerManager
         );
         $pid = (int) trim((string) shell_exec($cmd));
         if ($pid <= 0) {
+            if ($worktreePath !== null) {
+                $this->removeWorktree($project, $worktreePath);
+            }
             throw new RuntimeException('Gagal menjalankan server demo.');
         }
         sleep(1);
         if (! $this->pidAlive($pid)) {
+            if ($worktreePath !== null) {
+                $this->removeWorktree($project, $worktreePath);
+            }
             throw new RuntimeException('Server demo langsung berhenti. Periksa log: '.$log);
         }
 
@@ -59,7 +77,93 @@ class DemoServerManager
             'status' => 'RUNNING',
             'started_at' => now(),
             'expires_at' => now()->addMinutes((int) config('demo.ttl_minutes', 60)),
+            'worktree_path' => $worktreePath,
         ]);
+    }
+
+    /**
+     * Fase 3 GitHub: siapkan worktree dari branch integration terbaru.
+     * Return path worktree, atau null bila GitHub tidak dipakai/tidak ada integration.
+     */
+    protected function prepareIntegrationWorktree(Project $project): ?string
+    {
+        try {
+            if (! filled($project->github_owner) || ! filled($project->github_repo)) {
+                return null;
+            }
+
+            $service = app(\App\Services\GithubProjectService::class);
+            if (! $service->isConnected()) {
+                return null;
+            }
+
+            $github = app(\App\Services\GithubApiClient::class);
+            if ($github->branchSha($project->github_owner, $project->github_repo, 'integration') === null) {
+                return null; // Belum ada integration — pakai baseline lokal.
+            }
+
+            $workspace = (string) $project->workspace_path;
+            if ($workspace === '' || ! is_dir($workspace)) {
+                return null;
+            }
+
+            // Sinkronkan branch integration lokal dengan remote.
+            $service->syncBranchFromRemote($workspace, 'integration');
+
+            // Buat worktree terpisah agar workspace utama tidak terganggu.
+            $worktreePath = storage_path('app/demo-worktrees/'.$project->id);
+            $this->removeWorktree($project, $worktreePath); // Bersihkan sisa lama.
+            $this->git($workspace, ['worktree', 'add', '--detach', $worktreePath, 'integration']);
+
+            return $worktreePath;
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Demo worktree integration gagal, pakai baseline', [
+                'project_id' => $project->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Hapus worktree demo (best-effort).
+     */
+    protected function removeWorktree(Project $project, string $worktreePath): void
+    {
+        try {
+            $workspace = (string) $project->workspace_path;
+            if ($workspace !== '' && is_dir($workspace) && is_dir($worktreePath)) {
+                $this->git($workspace, ['worktree', 'remove', '--force', $worktreePath]);
+            }
+        } catch (\Throwable) {
+            // Abaikan — best effort.
+        }
+        if (is_dir($worktreePath)) {
+            @rmdir($worktreePath);
+        }
+    }
+
+    /**
+     * Git via proc_open tanpa shell (pola sama seperti GithubProjectService).
+     */
+    protected function git(string $cwd, array $args): string
+    {
+        $command = array_merge(['git', '-c', 'credential.helper='], $args);
+        $descriptor = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $process = proc_open($command, $descriptor, $pipes, $cwd, ['GIT_TERMINAL_PROMPT' => '0']);
+        if (! is_resource($process)) {
+            throw new RuntimeException('Git tidak dapat dijalankan.');
+        }
+        $stdout = (string) stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($process);
+        if ($exitCode !== 0) {
+            throw new RuntimeException('Perintah git demo gagal.');
+        }
+
+        return $stdout;
     }
 
     public function stop(DemoServer $demo, string $status = 'STOPPED'): void
@@ -69,6 +173,13 @@ class DemoServerManager
             sleep(1);
             if ($this->pidAlive($demo->pid)) {
                 @posix_kill($demo->pid, 9); // SIGKILL
+            }
+        }
+        // Bersihkan worktree integration bila ada.
+        if (filled($demo->worktree_path)) {
+            $project = $demo->project;
+            if ($project) {
+                $this->removeWorktree($project, (string) $demo->worktree_path);
             }
         }
         $demo->forceFill(['status' => $status])->save();

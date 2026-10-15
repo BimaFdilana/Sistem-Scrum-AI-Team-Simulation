@@ -11,6 +11,7 @@ class ExecutionRun extends Model
 {
     protected $fillable = [
         'story_id', 'repair_order_id', 'requested_by', 'status', 'summary', 'error_code', 'completed_at',
+        'github_branch',
     ];
 
     protected function casts(): array

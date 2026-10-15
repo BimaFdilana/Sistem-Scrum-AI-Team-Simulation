@@ -21,6 +21,8 @@ class Project extends Model
         'source_commit_sha',
         'workspace_path',
         'source_error',
+        'github_owner',
+        'github_repo',
         'stack',
         'status',
     ];

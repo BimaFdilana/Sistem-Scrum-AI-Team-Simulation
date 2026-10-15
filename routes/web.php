@@ -7,6 +7,7 @@ use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\DemoController;
 use App\Http\Controllers\ExecutionController;
+use App\Http\Controllers\GithubSettingsController;
 use App\Http\Controllers\PermissionRequestController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ProjectDownloadController;
@@ -39,6 +40,10 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/ai-providers/{provider}/connect', [AiProviderController::class, 'connect'])->name('ai-providers.connect');
     Route::post('/ai-providers/{provider}/callback', [AiProviderController::class, 'callback'])->middleware('throttle:20,1')->name('ai-providers.callback');
     Route::post('/ai-providers/{provider}/disconnect', [AiProviderController::class, 'disconnect'])->name('ai-providers.disconnect');
+    Route::get('/settings/github', [GithubSettingsController::class, 'edit'])->name('settings.github.edit');
+    Route::post('/settings/github', [GithubSettingsController::class, 'update'])->middleware('throttle:10,1')->name('settings.github.update');
+    Route::post('/settings/github/test', [GithubSettingsController::class, 'test'])->middleware('throttle:10,1')->name('settings.github.test');
+    Route::post('/settings/github/disconnect', [GithubSettingsController::class, 'disconnect'])->name('settings.github.disconnect');
     Route::get('/agents/{slug}/config', [AgentConfigurationController::class, 'edit'])->name('agents.config.edit');
     Route::put('/agents/{slug}/config', [AgentConfigurationController::class, 'update'])->name('agents.config.update');
     Route::get('/agents/{slug}/config/history', [AgentConfigurationController::class, 'history'])->name('agents.config.history');
@@ -80,6 +85,7 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/accepted/{permissionRequest}/cancel', [PermissionRequestController::class, 'cancel'])->name('accepted.cancel');
     Route::post('/projects/{project}/demo/start', [DemoController::class, 'start'])->middleware('throttle:6,1')->name('projects.demo.start');
     Route::post('/projects/{project}/demo/stop', [DemoController::class, 'stop'])->name('projects.demo.stop');
+    Route::post('/projects/{project}/demo/request-fix', [DemoController::class, 'requestFix'])->middleware('throttle:6,1')->name('projects.demo.request-fix');
     Route::get('/projects/{project}/download', [ProjectDownloadController::class, 'download'])->name('projects.download');
     Route::get('/stories/{story}/tasks', [TaskController::class, 'index'])->name('stories.tasks.index');
     Route::get('/stories/{story}/tasks/create', [TaskController::class, 'create'])->name('stories.tasks.create');

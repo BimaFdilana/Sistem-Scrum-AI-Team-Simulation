@@ -40,6 +40,10 @@ class ExecutionController extends Controller
             'requested_by' => auth()->id(),
             'status' => 'QUEUED',
         ]);
+
+        // Fase 3 GitHub: buat story branch di GitHub (graceful bila gagal/tidak terhubung).
+        $this->createStoryBranch($story, $run);
+
         BreakdownExecutionJob::dispatch($run->id);
 
         return redirect()->route('stories.executions.show', [$story, $run])
@@ -72,6 +76,15 @@ class ExecutionController extends Controller
             return back()->withErrors(['acceptance' => 'Keputusan final hanya untuk eksekusi yang sudah selesai atau diblokir.']);
         }
 
+        // Fase 3 GitHub: bila BERHASIL dan ada story branch, merge ke integration.
+        // Konflik → tolak, story TIDAK ditandai Berhasil.
+        if ($status === 'BERHASIL' && filled($run->github_branch)) {
+            $mergeError = $this->mergeToIntegration($story, $run);
+            if ($mergeError !== null) {
+                return back()->withErrors(['acceptance' => $mergeError]);
+            }
+        }
+
         $story->forceFill([
             'acceptance_status' => $status,
             'accepted_at' => now(),
@@ -81,5 +94,101 @@ class ExecutionController extends Controller
 
         return redirect()->route('stories.executions.show', [$story, $run])
             ->with('status', 'Story diterima PO dengan status '.$label.'. Eksekusi ulang dikunci.');
+    }
+
+    /**
+     * Buat story branch di GitHub saat eksekusi dimulai.
+     * Graceful: gagal → log saja, eksekusi tetap jalan lokal.
+     */
+    protected function createStoryBranch(Story $story, ExecutionRun $run): void
+    {
+        try {
+            $project = $story->project;
+            if (! $project || ! filled($project->github_owner) || ! filled($project->github_repo)) {
+                return;
+            }
+
+            $service = app(\App\Services\GithubProjectService::class);
+            if (! $service->isConnected()) {
+                return;
+            }
+
+            $branch = $service->createStoryBranch(
+                $project->github_owner,
+                $project->github_repo,
+                $story->id,
+                $story->title ?? $story->refined_title ?? 'story'
+            );
+
+            if ($branch !== null) {
+                $run->forceFill(['github_branch' => $branch])->save();
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Story branch GitHub gagal dibuat', [
+                'story_id' => $story->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Merge story branch → integration di GitHub.
+     * Return null bila sukses, pesan error Bahasa Indonesia bila gagal.
+     */
+    protected function mergeToIntegration(Story $story, ExecutionRun $run): ?string
+    {
+        try {
+            $project = $story->project;
+            if (! $project || ! filled($project->github_owner) || ! filled($project->github_repo)) {
+                return null; // Flow lokal — tidak ada yang di-merge.
+            }
+
+            $service = app(\App\Services\GithubProjectService::class);
+            if (! $service->isConnected()) {
+                return null;
+            }
+
+            $owner = $project->github_owner;
+            $repo = $project->github_repo;
+
+            // Pastikan branch integration ada.
+            try {
+                $service->ensureIntegrationBranch($owner, $repo);
+            } catch (\Throwable $e) {
+                return 'Gagal menyiapkan branch integration di GitHub: '.$e->getMessage();
+            }
+
+            // Merge via GitHub API.
+            $github = app(\App\Services\GithubApiClient::class);
+            $result = $github->mergeBranch($owner, $repo, 'integration', $run->github_branch);
+
+            if ($result === null || ! ($result['merged'] ?? false)) {
+                return 'Merge ke branch integration gagal — kemungkinan ada konflik. '.
+                    'Periksa di GitHub ('.$owner.'/'.$repo.') dan selesaikan konflik secara manual, '.
+                    'lalu coba Accept lagi.';
+            }
+
+            // Sinkronkan branch integration ke lokal agar demo bisa pakai kode terbaru.
+            $workspace = (string) $project->workspace_path;
+            if ($workspace !== '' && is_dir($workspace)) {
+                try {
+                    $service->syncBranchFromRemote($workspace, 'integration');
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('Sync integration ke lokal gagal', [
+                        'error' => $e->getMessage(),
+                    ]);
+                    // Tidak fatal — merge GitHub sudah sukses.
+                }
+            }
+
+            return null;
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Merge story ke integration gagal', [
+                'story_id' => $story->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return 'Gagal merge ke branch integration: '.$e->getMessage();
+        }
     }
 }

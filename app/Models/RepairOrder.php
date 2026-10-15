@@ -10,7 +10,7 @@ class RepairOrder extends Model
 {
     protected $fillable = [
         'requested_by', 'project_id', 'title', 'summary', 'original_message',
-        'scope_risk', 'risk_note', 'status', 'acceptance_status', 'accepted_at',
+        'scope_risk', 'risk_note', 'status', 'target_branch', 'acceptance_status', 'accepted_at',
         'conversation_uuid',
     ];
 
