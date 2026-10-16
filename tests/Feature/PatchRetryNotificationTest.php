@@ -203,4 +203,107 @@ class PatchRetryNotificationTest extends TestCase
     {
         $this->get('/notifications')->assertRedirect('/login');
     }
+
+    public function test_ai_error_juga_membuat_notifikasi(): void
+    {
+        [$owner, $baseline, $run, $task] = $this->makeRun();
+
+        $agents = $this->createMock(AgentProfileClient::class);
+        $agents->method('sendMessage')->willThrowException(new \RuntimeException('AI timeout'));
+
+        try {
+            $this->runJob($run, $task, $agents);
+            $this->fail('Seharusnya throw');
+        } catch (\RuntimeException) {
+        }
+
+        $this->assertEquals('FAILED', $task->fresh()->status);
+        $notif = Notification::query()->where('user_id', $owner->id)->first();
+        $this->assertNotNull($notif, 'PO harus dapat notifikasi saat AI error');
+        $this->assertStringContainsString('AI timeout', $notif->message);
+    }
+
+    public function test_json_invalid_juga_membuat_notifikasi(): void
+    {
+        [$owner, $baseline, $run, $task] = $this->makeRun();
+
+        $agents = $this->createMock(AgentProfileClient::class);
+        $agents->method('sendMessage')->willReturn('bukan json valid {{{');
+
+        try {
+            $this->runJob($run, $task, $agents);
+            $this->fail('Seharusnya throw');
+        } catch (\Throwable) {
+        }
+
+        $this->assertEquals('FAILED', $task->fresh()->status);
+        $this->assertNotNull(
+            Notification::query()->where('user_id', $owner->id)->first(),
+            'PO harus dapat notifikasi saat JSON patch invalid'
+        );
+    }
+
+    public function test_retry_membawa_qa_feedback_dan_batasan_repair_order(): void
+    {
+        Queue::fake();
+        [$owner, $baseline, $run, $task] = $this->makeRun([
+            'status' => 'REVISION',
+            'qa_feedback' => 'Tolong perbaiki validasi email',
+            'revision_count' => 1,
+        ]);
+        $repairOrder = \App\Models\RepairOrder::query()->create([
+            'requested_by' => $owner->id,
+            'project_id' => $run->story->project_id,
+            'title' => 'Perbaiki demo',
+            'summary' => 'Test',
+            'original_message' => 'Test message',
+            'status' => 'RUNNING',
+        ]);
+        $run->forceFill(['repair_order_id' => $repairOrder->id])->save();
+
+        $capturedPrompts = [];
+        $agents = $this->createMock(AgentProfileClient::class);
+        $agents->method('sendMessage')->willReturnCallback(
+            function (string $slug, string $message) use (&$capturedPrompts) {
+                $capturedPrompts[] = $message;
+                return count($capturedPrompts) === 1
+                    ? $this->invalidPatchJson()
+                    : $this->validPatchJson();
+            }
+        );
+
+        $this->runJob($run, $task, $agents);
+
+        $this->assertCount(2, $capturedPrompts, 'AI harus dipanggil 2x (awal + retry)');
+        $retryPrompt = $capturedPrompts[1];
+        $this->assertStringContainsString(
+            'Tolong perbaiki validasi email',
+            $retryPrompt,
+            'Prompt retry harus membawa QA feedback'
+        );
+        $this->assertStringContainsString(
+            'BATASAN PERINTAH PERBAIKAN',
+            $retryPrompt,
+            'Prompt retry harus membawa batasan repair order'
+        );
+        $this->assertEquals('IN_REVIEW', $task->fresh()->status);
+    }
+
+    public function test_tidak_ada_duplikasi_notifikasi(): void
+    {
+        [$owner, $baseline, $run, $task] = $this->makeRun();
+
+        $agents = $this->createMock(AgentProfileClient::class);
+        // Patch selalu invalid -> retry juga gagal.
+        $agents->method('sendMessage')->willReturn($this->invalidPatchJson());
+
+        try {
+            $this->runJob($run, $task, $agents);
+            $this->fail('Seharusnya throw');
+        } catch (\Throwable) {
+        }
+
+        $count = Notification::query()->where('user_id', $owner->id)->count();
+        $this->assertEquals(1, $count, 'Hanya boleh ada 1 notifikasi, tidak duplikat');
+    }
 }

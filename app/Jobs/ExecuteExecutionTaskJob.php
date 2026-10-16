@@ -86,7 +86,6 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                 $applied = $patch['applied'];
                 $patch = $patch['patch'];
             } catch (Throwable $writeError) {
-                Notification::patchFailed($run, $task, $writeError->getMessage());
                 throw $writeError;
             }
             $worktrees->commit($worktree, 'Task #'.$task->id.': '.$task->title);
@@ -103,7 +102,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             $run->forceFill(['status' => 'REVIEWING'])->save();
             ReviewExecutionTaskJob::dispatch($run->id, $task->id);
         } catch (Throwable $exception) {
-            $this->failRun($run, $task, 'EXECUTION_FAILED', $worktrees, $baseline);
+            $this->failRun($run, $task, 'EXECUTION_FAILED', $worktrees, $baseline, $exception->getMessage());
             throw $exception;
         }
     }
@@ -141,19 +140,28 @@ class ExecuteExecutionTaskJob implements ShouldQueue
     ): array {
         if ($task->patch_retry_count >= 1) {
             // Seharusnya tidak terjadi (hanya dipanggil sekali), tapi jaga-jaga.
-            Notification::patchFailed($run, $task, $validationError->getMessage());
+            // Notifikasi ditangani oleh failRun() di outer catch — jangan duplikasi.
             throw $validationError;
         }
 
         $task->forceFill(['patch_retry_count' => $task->patch_retry_count + 1])->save();
 
-        $retryPrompt = implode("\n\n", [
+        // Catatan: $task->status sudah IN_PROGRESS di titik ini, jadi deteksi
+        // revisi QA dari qa_feedback yang terisi (bukan dari status).
+        $isQaRevision = filled($task->qa_feedback);
+
+        $retryPrompt = implode("\n\n", array_filter([
             "Patch kamu DITOLAK sistem karena: {$validationError->getMessage()}",
             'Pecah menjadi patch yang LEBIH KECIL: maksimal 2 file saja, kirim ulang hanya file yang paling penting dulu.',
             'Kembalikan JSON tepat: {"files":[{"path":"relatif/ke/file.php","action":"create|update|delete","content":"isi lengkap file"}],"summary":"ringkasan perubahan"}.',
-            'Aturan: path relatif dari root project, tanpa .. atau path absolut; action delete tanpa content; tulis code lengkap yang valid, bukan potongan; JANGAN sertakan penjelasan di luar JSON.',
+            'Aturan: path relatif dari root project, tanpa .. atau path absolut; action delete tanpa content; tulis code lengkap yang valid, bukan potongan; JANGAN sertakan penjelasan di luar JSON.'
+                .($run->repair_order_id ? ' BATASAN PERINTAH PERBAIKAN: dilarang menghapus file (action delete) dan dilarang operasi destruktif terhadap data; lakukan hanya perubahan minimal yang aman.' : ''),
+            // Jangan hilangkan konteks QA saat retry di putaran revisi.
+            $isQaRevision
+                ? 'REVISI (putaran '.($task->revision_count + 1).'): perbaiki berdasarkan feedback QA berikut, lalu kirim ulang SEMUA file yang berubah: '.$task->qa_feedback
+                : null,
             'Task: '.$task->title.' — '.$task->description,
-        ]);
+        ]));
 
         try {
             $rawRetry = $agents->sendMessage(
@@ -166,15 +174,27 @@ class ExecuteExecutionTaskJob implements ShouldQueue
 
             return ['applied' => $applied, 'patch' => $patchRetry];
         } catch (Throwable $retryError) {
-            Notification::patchFailed($run, $task, $retryError->getMessage());
             throw $retryError;
         }
     }
 
-    private function failRun(ExecutionRun $run, ExecutionTask $task, string $code, ?WorktreeManager $worktrees = null, ?string $baseline = null): void
+    private function failRun(ExecutionRun $run, ExecutionTask $task, string $code, ?WorktreeManager $worktrees = null, ?string $baseline = null, ?string $errorMessage = null): void
     {
         $task->forceFill(['status' => 'FAILED'])->save();
         $run->forceFill(['status' => 'FAILED', 'error_code' => $code, 'completed_at' => now()])->save();
+
+        // Notifikasi ke PO untuk SEMUA kegagalan eksekusi (AI error, JSON invalid,
+        // patch ditolak, write error) — PO tidak boleh dibiarkan tanpa kabar.
+        try {
+            $reason = $errorMessage ?: match ($code) {
+                'WORKSPACE_MISSING' => 'Workspace project tidak ditemukan.',
+                'PERMISSION_REJECTED' => 'PO menolak permintaan izin eksekusi.',
+                default => 'Terjadi kesalahan saat eksekusi.',
+            };
+            Notification::patchFailed($run, $task, $reason);
+        } catch (Throwable) {
+            // Best-effort: notifikasi tidak boleh menggagalkan failRun.
+        }
 
         // Bersihkan worktree yatim: worktree + branch dibuat sebelum pemanggilan
         // AI; bila gagal setelahnya, direktori worktrees/ dan branch exec-*-task-*
