@@ -2,6 +2,17 @@
 
 Simulasi tim Scrum yang dijalankan agen AI: **Product Owner** (kamu), **Scrum Master**, dan developer **FE/BE** plus **QA Engineer**. Mulai dari estimasi Fibonacci konsensus, diskusi refinement, sampai eksekusi kode dengan QA review loop dan final acceptance — semua di satu workspace Laravel.
 
+## Tampilan
+
+![Dashboard ScrumSpace](docs/images/dashboard.png)
+*Ringkasan workspace: status agent AI, sprint berjalan, dan approval PO.*
+
+![Chat dengan Scrum Master](docs/images/sm-chat.png)
+*Diskusi refinement dengan Scrum Master, termasuk lampiran gambar (vision).*
+
+![AI Providers](docs/images/ai-providers.png)
+*Hubungkan akun Google (Gemini), ChatGPT (Codex), dan Claude lewat OAuth — tanpa API key.*
+
 ## Fitur utama
 
 **Estimasi & refinement**
