@@ -43,8 +43,8 @@
             <div class="approval-actions">
                 @if ($request->status === 'PENDING')
                     <form method="POST" action="{{ route('accepted.approve', $request) }}" style="display:inline">@csrf<button class="button button-primary" type="submit">Setujui</button></form>
-                    <form method="POST" action="{{ route('accepted.reject', $request) }}" style="display:inline">@csrf<button class="button button-ghost" type="submit" onclick="return confirm('Tolak permintaan izin ini? Eksekusi akan dibatalkan.')">Tolak</button></form>
-                    <form method="POST" action="{{ route('accepted.cancel', $request) }}" style="display:inline">@csrf<button class="button button-ghost" type="submit" onclick="return confirm('Batalkan permintaan izin ini? Story bisa dieksekusi ulang dari awal.')">Batalkan</button></form>
+                    <form method="POST" action="{{ route('accepted.reject', $request) }}" style="display:inline">@csrf<button class="button button-ghost" type="submit" onclick="return handleConfirm(event, {title: 'Tolak permintaan?', message: 'Tolak permintaan izin ini? Eksekusi akan dibatalkan.', confirmLabel: 'Ya, tolak', danger: true})">Tolak</button></form>
+                    <form method="POST" action="{{ route('accepted.cancel', $request) }}" style="display:inline">@csrf<button class="button button-ghost" type="submit" onclick="return handleConfirm(event, {title: 'Batalkan permintaan?', message: 'Batalkan permintaan izin ini? Story bisa dieksekusi ulang dari awal.', confirmLabel: 'Ya, batalkan', danger: true})">Batalkan</button></form>
                 @else
                     <small> diproses {{ $request->resolved_at?->format('d M Y H:i') }}</small>
                 @endif

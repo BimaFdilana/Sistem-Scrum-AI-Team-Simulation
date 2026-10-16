@@ -26,10 +26,10 @@
     <p><strong>Ringkasan:</strong> {{ $order->summary }}</p>
     <p><strong>Perintah asli PO:</strong> {{ $order->original_message }}</p>
     @if ($order->status === 'CONFIRMED' && ! $order->isAccepted())
-        <form method="POST" action="{{ route('repair-orders.run', $order) }}" style="margin-top:1rem">@csrf<button class="button button-primary" type="submit" onclick="return confirm('Jalankan perintah ini? Tim AI akan mengerjakannya via pipeline FE/BE → QA → merge.')">Jalankan perintah</button></form>
+        <form method="POST" action="{{ route('repair-orders.run', $order) }}" style="margin-top:1rem">@csrf<button class="button button-primary" type="submit" onclick="return handleConfirm(event, {title: 'Jalankan perintah?', message: 'Jalankan perintah ini? Tim AI akan mengerjakannya via pipeline FE/BE → QA → merge.', confirmLabel: 'Ya, jalankan'})">Jalankan perintah</button></form>
     @endif
     @if (in_array($order->status, ['FAILED', 'BLOCKED'], true) && ! $order->isAccepted())
-        <form method="POST" action="{{ route('repair-orders.retry', $order) }}" style="margin-top:1rem">@csrf<button class="button button-primary" type="submit" onclick="return confirm('Kembalikan perintah ke status siap dijalankan?')">Coba lagi</button></form>
+        <form method="POST" action="{{ route('repair-orders.retry', $order) }}" style="margin-top:1rem">@csrf<button class="button button-primary" type="submit" onclick="return handleConfirm(event, {title: 'Coba lagi?', message: 'Kembalikan perintah ke status siap dijalankan?', confirmLabel: 'Ya, coba lagi'})">Coba lagi</button></form>
     @endif
 </section>
 

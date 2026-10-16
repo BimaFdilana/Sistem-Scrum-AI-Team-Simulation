@@ -48,7 +48,7 @@
                     @if ($connected)
                         <form method="POST" action="{{ route('ai-providers.disconnect', ['provider' => $slug]) }}">
                             @csrf
-                            <button class="button" type="submit" onclick="return confirm('Putus akun {{ $info['label'] }}? Kamu bisa mengaktifkannya lagi kapan pun.')">Putuskan</button>
+                            <button class="button" type="submit" onclick="return handleConfirm(event, {title: 'Putus akun?', message: 'Putus akun {{ $info['label'] }}? Kamu bisa mengaktifkannya lagi kapan pun.', confirmLabel: 'Ya, putuskan', danger: true})">Putuskan</button>
                         </form>
                     @else
                         <a class="button button-primary" href="{{ route('ai-providers.connect', ['provider' => $slug]) }}">Hubungkan <span aria-hidden="true">→</span></a>

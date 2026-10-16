@@ -4,8 +4,10 @@ namespace App\Jobs;
 
 use App\Models\ExecutionRun;
 use App\Models\ExecutionTask;
+use App\Models\Notification;
 use App\Services\AgentProfileClient;
 use App\Support\Workspace\PatchApplier;
+use App\Support\Workspace\PatchValidationException;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -75,7 +77,18 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             $patch = $this->validatedPatch($raw);
 
             // Guardrail perintah perbaikan: penegakan di level sistem, bukan cuma prompt.
-            $applied = $patcher->apply($worktree, $patch['files'], $run->repair_order_id === null);
+            // Bila patch DITOLAK validasi -> 1x retry otomatis dengan patch lebih kecil.
+            // Bila patch GAGAL TULIS (disk/izin) -> langsung fail, retry tidak ada gunanya.
+            try {
+                $applied = $patcher->apply($worktree, $patch['files'], $run->repair_order_id === null);
+            } catch (PatchValidationException $validationError) {
+                $patch = $this->retryWithSmallerPatch($agents, $run, $task, $patcher, $worktree, $validationError);
+                $applied = $patch['applied'];
+                $patch = $patch['patch'];
+            } catch (Throwable $writeError) {
+                Notification::patchFailed($run, $task, $writeError->getMessage());
+                throw $writeError;
+            }
             $worktrees->commit($worktree, 'Task #'.$task->id.': '.$task->title);
 
             $run->messages()->create([
@@ -109,6 +122,53 @@ class ExecuteExecutionTaskJob implements ShouldQueue
         }
 
         return ['files' => array_values($data['files']), 'summary' => trim($data['summary'])];
+    }
+
+    /**
+     * Retry otomatis 1x dengan patch yang lebih kecil (maks 2 file) bila patch
+     * asli ditolak validasi. Guard patch_retry_count mencegah infinite loop:
+     * retry tidak pernah me-retry lagi — gagal -> notifikasi + throw.
+     *
+     * @return array{applied:string[],patch:array{files:array,summary:string}}
+     */
+    private function retryWithSmallerPatch(
+        AgentProfileClient $agents,
+        ExecutionRun $run,
+        ExecutionTask $task,
+        PatchApplier $patcher,
+        string $worktree,
+        PatchValidationException $validationError,
+    ): array {
+        if ($task->patch_retry_count >= 1) {
+            // Seharusnya tidak terjadi (hanya dipanggil sekali), tapi jaga-jaga.
+            Notification::patchFailed($run, $task, $validationError->getMessage());
+            throw $validationError;
+        }
+
+        $task->forceFill(['patch_retry_count' => $task->patch_retry_count + 1])->save();
+
+        $retryPrompt = implode("\n\n", [
+            "Patch kamu DITOLAK sistem karena: {$validationError->getMessage()}",
+            'Pecah menjadi patch yang LEBIH KECIL: maksimal 2 file saja, kirim ulang hanya file yang paling penting dulu.',
+            'Kembalikan JSON tepat: {"files":[{"path":"relatif/ke/file.php","action":"create|update|delete","content":"isi lengkap file"}],"summary":"ringkasan perubahan"}.',
+            'Aturan: path relatif dari root project, tanpa .. atau path absolut; action delete tanpa content; tulis code lengkap yang valid, bukan potongan; JANGAN sertakan penjelasan di luar JSON.',
+            'Task: '.$task->title.' — '.$task->description,
+        ]);
+
+        try {
+            $rawRetry = $agents->sendMessage(
+                $task->assignee,
+                $retryPrompt,
+                'execution-'.$run->id.'-task-'.$task->id.'-retry1'
+            );
+            $patchRetry = $this->validatedPatch($rawRetry);
+            $applied = $patcher->apply($worktree, $patchRetry['files'], $run->repair_order_id === null);
+
+            return ['applied' => $applied, 'patch' => $patchRetry];
+        } catch (Throwable $retryError) {
+            Notification::patchFailed($run, $task, $retryError->getMessage());
+            throw $retryError;
+        }
     }
 
     private function failRun(ExecutionRun $run, ExecutionTask $task, string $code, ?WorktreeManager $worktrees = null, ?string $baseline = null): void

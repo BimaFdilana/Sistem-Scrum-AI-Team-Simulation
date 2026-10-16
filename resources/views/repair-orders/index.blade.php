@@ -32,7 +32,7 @@
             <div class="approval-actions">
                 <a class="button button-ghost" href="{{ route('repair-orders.show', $order) }}">Detail</a>
                 @if ($order->status === 'CONFIRMED')
-                    <form method="POST" action="{{ route('repair-orders.run', $order) }}" style="display:inline">@csrf<button class="button button-primary" type="submit" onclick="return confirm('Jalankan perintah ini? Tim AI akan mengerjakannya via pipeline FE/BE → QA → merge.')">Jalankan</button></form>
+                    <form method="POST" action="{{ route('repair-orders.run', $order) }}" style="display:inline">@csrf<button class="button button-primary" type="submit" onclick="return handleConfirm(event, {title: 'Jalankan perintah?', message: 'Jalankan perintah ini? Tim AI akan mengerjakannya via pipeline FE/BE → QA → merge.', confirmLabel: 'Ya, jalankan'})">Jalankan</button></form>
                 @endif
             </div>
         </article>

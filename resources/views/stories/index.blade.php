@@ -88,7 +88,7 @@
                             @elseif ($agreed && $latestExecution && $latestExecution->isActive())
                                 <a class="button button-ghost" href="{{ route('stories.executions.show', [$story, $latestExecution]) }}">Lihat Eksekusi ({{ str_replace('_', ' ', $latestExecution->status) }})</a>
                             @elseif ($agreed)
-                                <form method="POST" action="{{ route('stories.executions.store', $story) }}" style="display:inline">@csrf<button class="button button-primary" type="submit" onclick="return confirm('Mulai eksekusi user story ini? Scrum Master akan memecah menjadi task dan meminta izin sebelum agen mengubah code.')">Eksekusi User Story</button></form>
+                                <form method="POST" action="{{ route('stories.executions.store', $story) }}" style="display:inline">@csrf<button class="button button-primary" type="submit" onclick="return handleConfirm(event, {title: 'Mulai eksekusi?', message: 'Mulai eksekusi user story ini? Scrum Master akan memecah menjadi task dan meminta izin sebelum agen mengubah code.', confirmLabel: 'Ya, mulai eksekusi'})">Eksekusi User Story</button></form>
                                 @if ($latestExecution)
                                     <a class="button button-ghost" href="{{ route('stories.executions.show', [$story, $latestExecution]) }}">Riwayat Eksekusi</a>
                                 @endif

@@ -28,7 +28,7 @@
                 <span class="actor-actions" aria-label="Aksi actor {{ $actor->name }}">
                     <a class="button button-ghost" href="{{ route('actors.edit', $actor) }}" aria-label="Edit actor {{ $actor->name }}">Edit</a>
                     @if ($actor->stories_count === 0)
-                        <form method="POST" action="{{ route('actors.destroy', $actor) }}" onsubmit="return confirm('Hapus aktor ini?')">
+                        <form method="POST" action="{{ route('actors.destroy', $actor) }}" onsubmit="return handleConfirm(event, {title: 'Hapus aktor?', message: 'Hapus aktor ini?', confirmLabel: 'Ya, hapus', danger: true})">
                             @csrf
                             @method('DELETE')
                             <button class="button button-danger" type="submit" aria-label="Hapus actor {{ $actor->name }}">Hapus</button>

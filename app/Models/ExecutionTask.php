@@ -10,12 +10,12 @@ class ExecutionTask extends Model
 {
     protected $fillable = [
         'execution_run_id', 'title', 'description', 'assignee', 'status',
-        'worktree_path', 'branch', 'revision_count', 'qa_feedback',
+        'worktree_path', 'branch', 'revision_count', 'qa_feedback', 'patch_retry_count',
     ];
 
     protected function casts(): array
     {
-        return ['revision_count' => 'integer'];
+        return ['revision_count' => 'integer', 'patch_retry_count' => 'integer'];
     }
 
     public function run(): BelongsTo

@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>Masuk · AI Scrum Agent Workspace</title>
+    <script>
+        (function () {
+            try {
+                var t = localStorage.getItem('scrumspace-theme');
+                if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+            } catch (e) {}
+        })();
+    </script>
     <link rel="stylesheet" href="{{ asset('css/workspace.css') }}">
 </head>
 <body class="login-body">

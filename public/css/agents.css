@@ -1,11 +1,11 @@
 .directory-row{grid-template-columns:40px minmax(0,1fr) 140px 110px minmax(220px,auto)}
 .directory-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}
 .directory-actions .button,.activity-back-link{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:0 11px;border:1px solid var(--line-strong);border-radius:8px;font-size:10px;font-weight:600;white-space:nowrap}
-.directory-actions .button-primary{border-color:rgba(124,226,188,.48);background:#163c30;color:#d8f7e9}
+.directory-actions .button-primary{border-color:rgba(var(--accent-rgb),.48);background:#163c30;color:#d8f7e9}
 .directory-actions .button-primary:hover{background:#1d4b3c}
-.directory-actions .button-secondary,.activity-back-link{background:rgba(255,255,255,.025);color:#d2dddc}
+.directory-actions .button-secondary,.activity-back-link{background:rgba(var(--overlay),.025);color:var(--text)}
 .directory-actions .button-secondary:hover,.activity-back-link:hover{background:var(--panel-hover)}
-.activity-panel{overflow:hidden;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.018)}
+.activity-panel{overflow:hidden;border:1px solid var(--line);border-radius:10px;background:rgba(var(--overlay),.018)}
 .activity-note{margin:0;padding:14px 16px;border-bottom:1px solid var(--line);color:var(--muted);font-size:11px}
 .activity-table-wrap{overflow-x:auto}
 .activity-table{width:100%;border-collapse:collapse;text-align:left}

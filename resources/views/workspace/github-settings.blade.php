@@ -33,7 +33,7 @@
                     @unless ($fromEnv)
                         <form method="POST" action="{{ route('settings.github.disconnect') }}">
                             @csrf
-                            <button class="button" type="submit" onclick="return confirm('Putus koneksi GitHub? Token akan dihapus dari database.')">Putuskan</button>
+                            <button class="button" type="submit" onclick="return handleConfirm(event, {title: 'Putus koneksi GitHub?', message: 'Putus koneksi GitHub? Token akan dihapus dari database.', confirmLabel: 'Ya, putuskan', danger: true})">Putuskan</button>
                         </form>
                     @endunless
                 </div>

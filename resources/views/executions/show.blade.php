@@ -23,8 +23,8 @@
     <div class="notice-bar"><span class="notice-icon">★</span><p><strong>Eksekusi selesai ({{ str_replace('_', ' ', $run->status) }}).</strong> Beri keputusan final sebagai Product Owner:</p></div>
     <form method="POST" action="{{ route('stories.executions.accept', [$story, $run]) }}" style="display:flex;gap:.5rem;margin-bottom:1rem">
         @csrf
-        <button class="button button-primary" type="submit" name="status" value="BERHASIL" onclick="return confirm('Terima story ini sebagai BERHASIL? Story akan terkunci dari eksekusi ulang.')">Terima sebagai Berhasil</button>
-        <button class="button button-danger" type="submit" name="status" value="GAGAL" onclick="return confirm('Tandai story ini sebagai GAGAL? Story akan terkunci dari eksekusi ulang.')">Tandai Gagal</button>
+        <button class="button button-primary" type="submit" name="status" value="BERHASIL" onclick="return handleConfirm(event, {title: 'Terima sebagai Berhasil?', message: 'Terima story ini sebagai BERHASIL? Story akan terkunci dari eksekusi ulang.', confirmLabel: 'Ya, terima'})">Terima sebagai Berhasil</button>
+        <button class="button button-danger" type="submit" name="status" value="GAGAL" onclick="return handleConfirm(event, {title: 'Tandai sebagai Gagal?', message: 'Tandai story ini sebagai GAGAL? Story akan terkunci dari eksekusi ulang.', confirmLabel: 'Ya, tandai gagal', danger: true})">Tandai Gagal</button>
     </form>
 @endif
 

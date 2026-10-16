@@ -47,7 +47,7 @@
         @if ($demo && $demoUrl)
             <p>Demo aktif di <a href="{{ $demoUrl }}" target="_blank" rel="noopener">{{ $demoUrl }}</a> · berhenti otomatis {{ $demo->expires_at?->format('H:i') }}.</p>
             <form method="POST" action="{{ route('projects.demo.stop', $project) }}">@csrf<button class="button button-ghost" type="submit">Hentikan demo</button></form>
-            <form method="POST" action="{{ route('projects.demo.request-fix', $project) }}" style="margin-top:8px">@csrf<button class="button button-ghost" type="submit" onclick="return confirm('Minta Scrum Master memperbaiki demo yang bermasalah?')">Minta SM Perbaiki</button></form>
+            <form method="POST" action="{{ route('projects.demo.request-fix', $project) }}" style="margin-top:8px">@csrf<button class="button button-ghost" type="submit" onclick="return handleConfirm(event, {title: 'Minta SM perbaiki demo?', message: 'Minta Scrum Master memperbaiki demo yang bermasalah?', confirmLabel: 'Ya, minta perbaiki'})">Minta SM Perbaiki</button></form>
         @else
             <p>Jalankan project di server demo sementara (port unik per project).</p>
             <form method="POST" action="{{ route('projects.demo.start', $project) }}">@csrf<button class="button button-primary" type="submit">Jalankan demo</button></form>

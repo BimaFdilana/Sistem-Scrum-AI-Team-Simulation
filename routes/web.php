@@ -8,6 +8,7 @@ use App\Http\Controllers\ChatController;
 use App\Http\Controllers\DemoController;
 use App\Http\Controllers\ExecutionController;
 use App\Http\Controllers\GithubSettingsController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\PermissionRequestController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ProjectDownloadController;
@@ -72,6 +73,9 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/stories/{story}/executions/{run}', [ExecutionController::class, 'show'])->name('stories.executions.show');
     Route::post('/stories/{story}/executions/{run}/accept', [ExecutionController::class, 'accept'])->name('stories.executions.accept');
     Route::get('/repair-orders', [RepairOrderController::class, 'index'])->name('repair-orders.index');
+    Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
+    Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead'])->name('notifications.read-all');
+    Route::post('/notifications/{notification}/read', [NotificationController::class, 'markAsRead'])->name('notifications.read');
     Route::get('/repair-orders/{repairOrder}', [RepairOrderController::class, 'show'])->name('repair-orders.show');
     Route::post('/repair-orders/{repairOrder}/confirm', [RepairOrderController::class, 'confirm'])->middleware('throttle:20,1')->name('repair-orders.confirm');
     Route::post('/repair-orders/{repairOrder}/cancel', [RepairOrderController::class, 'cancel'])->middleware('throttle:20,1')->name('repair-orders.cancel');

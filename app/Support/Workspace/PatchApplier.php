@@ -52,10 +52,10 @@ class PatchApplier
     {
         $real = realpath($worktreePath);
         if ($real === false || ! is_dir($real)) {
-            throw new RuntimeException('Worktree tidak valid.');
+            throw new PatchValidationException('Worktree tidak valid.');
         }
         if (count($files) > self::MAX_FILES) {
-            throw new RuntimeException('Patch melebihi batas '.self::MAX_FILES.' file.');
+            throw new PatchValidationException('Patch melebihi batas '.self::MAX_FILES.' file.');
         }
 
         $plans = [];
@@ -86,14 +86,14 @@ class PatchApplier
     private function planOne(string $realWorktree, mixed $file, int $index, bool $allowDelete): array
     {
         if (! is_array($file)) {
-            throw new RuntimeException("Patch #{$index} bukan array.");
+            throw new PatchValidationException("Patch #{$index} bukan array.");
         }
         $action = $file['action'] ?? null;
         if (! in_array($action, ['create', 'update', 'delete'], true)) {
-            throw new RuntimeException("Patch #{$index}: action tidak valid.");
+            throw new PatchValidationException("Patch #{$index}: action tidak valid.");
         }
         if ($action === 'delete' && ! $allowDelete) {
-            throw new RuntimeException("Patch #{$index}: penghapusan file tidak diizinkan pada perintah perbaikan.");
+            throw new PatchValidationException("Patch #{$index}: penghapusan file tidak diizinkan pada perintah perbaikan.");
         }
         $relative = $this->safeRelativePath($file['path'] ?? null, $index);
         $target = $realWorktree.DIRECTORY_SEPARATOR.$relative;
@@ -103,13 +103,13 @@ class PatchApplier
         if ($action !== 'delete') {
             $content = $file['content'] ?? null;
             if (! is_string($content)) {
-                throw new RuntimeException("Patch #{$index}: content harus string.");
+                throw new PatchValidationException("Patch #{$index}: content harus string.");
             }
             if (strlen($content) > self::MAX_FILE_BYTES) {
-                throw new RuntimeException("Patch #{$index}: file melebihi 500 KB.");
+                throw new PatchValidationException("Patch #{$index}: file melebihi 500 KB.");
             }
             if (str_contains($content, "\0")) {
-                throw new RuntimeException("Patch #{$index}: content mengandung null byte.");
+                throw new PatchValidationException("Patch #{$index}: content mengandung null byte.");
             }
             if (! $allowDelete) {
                 $this->assertNotDestructive($content, $index);
@@ -198,12 +198,12 @@ class PatchApplier
     private function safeRelativePath(mixed $path, int $index): string
     {
         if (! is_string($path) || trim($path) === '') {
-            throw new RuntimeException("Patch #{$index}: path kosong.");
+            throw new PatchValidationException("Patch #{$index}: path kosong.");
         }
         $path = str_replace('\\', '/', trim($path));
         $path = ltrim($path, '/');
         if ($path === '' || str_contains($path, "\0")) {
-            throw new RuntimeException("Patch #{$index}: path tidak valid.");
+            throw new PatchValidationException("Patch #{$index}: path tidak valid.");
         }
         $segments = [];
         foreach (explode('/', $path) as $segment) {
@@ -211,16 +211,16 @@ class PatchApplier
                 continue;
             }
             if ($segment === '..') {
-                throw new RuntimeException("Patch #{$index}: path traversal ditolak.");
+                throw new PatchValidationException("Patch #{$index}: path traversal ditolak.");
             }
             $segments[] = $segment;
         }
         if ($segments === []) {
-            throw new RuntimeException("Patch #{$index}: path kosong.");
+            throw new PatchValidationException("Patch #{$index}: path kosong.");
         }
         foreach ($segments as $segment) {
             if (strtolower($segment) === '.git') {
-                throw new RuntimeException("Patch #{$index}: path tidak diizinkan.");
+                throw new PatchValidationException("Patch #{$index}: path tidak diizinkan.");
             }
         }
 
@@ -249,7 +249,7 @@ class PatchApplier
             ? ''
             : rtrim($realParent, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR;
         if (! str_starts_with($resolved, $prefix)) {
-            throw new RuntimeException("Patch #{$index}: path keluar dari worktree (symlink tidak diizinkan).");
+            throw new PatchValidationException("Patch #{$index}: path keluar dari worktree (symlink tidak diizinkan).");
         }
     }
 
@@ -262,7 +262,7 @@ class PatchApplier
     {
         foreach (self::DESTRUCTIVE_PATTERNS as $label => $pattern) {
             if (preg_match($pattern, $content) === 1) {
-                throw new RuntimeException(
+                throw new PatchValidationException(
                     "Patch #{$index}: ditolak guardrail anti-destruktif — terdeteksi {$label} pada perintah perbaikan."
                 );
             }
