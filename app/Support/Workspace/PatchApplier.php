@@ -35,6 +35,13 @@ class PatchApplier
     ];
 
     /**
+     * Terapkan patch secara atomik (two-phase):
+     * - Fase 1: validasi SELURUH patch tanpa menulis apa pun. Satu patch
+     *   tidak valid -> tidak ada satu file pun yang berubah.
+     * - Fase 2: terapkan satu per satu. Bila ada yang gagal di tengah
+     *   (mis. disk penuh, izin berubah), semua file yang sudah ditulis
+     *   dikembalikan ke kondisi semula (rollback otomatis).
+     *
      * @param  bool  $allowDelete  false untuk perintah perbaikan: penghapusan file
      *                            ditolak di level sistem (guardrail anti-destruktif),
      *                            dan isi patch dipindai untuk pola destruktif
@@ -51,15 +58,32 @@ class PatchApplier
             throw new RuntimeException('Patch melebihi batas '.self::MAX_FILES.' file.');
         }
 
-        $applied = [];
+        $plans = [];
         foreach ($files as $index => $file) {
-            $applied[] = $this->applyOne($real, $file, $index, $allowDelete);
+            $plans[] = $this->planOne($real, $file, $index, $allowDelete);
+        }
+
+        $applied = [];
+        $backups = [];
+        $createdDirs = [];
+        try {
+            foreach ($plans as $plan) {
+                $this->applyPlan($plan, $backups, $createdDirs);
+                $applied[] = $plan['relative'];
+            }
+        } catch (\Throwable $e) {
+            $this->rollback($backups, $createdDirs);
+            throw $e;
         }
 
         return $applied;
     }
 
-    private function applyOne(string $realWorktree, mixed $file, int $index, bool $allowDelete): string
+    /**
+     * Fase 1: validasi satu patch tanpa menyentuh disk.
+     * @return array{index:int,relative:string,target:string,action:string,content:?string}
+     */
+    private function planOne(string $realWorktree, mixed $file, int $index, bool $allowDelete): array
     {
         if (! is_array($file)) {
             throw new RuntimeException("Patch #{$index} bukan array.");
@@ -75,32 +99,100 @@ class PatchApplier
         $target = $realWorktree.DIRECTORY_SEPARATOR.$relative;
         $this->assertInsideWorktree($realWorktree, $target, $index);
 
-        if ($action === 'delete') {
-            if (File::exists($target) && ! File::isDirectory($target)) {
-                File::delete($target);
+        $content = null;
+        if ($action !== 'delete') {
+            $content = $file['content'] ?? null;
+            if (! is_string($content)) {
+                throw new RuntimeException("Patch #{$index}: content harus string.");
+            }
+            if (strlen($content) > self::MAX_FILE_BYTES) {
+                throw new RuntimeException("Patch #{$index}: file melebihi 500 KB.");
+            }
+            if (str_contains($content, "\0")) {
+                throw new RuntimeException("Patch #{$index}: content mengandung null byte.");
+            }
+            if (! $allowDelete) {
+                $this->assertNotDestructive($content, $index);
+            }
+        }
+
+        return [
+            'index' => $index,
+            'relative' => $relative,
+            'target' => $target,
+            'action' => $action,
+            'content' => $content,
+        ];
+    }
+
+    /**
+     * Fase 2: terapkan satu rencana yang sudah lolos validasi, sambil
+     * mencatat kondisi semula tiap target untuk rollback.
+     */
+    private function applyPlan(array $plan, array &$backups, array &$createdDirs): void
+    {
+        $target = $plan['target'];
+        if (! array_key_exists($target, $backups)) {
+            $backups[$target] = [
+                'wasDir' => is_dir($target) && ! is_link($target),
+                'content' => is_file($target) ? file_get_contents($target) : null,
+            ];
+        }
+
+        if ($plan['action'] === 'delete') {
+            // Semantik lama dipertahankan: target direktori tidak dihapus diam-diam.
+            if ((is_file($target) || is_link($target)) && ! @unlink($target)) {
+                throw new RuntimeException("Patch #{$plan['index']}: gagal menghapus file.");
             }
 
-            return $relative;
+            return;
         }
 
-        $content = $file['content'] ?? null;
-        if (! is_string($content)) {
-            throw new RuntimeException("Patch #{$index}: content harus string.");
+        $dir = dirname($target);
+        if (! is_dir($dir)) {
+            $createdDirs[] = $dir;
+            File::ensureDirectoryExists($dir, 0755);
         }
-        if (strlen($content) > self::MAX_FILE_BYTES) {
-            throw new RuntimeException("Patch #{$index}: file melebihi 500 KB.");
+        try {
+            $written = File::put($target, $plan['content']);
+        } catch (\Throwable $e) {
+            throw new RuntimeException("Patch #{$plan['index']}: gagal menulis file.", 0, $e);
         }
-        if (str_contains($content, "\0")) {
-            throw new RuntimeException("Patch #{$index}: content mengandung null byte.");
+        if ($written === false) {
+            throw new RuntimeException("Patch #{$plan['index']}: gagal menulis file.");
         }
-        if (! $allowDelete) {
-            $this->assertNotDestructive($content, $index);
+    }
+
+    /**
+     * Kembalikan semua target ke kondisi sebelum fase 2 dimulai, dalam
+     * urutan terbalik; lalu hapus direktori yang kita buat bila kosong.
+     */
+    private function rollback(array $backups, array $createdDirs): void
+    {
+        foreach (array_reverse($backups, true) as $target => $backup) {
+            if ($backup['wasDir']) {
+                // Target adalah direktori (mis. tabrakan path): pastikan tidak
+                // ada file setengah-jadi tertinggal di sana.
+                if (is_file($target)) {
+                    @unlink($target);
+                }
+                continue;
+            }
+            if ($backup['content'] === null) {
+                if (is_file($target) || is_link($target)) {
+                    @unlink($target);
+                }
+            } else {
+                @file_put_contents($target, $backup['content']);
+            }
         }
 
-        File::ensureDirectoryExists(dirname($target), 0755);
-        File::put($target, $content);
-
-        return $relative;
+        usort($createdDirs, static fn ($a, $b) => strlen($b) <=> strlen($a));
+        foreach ($createdDirs as $dir) {
+            if (is_dir($dir)) {
+                @rmdir($dir); // hanya berhasil bila sudah kosong
+            }
+        }
     }
 
     private function safeRelativePath(mixed $path, int $index): string
