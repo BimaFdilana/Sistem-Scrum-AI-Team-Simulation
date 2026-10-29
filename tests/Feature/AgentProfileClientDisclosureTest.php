@@ -55,6 +55,38 @@ class AgentProfileClientDisclosureTest extends TestCase
         $this->assertSame($leak, $result);
     }
 
+    public function test_execution_mode_prompt_is_json_only_without_consultation_line(): void
+    {
+        // Regresi eksekusi US-01 #4: system prompt "consultation and
+        // analysis only" bertabrakan dengan instruksi patch JSON, agent
+        // Frontend dua kali menjawab prosa alih-alih patch.
+        $captured = null;
+        $this->mockCliproxy('{"files":[],"summary":"Ok."}', function ($systemPrompt) use (&$captured) {
+            $captured = $systemPrompt;
+        });
+        app(AgentProfileClient::class)->sendMessage('qa-engineer', 'Kerjakan task.', 'test-exec', false, true);
+
+        $this->assertNotNull($captured);
+        $this->assertStringContainsString('ONLY the JSON object', $captured);
+        $this->assertStringNotContainsString('consultation and analysis only', $captured);
+        $this->assertStringNotContainsString('Kepribadian profesionalmu', $captured);
+        // Aturan platform-vs-project tetap berlaku dalam mode eksekusi.
+        $this->assertStringContainsString('TARGET PROJECT', $captured);
+        $this->assertStringContainsString('ScrumSpace platform itself', $captured);
+    }
+
+    public function test_consultation_mode_prompt_keeps_consultation_line(): void
+    {
+        $captured = null;
+        $this->mockCliproxy('{"estimate_points":5,"rationale":"Ok."}', function ($systemPrompt) use (&$captured) {
+            $captured = $systemPrompt;
+        });
+        app(AgentProfileClient::class)->sendMessage('qa-engineer', 'Vote.', 'test-consult');
+
+        $this->assertStringContainsString('consultation and analysis only', $captured);
+        $this->assertStringNotContainsString('ONLY the JSON object', $captured);
+    }
+
     public function test_system_prompt_distinguishes_project_from_platform(): void
     {
         $captured = null;

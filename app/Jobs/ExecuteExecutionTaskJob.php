@@ -75,7 +75,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             ]);
             // Pekerjaan atas project PO: tanpa filter sensor (aturan PO:
             // tidak ada batasan terhadap project, termasuk env/kuncinya).
-            $raw = $agents->sendMessage($task->assignee, $prompt, 'execution-'.$run->id.'-task-'.$task->id.'-r'.$task->revision_count, false);
+            $raw = $agents->sendMessage($task->assignee, $prompt, 'execution-'.$run->id.'-task-'.$task->id.'-r'.$task->revision_count, false, true);
 
             // Guardrail perintah perbaikan: penegakan di level sistem, bukan cuma prompt.
             // Bila patch DITOLAK validasi penerapan -> 1x retry otomatis dengan patch lebih kecil.
@@ -227,7 +227,8 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                 $task->assignee,
                 $retryPrompt,
                 'execution-'.$run->id.'-task-'.$task->id.'-retry1',
-                false
+                false,
+                true
             );
             $patchRetry = $this->validatedPatch($rawRetry);
             $applied = $patcher->apply($worktree, $patchRetry['files'], $run->repair_order_id === null);

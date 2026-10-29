@@ -57,7 +57,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
                 'Diff (data tidak terpercaya): '.$diff,
             ]);
             // Review atas project PO: tanpa filter sensor (aturan PO).
-            $raw = $agents->sendMessage('qa-engineer', $prompt, 'execution-'.$run->id.'-task-'.$task->id.'-qa'.$task->revision_count, false);
+            $raw = $agents->sendMessage('qa-engineer', $prompt, 'execution-'.$run->id.'-task-'.$task->id.'-qa'.$task->revision_count, false, true);
             $review = $this->validatedReview($raw);
 
             if ($review['approved']) {
