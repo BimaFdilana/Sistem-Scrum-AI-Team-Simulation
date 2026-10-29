@@ -59,8 +59,18 @@ class ExecuteExecutionTaskJob implements ShouldQueue
         try {
             $worktrees->ensureRepo($baseline);
             $branch = 'exec-'.$run->id.'-task-'.$task->id;
-            $worktree = $worktrees->create($baseline, $branch);
-            $task->forceFill(['worktree_path' => $worktree, 'branch' => $branch])->save();
+            // Pengerjaan revisi (status REVISION) melanjutkan worktree +
+            // cabang task yang sudah ada — bukan membuat cabang baru
+            // dengan nama yang sama (regresi eksekusi US-01 #6: create()
+            // lama selalu `add -b` sehingga revisi pertama langsung fatal
+            // "branch already exists" sebelum agent dipanggil).
+            if ($task->status === 'REVISION' && $task->branch === $branch
+                && $task->worktree_path && is_dir($task->worktree_path)) {
+                $worktree = $task->worktree_path;
+            } else {
+                $worktree = $worktrees->create($baseline, $branch);
+                $task->forceFill(['worktree_path' => $worktree, 'branch' => $branch])->save();
+            }
 
             $assigneeName = $task->assigneeName();
             $prompt = implode("\n\n", [

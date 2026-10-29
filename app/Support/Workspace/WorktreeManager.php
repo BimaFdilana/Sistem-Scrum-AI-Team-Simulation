@@ -27,17 +27,74 @@ class WorktreeManager
         ]);
     }
 
-    /** Buat worktree + branch baru dari HEAD baseline. Return path worktree. */
+    /**
+     * Buat worktree + branch baru dari HEAD baseline. Return path worktree.
+     *
+     * Revisi eksekusi US-01 #6 (15:00:25 UTC) gagal di sini: pengerjaan
+     * ulang task memakai branch 'exec-{run}-task-{id}' yang SAMA, tapi
+     * create() selalu `worktree add -b`, sehingga git menolak dengan
+     * "a branch named ... already exists" — sebelum agent dipanggil —
+     * dan catch failRun menandai run EXECUTION_FAILED. Jadi:
+     *  - bila worktree cabang itu sudah terdaftar di path ini, pakai
+     *    kembali apa adanya (pengerjaan revisi melanjutkan cabang task);
+     *  - bila cabang ada tapi worktree-nya tidak terdaftar (mis. direktori
+     *    terhapus), daftarkan ulang TANPA -b setelah `worktree prune`
+     *    membersihkan registrasi yatim;
+     *  - bila cabang belum ada, perilaku lama (`add -b`).
+     */
     public function create(string $baselinePath, string $branch): string
     {
         $path = dirname($baselinePath).'/worktrees/'.$branch;
+        try {
+            $this->git($baselinePath, ['worktree', 'prune']);
+        } catch (RuntimeException) {
+            // Prune best-effort; kegagalan di sini tidak boleh menggagalkan create.
+        }
+        File::ensureDirectoryExists(dirname($path), 0700);
+        if ($this->isWorktreeRegistered($baselinePath, $path)) {
+            return $path;
+        }
+        if ($this->branchExists($baselinePath, $branch)) {
+            if (File::exists($path)) {
+                File::deleteDirectory($path);
+            }
+            $this->git($baselinePath, ['worktree', 'add', $path, $branch]);
+
+            return $path;
+        }
         if (File::exists($path)) {
             File::deleteDirectory($path);
         }
-        File::ensureDirectoryExists(dirname($path), 0700);
         $this->git($baselinePath, ['worktree', 'add', '-b', $branch, $path, 'HEAD']);
 
         return $path;
+    }
+
+    private function branchExists(string $baselinePath, string $branch): bool
+    {
+        try {
+            $this->git($baselinePath, ['show-ref', '--verify', '--quiet', 'refs/heads/'.$branch]);
+
+            return true;
+        } catch (RuntimeException) {
+            return false;
+        }
+    }
+
+    private function isWorktreeRegistered(string $baselinePath, string $path): bool
+    {
+        try {
+            $list = $this->git($baselinePath, ['worktree', 'list', '--porcelain']);
+        } catch (RuntimeException) {
+            return false;
+        }
+        foreach (explode("\n", $list) as $line) {
+            if (str_starts_with($line, 'worktree ') && trim(substr($line, 9)) === $path) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function commit(string $worktreePath, string $message): void
