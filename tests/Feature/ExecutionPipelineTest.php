@@ -120,8 +120,8 @@ class ExecutionPipelineTest extends TestCase
         ]);
 
         // AI gagal setelah worktree dibuat.
-        $this->mock(\App\Services\AgentProfileClient::class, function ($mock): void {
-            $mock->shouldReceive('sendMessage')->andThrow(new \RuntimeException('AI down'));
+        $runner = $this->mock(\App\Services\AgentToolRunner::class, function ($mock): void {
+            $mock->shouldReceive('run')->andThrow(new \RuntimeException('AI down'));
         });
 
         $branch = 'exec-'.$run->id.'-task-'.$task->id;
@@ -129,9 +129,8 @@ class ExecutionPipelineTest extends TestCase
 
         try {
             (new ExecuteExecutionTaskJob($run->id, $task->id))->handle(
-                app(\App\Services\AgentProfileClient::class),
                 $worktrees,
-                app(PatchApplier::class),
+                $runner,
             );
             $this->fail('Job seharusnya melempar ulang exception.');
         } catch (\RuntimeException $e) {

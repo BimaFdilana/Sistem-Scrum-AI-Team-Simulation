@@ -130,4 +130,21 @@ class ExecutionValidatorsTest extends TestCase
         $this->assertTrue($review['approved']);
         $this->assertSame('', $review['feedback']);
     }
+
+    public function test_tool_verdict_parsing_accepts_valid_and_rejects_empty_rejection(): void
+    {
+        $this->assertSame(
+            ['approved' => true, 'feedback' => 'Bagus.'],
+            ReviewExecutionTaskJob::verdictFromToolCalls([
+                ['name' => 'qa_verdict', 'arguments' => ['approved' => true, 'feedback' => 'Bagus.']],
+            ]),
+        );
+        $this->assertNull(ReviewExecutionTaskJob::verdictFromToolCalls([
+            ['name' => 'qa_verdict', 'arguments' => ['approved' => false, 'feedback' => '']],
+        ]));
+        $this->assertNull(ReviewExecutionTaskJob::verdictFromToolCalls([
+            ['name' => 'other_tool', 'arguments' => ['approved' => true, 'feedback' => 'x']],
+        ]));
+        $this->assertNull(ReviewExecutionTaskJob::verdictFromToolCalls([]));
+    }
 }

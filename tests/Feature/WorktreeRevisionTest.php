@@ -85,22 +85,29 @@ class WorktreeRevisionTest extends TestCase
             'title' => 'T1', 'description' => 'D1', 'assignee' => 'backend-developer', 'status' => 'PENDING',
         ]);
 
-        $this->mock(\App\Services\AgentProfileClient::class, function ($mock): void {
-            $mock->shouldReceive('sendMessage')->andReturn(
-                json_encode(['files' => [['path' => 'satu.css', 'action' => 'create', 'content' => '.a{}']], 'summary' => 'Satu.']),
-                json_encode(['files' => [['path' => 'dua.css', 'action' => 'create', 'content' => '.b{}']], 'summary' => 'Dua.']),
-            );
-        });
-        $agents = app(\App\Services\AgentProfileClient::class);
+        $runner = $this->mock(\App\Services\AgentToolRunner::class, function ($mock): void {
+            $mock->shouldReceive('run')->twice()->andReturnUsing(function (string $slug, string $worktree) {
+                static $call = 0;
+                $call++;
+                if ($call === 1) {
+                    file_put_contents($worktree.'/satu.css', '.a{}');
 
-        (new ExecuteExecutionTaskJob($run->id, $task->id))->handle($agents, $worktrees, app(PatchApplier::class));
+                    return ['files' => ['satu.css'], 'summary' => 'Satu.'];
+                }
+                file_put_contents($worktree.'/dua.css', '.b{}');
+
+                return ['files' => ['dua.css'], 'summary' => 'Dua.'];
+            });
+        });
+
+        (new ExecuteExecutionTaskJob($run->id, $task->id))->handle($worktrees, $runner);
         $this->assertSame('IN_REVIEW', $task->fresh()->status);
 
         // Simulasi QA meminta revisi (seperti ReviewExecutionTaskJob).
         $task->forceFill(['status' => 'REVISION', 'qa_feedback' => 'Perbaiki.'])->save();
         $run->forceFill(['status' => 'REVIEWING'])->save();
 
-        (new ExecuteExecutionTaskJob($run->id, $task->id))->handle($agents, $worktrees, app(PatchApplier::class));
+        (new ExecuteExecutionTaskJob($run->id, $task->id))->handle($worktrees, $runner);
 
         $this->assertSame('IN_REVIEW', $task->fresh()->status);
         $worktree = $task->fresh()->worktree_path;

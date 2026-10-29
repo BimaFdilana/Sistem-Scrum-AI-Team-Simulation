@@ -56,64 +56,45 @@ class ExecutionPatchRetryTest extends TestCase
         ], 'summary' => 'Tambah hello.css.']);
     }
 
-    public function test_format_failure_retries_once_and_succeeds(): void
+    public function test_tool_loop_success_moves_task_to_review(): void
     {
-        // Regresi eksekusi US-01 #3: jawaban pertama agent gagal bentuk
-        // ("Format patch agent tidak valid") langsung membunuh eksekusi.
-        // Kini: 1x retry dengan patch lebih kecil, lalu lanjut.
+        // Jalur tool-call menggantikan patch JSON: runner mengembalikan
+        // daftar file + ringkasan, job memindah task ke IN_REVIEW dan
+        // mengantre job review QA.
         Queue::fake();
         [$baseline, $worktrees] = $this->makeBaseline();
         [$run, $task] = $this->makeRun($baseline);
 
-        $this->mock(\App\Services\AgentProfileClient::class, function ($mock): void {
-            $mock->shouldReceive('sendMessage')->andReturn(
-                'Maaf, saya tidak dapat membantu.',
-                $this->validPatch(),
-            );
+        $runner = $this->mock(\App\Services\AgentToolRunner::class, function ($mock): void {
+            $mock->shouldReceive('run')->once()->andReturn(['files' => ['hello.css'], 'summary' => 'Tambah hello.css.']);
         });
 
-        (new ExecuteExecutionTaskJob($run->id, $task->id))->handle(
-            app(\App\Services\AgentProfileClient::class),
-            $worktrees,
-            app(PatchApplier::class),
-        );
+        (new ExecuteExecutionTaskJob($run->id, $task->id))->handle($worktrees, $runner);
 
         $this->assertSame('IN_REVIEW', $task->fresh()->status);
         $this->assertSame('REVIEWING', $run->fresh()->status);
-        $this->assertSame(1, $task->fresh()->patch_retry_count);
-        $this->assertSame('.a{color:red}', file_get_contents(
-            dirname($baseline).'/worktrees/exec-'.$run->id.'-task-'.$task->id.'/hello.css'
-        ));
         Queue::assertPushed(ReviewExecutionTaskJob::class);
     }
 
-    public function test_retry_failure_fails_run_only_once(): void
+    public function test_tool_loop_failure_fails_run_only_once(): void
     {
         Queue::fake();
         [$baseline, $worktrees] = $this->makeBaseline();
         [$run, $task] = $this->makeRun($baseline);
 
-        $this->mock(\App\Services\AgentProfileClient::class, function ($mock): void {
-            $mock->shouldReceive('sendMessage')->andReturn(
-                'Maaf, saya tidak dapat membantu.',
-                'Masih bukan JSON.',
-            );
+        $runner = $this->mock(\App\Services\AgentToolRunner::class, function ($mock): void {
+            $mock->shouldReceive('run')->once()->andThrow(new \RuntimeException('Agent gagal.'));
         });
 
         try {
-            (new ExecuteExecutionTaskJob($run->id, $task->id))->handle(
-                app(\App\Services\AgentProfileClient::class),
-                $worktrees,
-                app(PatchApplier::class),
-            );
+            (new ExecuteExecutionTaskJob($run->id, $task->id))->handle($worktrees, $runner);
             $this->fail('Job seharusnya melempar ulang exception.');
         } catch (\Throwable) {
-            // Diharapkan: retry gagal -> failRun.
+            // Diharapkan: runner gagal -> failRun.
         }
 
         $this->assertSame('FAILED', $task->fresh()->status);
         $this->assertSame('FAILED', $run->fresh()->status);
         $this->assertSame('EXECUTION_FAILED', $run->fresh()->error_code);
-        $this->assertSame(1, $task->fresh()->patch_retry_count);
     }
 }

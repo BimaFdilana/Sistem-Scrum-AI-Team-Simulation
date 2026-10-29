@@ -550,13 +550,22 @@ class CliProxyApiClient
                 ['type' => 'image_url', 'image_url' => ['url' => 'data:'.$image['mime'].';base64,'.$image['data']]],
             ]
             : $userMessage;
+        return $this->attemptChatMessages($model, $systemPrompt, [['role' => 'user', 'content' => $userContent]], $timeout, $tools);
+    }
+
+    /**
+     * Satu percobaan chat dengan riwayat pesan penuh (untuk loop tool).
+     *
+     * @param  array<int,array{role:string,content:mixed}>  $messages
+     * @param  array<int,array{type:string,function:array{name:string,parameters:array}}>|null  $tools
+     * @return array{status: 'ok'|'transient'|'permanent'|'not_found'|'malformed', text: ?string, error: string, tool_calls: array, usage: array, retry_after: ?int}
+     */
+    private function attemptChatMessages(string $model, string $systemPrompt, array $messages, int $timeout, ?array $tools = null): array
+    {
         $payload = [
             'model' => $model,
             'stream' => false,
-            'messages' => [
-                ['role' => 'system', 'content' => $systemPrompt],
-                ['role' => 'user', 'content' => $userContent],
-            ],
+            'messages' => array_merge([['role' => 'system', 'content' => $systemPrompt]], $messages),
         ];
         if ($tools !== null) {
             $payload['tools'] = $tools;
@@ -648,6 +657,18 @@ class CliProxyApiClient
      */
     public function chatWithTools(string $model, string $systemPrompt, string $userMessage, array $tools, int $timeout = 120): array
     {
+        return $this->chatWithToolsHistory($model, $systemPrompt, [['role' => 'user', 'content' => $userMessage]], $tools, $timeout);
+    }
+
+    /**
+     * Seperti chatWithTools, tapi dengan riwayat pesan penuh (loop tool).
+     *
+     * @param  array<int,array{role:string,content:mixed}>  $messages
+     * @param  array<int,array{type:string,function:array{name:string,parameters:array}}>  $tools
+     * @return array{tool_calls: array, text: ?string, error: ?string, model: ?string, usage: array, retry_after: ?int}
+     */
+    public function chatWithToolsHistory(string $model, string $systemPrompt, array $messages, array $tools, int $timeout = 120): array
+    {
         if (! $this->agentsEnabled() || ! $this->apiKey) {
             return ['tool_calls' => [], 'text' => null, 'error' => 'DISABLED', 'model' => null, 'usage' => [], 'retry_after' => null];
         }
@@ -661,7 +682,7 @@ class CliProxyApiClient
                 if (microtime(true) >= $deadline) {
                     return ['tool_calls' => [], 'text' => null, 'error' => $lastError === 'UNKNOWN' ? 'TIMEOUT' : $lastError, 'model' => null, 'usage' => [], 'retry_after' => $lastRetryAfter];
                 }
-                $outcome = $this->attemptChat($candidate, $systemPrompt, $userMessage, $timeout, null, $tools);
+                $outcome = $this->attemptChatMessages($candidate, $systemPrompt, $messages, $timeout, $tools);
                 if ($outcome['status'] === 'ok') {
                     return ['tool_calls' => $outcome['tool_calls'], 'text' => $outcome['text'], 'error' => null, 'model' => $candidate, 'usage' => $outcome['usage'], 'retry_after' => null];
                 }

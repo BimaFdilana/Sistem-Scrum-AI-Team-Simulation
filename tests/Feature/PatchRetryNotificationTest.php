@@ -8,9 +8,7 @@ use App\Models\Notification;
 use App\Models\Project;
 use App\Models\Story;
 use App\Models\User;
-use App\Services\AgentProfileClient;
-use App\Support\Workspace\PatchApplier;
-use App\Support\Workspace\PatchValidationException;
+use App\Services\AgentToolRunner;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -44,76 +42,56 @@ class PatchRetryNotificationTest extends TestCase
         return [$owner, $baseline, $run, $task];
     }
 
-    private function runJob(ExecutionRun $run, $task, $agents, $patcher = null): void
+    private function runJob(ExecutionRun $run, $task, $runner): void
     {
         $worktrees = new WorktreeManager;
         (new ExecuteExecutionTaskJob($run->id, $task->id))->handle(
-            $agents,
             $worktrees,
-            $patcher ?? app(PatchApplier::class),
+            $runner,
         );
     }
 
-    private function validPatchJson(string $path = 'app/Ok.php'): string
-    {
-        return json_encode([
-            'files' => [['path' => $path, 'action' => 'create', 'content' => '<?php // ok']],
-            'summary' => 'Tambah file ok',
-        ]);
-    }
-
-    private function invalidPatchJson(): string
-    {
-        return json_encode([
-            'files' => [['path' => '../evil.php', 'action' => 'create', 'content' => 'x']],
-            'summary' => 'Patch jahat',
-        ]);
-    }
-
-    public function test_retry_berhasil_setelah_patch_kecil(): void
+    public function test_tool_loop_berhasil_tanpa_notifikasi(): void
     {
         Queue::fake();
         [$owner, $baseline, $run, $task] = $this->makeRun();
 
-        $agents = $this->mock(AgentProfileClient::class, function ($mock): void {
-            $mock->shouldReceive('sendMessage')->twice()->andReturn(
-                $this->invalidPatchJson(),   // percobaan pertama: ditolak validasi
-                $this->validPatchJson(),     // retry: patch kecil valid
-            );
+        $runner = $this->mock(AgentToolRunner::class, function ($mock): void {
+            $mock->shouldReceive('run')->once()->andReturnUsing(function (string $slug, string $worktree) {
+                mkdir($worktree.'/app', 0755, true);
+                file_put_contents($worktree.'/app/Ok.php', '<?php // ok');
+
+                return ['files' => ['app/Ok.php'], 'summary' => 'Tambah file ok'];
+            });
         });
 
-        $this->runJob($run, $task, $agents);
+        $this->runJob($run, $task, $runner);
 
         $this->assertSame('IN_REVIEW', $task->fresh()->status);
         $this->assertSame('REVIEWING', $run->fresh()->status);
-        $this->assertSame(1, $task->fresh()->patch_retry_count);
-        $this->assertSame(0, Notification::query()->count(), 'Retry sukses tidak boleh buat notifikasi.');
+        $this->assertSame(0, Notification::query()->count(), 'Sukses tidak boleh buat notifikasi.');
         $worktree = $task->fresh()->worktree_path;
         $this->assertNotEmpty($worktree);
         $this->assertFileExists($worktree.'/app/Ok.php');
     }
 
-    public function test_retry_gagal_membuat_notifikasi_dan_fail(): void
+    public function test_tool_loop_gagal_membuat_notifikasi_dan_fail(): void
     {
         [$owner, $baseline, $run, $task] = $this->makeRun();
 
-        $agents = $this->mock(AgentProfileClient::class, function ($mock): void {
-            $mock->shouldReceive('sendMessage')->twice()->andReturn(
-                $this->invalidPatchJson(),
-                $this->invalidPatchJson(), // retry juga gagal
-            );
+        $runner = $this->mock(AgentToolRunner::class, function ($mock): void {
+            $mock->shouldReceive('run')->once()->andThrow(new \RuntimeException('Agent gagal.'));
         });
 
         try {
-            $this->runJob($run, $task, $agents);
+            $this->runJob($run, $task, $runner);
             $this->fail('Job seharusnya melempar ulang exception.');
-        } catch (PatchValidationException $e) {
-            $this->assertStringContainsString('path traversal', $e->getMessage());
+        } catch (\RuntimeException $e) {
+            $this->assertSame('Agent gagal.', $e->getMessage());
         }
 
         $this->assertSame('FAILED', $task->fresh()->status);
         $this->assertSame('FAILED', $run->fresh()->status);
-        $this->assertSame(1, $task->fresh()->patch_retry_count);
 
         $notif = Notification::query()->where('user_id', $owner->id)->first();
         $this->assertNotNull($notif, 'Notifikasi harus terbuat untuk PO.');
@@ -123,48 +101,40 @@ class PatchRetryNotificationTest extends TestCase
         $this->assertStringContainsString("/stories/{$run->story_id}/executions/{$run->id}", $notif->link);
     }
 
-    public function test_tidak_ada_infinite_retry(): void
-    {
-        [$owner, $baseline, $run, $task] = $this->makeRun(['patch_retry_count' => 1]);
-
-        // AI hanya dipanggil sekali (percobaan awal); retry tidak boleh terjadi lagi.
-        $agents = $this->mock(AgentProfileClient::class, function ($mock): void {
-            $mock->shouldReceive('sendMessage')->once()->andReturn($this->invalidPatchJson());
-        });
-
-        try {
-            $this->runJob($run, $task, $agents);
-            $this->fail('Job seharusnya melempar ulang exception.');
-        } catch (PatchValidationException) {
-            // diharapkan
-        }
-
-        $this->assertSame(1, $task->fresh()->patch_retry_count, 'Retry count tidak boleh bertambah lagi.');
-        $this->assertSame(1, Notification::query()->where('user_id', $owner->id)->count());
-    }
-
-    public function test_write_error_langsung_fail_tanpa_retry_tapi_notifikasi(): void
+    public function test_runner_gagal_sekali_tidak_retry_tanpa_batas(): void
     {
         [$owner, $baseline, $run, $task] = $this->makeRun();
 
-        $agents = $this->mock(AgentProfileClient::class, function ($mock): void {
-            $mock->shouldReceive('sendMessage')->once()->andReturn($this->validPatchJson());
-        });
-
-        // Simulasi error tulis (disk penuh): bukan PatchValidationException.
-        $patcher = $this->mock(PatchApplier::class, function ($mock): void {
-            $mock->shouldReceive('apply')->once()->andThrow(new \RuntimeException('gagal menulis file.'));
+        $runner = $this->mock(AgentToolRunner::class, function ($mock): void {
+            $mock->shouldReceive('run')->once()->andThrow(new \RuntimeException('Agent gagal.'));
         });
 
         try {
-            $this->runJob($run, $task, $agents, $patcher);
+            $this->runJob($run, $task, $runner);
+            $this->fail('Job seharusnya melempar ulang exception.');
+        } catch (\RuntimeException) {
+            // diharapkan
+        }
+
+        $this->assertSame(1, Notification::query()->where('user_id', $owner->id)->count());
+    }
+
+    public function test_write_error_langsung_fail_tapi_notifikasi(): void
+    {
+        [$owner, $baseline, $run, $task] = $this->makeRun();
+
+        $runner = $this->mock(AgentToolRunner::class, function ($mock): void {
+            $mock->shouldReceive('run')->once()->andThrow(new \RuntimeException('gagal menulis file.'));
+        });
+
+        try {
+            $this->runJob($run, $task, $runner);
             $this->fail('Job seharusnya melempar ulang exception.');
         } catch (\RuntimeException $e) {
             $this->assertSame('gagal menulis file.', $e->getMessage());
         }
 
         $this->assertSame('FAILED', $task->fresh()->status);
-        $this->assertSame(0, $task->fresh()->patch_retry_count, 'Write error tidak boleh retry.');
         $this->assertSame(1, Notification::query()->where('user_id', $owner->id)->count());
     }
 
@@ -208,11 +178,12 @@ class PatchRetryNotificationTest extends TestCase
     {
         [$owner, $baseline, $run, $task] = $this->makeRun();
 
-        $agents = $this->createMock(AgentProfileClient::class);
-        $agents->method('sendMessage')->willThrowException(new \RuntimeException('AI timeout'));
+        $runner = $this->mock(AgentToolRunner::class, function ($mock): void {
+            $mock->shouldReceive('run')->andThrow(new \RuntimeException('AI timeout'));
+        });
 
         try {
-            $this->runJob($run, $task, $agents);
+            $this->runJob($run, $task, $runner);
             $this->fail('Seharusnya throw');
         } catch (\RuntimeException) {
         }
@@ -223,15 +194,16 @@ class PatchRetryNotificationTest extends TestCase
         $this->assertStringContainsString('AI timeout', $notif->message);
     }
 
-    public function test_json_invalid_juga_membuat_notifikasi(): void
+    public function test_tool_loop_tidak_selesai_juga_membuat_notifikasi(): void
     {
         [$owner, $baseline, $run, $task] = $this->makeRun();
 
-        $agents = $this->createMock(AgentProfileClient::class);
-        $agents->method('sendMessage')->willReturn('bukan json valid {{{');
+        $runner = $this->mock(AgentToolRunner::class, function ($mock): void {
+            $mock->shouldReceive('run')->andThrow(new \RuntimeException('Agent tidak menyelesaikan task lewat tool.'));
+        });
 
         try {
-            $this->runJob($run, $task, $agents);
+            $this->runJob($run, $task, $runner);
             $this->fail('Seharusnya throw');
         } catch (\Throwable) {
         }
@@ -239,11 +211,11 @@ class PatchRetryNotificationTest extends TestCase
         $this->assertEquals('FAILED', $task->fresh()->status);
         $this->assertNotNull(
             Notification::query()->where('user_id', $owner->id)->first(),
-            'PO harus dapat notifikasi saat JSON patch invalid'
+            'PO harus dapat notifikasi saat tool loop gagal'
         );
     }
 
-    public function test_retry_membawa_qa_feedback_dan_batasan_repair_order(): void
+    public function test_tool_loop_membawa_qa_feedback_dan_batasan_repair_order(): void
     {
         Queue::fake();
         [$owner, $baseline, $run, $task] = $this->makeRun([
@@ -261,31 +233,21 @@ class PatchRetryNotificationTest extends TestCase
         ]);
         $run->forceFill(['repair_order_id' => $repairOrder->id])->save();
 
-        $capturedPrompts = [];
-        $agents = $this->createMock(AgentProfileClient::class);
-        $agents->method('sendMessage')->willReturnCallback(
-            function (string $slug, string $message) use (&$capturedPrompts) {
-                $capturedPrompts[] = $message;
-                return count($capturedPrompts) === 1
-                    ? $this->invalidPatchJson()
-                    : $this->validPatchJson();
-            }
-        );
+        $captured = [];
+        $runner = $this->mock(AgentToolRunner::class, function ($mock) use (&$captured): void {
+            $mock->shouldReceive('run')->once()->andReturnUsing(function (string $slug, string $worktree, string $prompt, bool $allowDelete) use (&$captured) {
+                $captured[] = ['prompt' => $prompt, 'allowDelete' => $allowDelete];
 
-        $this->runJob($run, $task, $agents);
+                return ['files' => [], 'summary' => 'ok'];
+            });
+        });
 
-        $this->assertCount(2, $capturedPrompts, 'AI harus dipanggil 2x (awal + retry)');
-        $retryPrompt = $capturedPrompts[1];
-        $this->assertStringContainsString(
-            'Tolong perbaiki validasi email',
-            $retryPrompt,
-            'Prompt retry harus membawa QA feedback'
-        );
-        $this->assertStringContainsString(
-            'BATASAN PERINTAH PERBAIKAN',
-            $retryPrompt,
-            'Prompt retry harus membawa batasan repair order'
-        );
+        $this->runJob($run, $task, $runner);
+
+        $this->assertCount(1, $captured, 'Runner harus dipanggil sekali');
+        $this->assertStringContainsString('Tolong perbaiki validasi email', $captured[0]['prompt'], 'Prompt harus membawa QA feedback');
+        $this->assertStringContainsString('BATASAN PERINTAH PERBAIKAN', $captured[0]['prompt'], 'Prompt harus membawa batasan repair order');
+        $this->assertFalse($captured[0]['allowDelete'], 'Perintah perbaikan melarang delete');
         $this->assertEquals('IN_REVIEW', $task->fresh()->status);
     }
 
@@ -293,12 +255,12 @@ class PatchRetryNotificationTest extends TestCase
     {
         [$owner, $baseline, $run, $task] = $this->makeRun();
 
-        $agents = $this->createMock(AgentProfileClient::class);
-        // Patch selalu invalid -> retry juga gagal.
-        $agents->method('sendMessage')->willReturn($this->invalidPatchJson());
+        $runner = $this->mock(AgentToolRunner::class, function ($mock): void {
+            $mock->shouldReceive('run')->andThrow(new \RuntimeException('Agent gagal.'));
+        });
 
         try {
-            $this->runJob($run, $task, $agents);
+            $this->runJob($run, $task, $runner);
             $this->fail('Seharusnya throw');
         } catch (\Throwable) {
         }

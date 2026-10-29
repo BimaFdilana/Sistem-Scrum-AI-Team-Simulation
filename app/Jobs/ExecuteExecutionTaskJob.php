@@ -6,6 +6,7 @@ use App\Models\ExecutionRun;
 use App\Models\ExecutionTask;
 use App\Models\Notification;
 use App\Services\AgentProfileClient;
+use App\Services\AgentToolRunner;
 use App\Support\Workspace\PatchApplier;
 use App\Support\Workspace\PatchValidationException;
 use App\Support\Workspace\WorktreeManager;
@@ -35,9 +36,8 @@ class ExecuteExecutionTaskJob implements ShouldQueue
     ) {}
 
     public function handle(
-        AgentProfileClient $agents,
         WorktreeManager $worktrees,
-        PatchApplier $patcher,
+        AgentToolRunner $runner,
     ): void {
         $run = ExecutionRun::query()->find($this->runId);
         $task = ExecutionTask::query()->find($this->taskId);
@@ -73,44 +73,26 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                 $task->forceFill(['worktree_path' => $worktree, 'branch' => $branch])->save();
             }
 
-            $assigneeName = $task->assigneeName();
             $prompt = implode("\n\n", [
-                "Kamu {$assigneeName}. Kerjakan task berikut pada project Laravel.",
-                'Kembalikan JSON tepat: {"files":[{"path":"relatif/ke/file.php","action":"create|update|delete","content":"isi lengkap file"}],"summary":"ringkasan perubahan"}.',
-                'Aturan: path relatif dari root project, tanpa .. atau path absolut; action delete tanpa content; maksimal '.PatchApplier::MAX_FILES.' file; tulis code lengkap yang valid, bukan potongan; JANGAN sertakan penjelasan di luar JSON.'
-                    .($run->repair_order_id ? ' BATASAN PERINTAH PERBAIKAN: dilarang menghapus file (action delete) dan dilarang operasi destruktif terhadap data; lakukan hanya perubahan minimal yang aman.' : ''),
-                $task->status === 'REVISION' && $task->qa_feedback
-                    ? 'REVISI (putaran '.($task->revision_count + 1).'): perbaiki berdasarkan feedback QA berikut, lalu kirim ulang SEMUA file yang berubah: '.$task->qa_feedback
+                "Kamu {$task->assigneeName()}. Kerjakan task berikut pada project Laravel HANYA lewat tool yang tersedia.",
+                'Langkah: baca file yang relevan dengan read_file, ubah dengan apply_edit (old_text harus cocok persis tepat satu kali), buat file baru dengan create_file, dan akhiri dengan submit_task berisi ringkasan perubahan. Jangan menulis code di teks chat.',
+                ($run->repair_order_id ? 'BATASAN PERINTAH PERBAIKAN: dilarang menghapus file (tool delete_file) dan dilarang operasi destruktif terhadap data; lakukan hanya perubahan minimal yang aman.' : ''),
+                $originalStatus === 'REVISION' && $task->qa_feedback
+                    ? 'REVISI (putaran '.($task->revision_count + 1).'): perbaiki berdasarkan feedback QA berikut: '.$task->qa_feedback
                     : 'Task: '.$task->title.' — '.$task->description,
                 'Tugas dari: '.$run->subjectTitle().' | Kriteria: '.$run->subjectCriteria(),
             ]);
             // Pekerjaan atas project PO: tanpa filter sensor (aturan PO:
             // tidak ada batasan terhadap project, termasuk env/kuncinya).
-            $raw = $agents->sendMessage($task->assignee, $prompt, 'execution-'.$run->id.'-task-'.$task->id.'-r'.$task->revision_count, false, true);
+            // Jalur tool-call menggantikan patch JSON di chat (sumber
+            // gagal parse eksekusi US-01 #1–#8): runner mengeksekusi
+            // tiap tool terhadap worktree dan mengembalikan daftar file
+            // yang berubah + ringkasan; kegagalan di tengah loop
+            // mengembalikan worktree ke kondisi semula.
+            $result = $runner->run($task->assignee, $worktree, $prompt, $run->repair_order_id === null);
+            $applied = $result['files'];
+            $patch = ['summary' => $result['summary']];
 
-            // Guardrail perintah perbaikan: penegakan di level sistem, bukan cuma prompt.
-            // Bila patch DITOLAK validasi penerapan -> 1x retry otomatis dengan patch lebih kecil.
-            // Bila patch GAGAL BENTUK (validatedPatch) -> 1x retry juga (perbaikan eksekusi
-            // US-01 #3: satu jawaban agent yang malformed tidak boleh langsung membunuh
-            // seluruh eksekusi; $patch yang masih null menandakan gagalnya di validasi format).
-            // Bila patch GAGAL TULIS (disk/izin) -> langsung fail, retry tidak ada gunanya.
-            $patch = null;
-            $applied = null;
-            try {
-                $patch = $this->validatedPatch($raw);
-                $applied = $patcher->apply($worktree, $patch['files'], $run->repair_order_id === null);
-            } catch (PatchValidationException $validationError) {
-                $retry = $this->retryWithSmallerPatch($agents, $run, $task, $patcher, $worktree, $validationError);
-                $applied = $retry['applied'];
-                $patch = $retry['patch'];
-            } catch (Throwable $error) {
-                if ($patch !== null) {
-                    throw $error;
-                }
-                $retry = $this->retryWithSmallerPatch($agents, $run, $task, $patcher, $worktree, $error);
-                $applied = $retry['applied'];
-                $patch = $retry['patch'];
-            }
             $worktrees->commit($worktree, 'Task #'.$task->id.': '.$task->title);
 
             $run->messages()->create([
