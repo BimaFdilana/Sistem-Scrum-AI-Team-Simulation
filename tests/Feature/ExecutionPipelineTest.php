@@ -124,7 +124,7 @@ class ExecutionPipelineTest extends TestCase
             $mock->shouldReceive('run')->andThrow(new \RuntimeException('AI down'));
         });
 
-        $branch = 'exec-'.$run->id.'-task-'.$task->id;
+        $branch = 'wt-'.$run->id.'-'.$task->id.'-1';
         $worktreePath = dirname($baseline).'/worktrees/'.$branch;
 
         try {

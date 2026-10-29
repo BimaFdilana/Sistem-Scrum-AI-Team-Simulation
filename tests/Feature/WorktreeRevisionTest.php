@@ -62,12 +62,33 @@ class WorktreeRevisionTest extends TestCase
         $this->assertSame('dari commit cabang', file_get_contents($second.'/kept.txt'));
     }
 
-    public function test_revision_rework_reuses_task_worktree(): void
+    public function test_attempt_worktree_branches_from_previous_attempt(): void
+    {
+        [$baseline, $worktrees] = $this->makeBaseline();
+
+        $first = $worktrees->create($baseline, 'wt-9-8-1');
+        file_put_contents($first.'/kept.txt', 'dari attempt 1');
+        $worktrees->commit($first, 'Attempt 1');
+
+        $second = $worktrees->create($baseline, 'wt-9-8-2', 'wt-9-8-1');
+
+        $this->assertNotSame($first, $second);
+        $this->assertSame('dari attempt 1', file_get_contents($second.'/kept.txt'));
+
+        // Cleanup semua attempt sekaligus.
+        $worktrees->cleanupTaskWorktrees($baseline, 9, 8);
+        $this->assertDirectoryDoesNotExist($first);
+        $this->assertDirectoryDoesNotExist($second);
+        $branches = trim((string) shell_exec('git -C '.escapeshellarg($baseline).' branch --list "wt-9-8-*"'));
+        $this->assertSame('', $branches);
+    }
+
+    public function test_revision_rework_uses_new_attempt_worktree(): void
     {
         // End-to-end regresi #6: pengerjaan pertama -> IN_REVIEW, QA
         // meminta revisi, pengerjaan ulang harus kembali IN_REVIEW (bukan
         // EXECUTION_FAILED karena tabrakan nama cabang), dan file dari
-        // pengerjaan pertama tetap ada di worktree.
+        // pengerjaan pertama tetap ada di worktree percobaan baru.
         Queue::fake();
         [$baseline, $worktrees] = $this->makeBaseline();
         $owner = User::factory()->create();
@@ -102,6 +123,8 @@ class WorktreeRevisionTest extends TestCase
 
         (new ExecuteExecutionTaskJob($run->id, $task->id))->handle($worktrees, $runner);
         $this->assertSame('IN_REVIEW', $task->fresh()->status);
+        $firstWorktree = $task->fresh()->worktree_path;
+        $this->assertStringEndsWith('wt-'.$run->id.'-'.$task->id.'-1', $firstWorktree);
 
         // Simulasi QA meminta revisi (seperti ReviewExecutionTaskJob).
         $task->forceFill(['status' => 'REVISION', 'qa_feedback' => 'Perbaiki.'])->save();
@@ -111,6 +134,11 @@ class WorktreeRevisionTest extends TestCase
 
         $this->assertSame('IN_REVIEW', $task->fresh()->status);
         $worktree = $task->fresh()->worktree_path;
+        // Percobaan revisi memakai worktree BARU (attempt 2) yang dibuat
+        // dari cabang attempt 1: file lama diwarisi, bukan hilang, dan
+        // tidak ada tabrakan nama cabang seperti #6.
+        $this->assertNotSame($firstWorktree, $worktree);
+        $this->assertStringEndsWith('wt-'.$run->id.'-'.$task->id.'-2', $worktree);
         $this->assertSame('.a{}', file_get_contents($worktree.'/satu.css'));
         $this->assertSame('.b{}', file_get_contents($worktree.'/dua.css'));
         Queue::assertPushed(ReviewExecutionTaskJob::class);

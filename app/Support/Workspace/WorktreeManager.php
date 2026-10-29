@@ -42,7 +42,15 @@ class WorktreeManager
      *    membersihkan registrasi yatim;
      *  - bila cabang belum ada, perilaku lama (`add -b`).
      */
-    public function create(string $baselinePath, string $branch): string
+    /**
+     * Buat worktree + branch baru. Bila $fromBranch diberikan dan ada,
+     * cabang baru dibuat dari cabang itu (pengerjaan revisi mewarisi
+     * file percobaan sebelumnya); bila tidak, dari HEAD baseline.
+     * Nama cabang per task+attempt (wt-{run}-{task}-{attempt}) membuat
+     * tiap percobaan punya worktree sendiri — menggantikan pola lama
+     * satu cabang per task yang menabrak di revisi (#6).
+     */
+    public function create(string $baselinePath, string $branch, ?string $fromBranch = null): string
     {
         $path = dirname($baselinePath).'/worktrees/'.$branch;
         try {
@@ -65,7 +73,8 @@ class WorktreeManager
         if (File::exists($path)) {
             File::deleteDirectory($path);
         }
-        $this->git($baselinePath, ['worktree', 'add', '-b', $branch, $path, 'HEAD']);
+        $base = ($fromBranch !== null && $this->branchExists($baselinePath, $fromBranch)) ? $fromBranch : 'HEAD';
+        $this->git($baselinePath, ['worktree', 'add', '-b', $branch, $path, $base]);
 
         return $path;
     }
@@ -156,6 +165,35 @@ class WorktreeManager
         }
         if (File::exists($worktreePath)) {
             File::deleteDirectory($worktreePath);
+        }
+    }
+
+    /**
+     * Hapus SEMUA worktree + branch percobaan satu task (semua attempt
+     * wt-{run}-{task}-*, plus nama lama exec-{run}-task-{id} bila ada).
+     * Dipakai failRun agar task yang gagal permanen tidak meninggalkan
+     * direktori yatim dari percobaan mana pun.
+     */
+    public function cleanupTaskWorktrees(string $baselinePath, int $runId, int $taskId): void
+    {
+        $dir = dirname($baselinePath).'/worktrees';
+        $prefix = 'wt-'.$runId.'-'.$taskId.'-';
+        $legacy = 'exec-'.$runId.'-task-'.$taskId;
+        if (! is_dir($dir)) {
+            return;
+        }
+        foreach (scandir($dir) as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            if (str_starts_with($entry, $prefix) || $entry === $legacy) {
+                $this->remove($baselinePath, $dir.'/'.$entry, $entry);
+            }
+        }
+        try {
+            $this->git($baselinePath, ['worktree', 'prune']);
+        } catch (RuntimeException) {
+            // Best-effort.
         }
     }
 

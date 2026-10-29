@@ -59,19 +59,19 @@ class ExecuteExecutionTaskJob implements ShouldQueue
 
         try {
             $worktrees->ensureRepo($baseline);
-            $branch = 'exec-'.$run->id.'-task-'.$task->id;
-            // Pengerjaan revisi (status REVISION) melanjutkan worktree +
-            // cabang task yang sudah ada — bukan membuat cabang baru
-            // dengan nama yang sama (regresi eksekusi US-01 #6: create()
-            // lama selalu `add -b` sehingga revisi pertama langsung fatal
-            // "branch already exists" sebelum agent dipanggil).
-            if ($task->status === 'REVISION' && $task->branch === $branch
-                && $task->worktree_path && is_dir($task->worktree_path)) {
-                $worktree = $task->worktree_path;
-            } else {
-                $worktree = $worktrees->create($baseline, $branch);
-                $task->forceFill(['worktree_path' => $worktree, 'branch' => $branch])->save();
-            }
+            // Satu worktree per task+attempt (wt-{run}-{task}-{attempt}):
+            // percobaan revisi TIDAK memakai ulang worktree percobaan
+            // sebelumnya — ia dibuat dari cabang percobaan sebelumnya,
+            // sehingga file hasil percobaan lama diwarisi lewat git,
+            // tapi tidak ada lagi tabrakan nama cabang seperti #6.
+            // attempt: PENDING -> 1; REVISION -> revision_count+1
+            // (minimal 2, karena status REVISION selalu berarti sudah
+            // ada percobaan sebelumnya).
+            $attempt = $originalStatus === 'REVISION' ? max(2, $task->revision_count + 1) : 1;
+            $branch = 'wt-'.$run->id.'-'.$task->id.'-'.$attempt;
+            $fromBranch = $attempt > 1 ? 'wt-'.$run->id.'-'.$task->id.'-'.($attempt - 1) : null;
+            $worktree = $worktrees->create($baseline, $branch, $fromBranch);
+            $task->forceFill(['worktree_path' => $worktree, 'branch' => $branch])->save();
 
             $prompt = implode("\n\n", [
                 "Kamu {$task->assigneeName()}. Kerjakan task berikut pada project Laravel HANYA lewat tool yang tersedia.",
@@ -271,12 +271,13 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // Best-effort: notifikasi tidak boleh menggagalkan failRun.
         }
 
-        // Bersihkan worktree yatim: worktree + branch dibuat sebelum pemanggilan
-        // AI; bila gagal setelahnya, direktori worktrees/ dan branch exec-*-task-*
-        // menumpuk bila tidak dihapus di sini.
-        if ($worktrees !== null && $baseline !== null && $task->worktree_path && $task->branch) {
+        // Bersihkan worktree yatim dari SEMUA percobaan task ini:
+        // worktree dibuat sebelum pemanggilan AI; bila gagal setelahnya,
+        // direktori worktrees/ dan cabang wt-*-* menumpuk bila tidak
+        // dihapus di sini.
+        if ($worktrees !== null && $baseline !== null) {
             try {
-                $worktrees->remove($baseline, $task->worktree_path, $task->branch);
+                $worktrees->cleanupTaskWorktrees($baseline, $run->id, $task->id);
             } catch (Throwable) {
                 // Best-effort: jangan menutupi error asli yang memicu failRun.
             }
