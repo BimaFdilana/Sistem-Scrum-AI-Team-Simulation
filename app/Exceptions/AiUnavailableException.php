@@ -17,6 +17,8 @@ class AiUnavailableException extends RuntimeException
         public readonly string $errorCode,
         string $message = '',
         public readonly ?int $retryAfter = null,
+        /** Model yang sedang dicoba saat gagal (null bila tak diketahui) — dicatat di log vote agar diagnosis tidak buta. */
+        public readonly ?string $attemptedModel = null,
     ) {
         parent::__construct($message !== '' ? $message : 'AI unavailable: '.$errorCode);
     }

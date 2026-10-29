@@ -706,8 +706,16 @@ class CliProxyApiClient
     }
 
     /**
-     * Kandidat model: utama dulu, lalu model chat lain dari provider yang sama.
-     * Model image-* dikecualikan (bukan untuk chat).
+     * Kandidat model: utama dulu, lalu cadangan terbaik dari provider yang
+     * sama, lalu model terbaik tiap provider lain. Urutan ini penting:
+     * bila provider pilihan gagal transient (mis. semua modelnya cooldown
+     * 429 seperti kasus estimasi laundry Run 9–12), model dari provider
+     * lain yang sehat tetap dicoba — sebelumnya fallback berhenti di
+     * provider yang sama sehingga model Google yang sehat tidak pernah
+     * menyelamatkan peran Backend/QA. Model image-* dikecualikan (bukan
+     * untuk chat). Pemanggil membatasi jumlah kandidat lewat config
+     * chat_fallbacks, dan urutan di sini menjamin satu model lintas
+     * provider selalu masuk dalam batas itu.
      *
      * @return string[]
      */
@@ -725,22 +733,72 @@ class CliProxyApiClient
         if ($primary === null) {
             return $candidates;
         }
+        $primaryProvider = null;
         foreach (['codex', 'google', 'anthropic'] as $provider) {
-            if (! self::modelMatchesProvider($primary['id'], $primary['owned_by'], $provider)) {
+            if (self::modelMatchesProvider($primary['id'], $primary['owned_by'], $provider)) {
+                $primaryProvider = $provider;
+                break;
+            }
+        }
+        $sameProvider = [];
+        foreach ($models as $m) {
+            if ($m['id'] === $model
+                || str_contains(strtolower($m['id']), 'image')
+                || ($primaryProvider !== null && ! self::modelMatchesProvider($m['id'], $m['owned_by'], $primaryProvider))) {
                 continue;
             }
-            foreach ($models as $m) {
-                if ($m['id'] === $model
-                    || ! self::modelMatchesProvider($m['id'], $m['owned_by'], $provider)
-                    || str_contains(strtolower($m['id']), 'image')) {
-                    continue;
-                }
+            $sameProvider[] = $m;
+        }
+        // Cadangan terbaik provider yang sama dulu, lalu satu model terbaik
+        // tiap provider lain (Google didahulukan: akun yang terverifikasi
+        // sehat saat insiden cooldown 2026-10-30).
+        if ($sameProvider !== []) {
+            $candidates[] = self::pickBest($sameProvider);
+        }
+        foreach (['google', 'codex', 'anthropic'] as $provider) {
+            if ($provider === $primaryProvider) {
+                continue;
+            }
+            $others = array_values(array_filter(
+                $models,
+                fn ($m) => $m['id'] !== $model
+                    && ! str_contains(strtolower($m['id']), 'image')
+                    && self::modelMatchesProvider($m['id'], $m['owned_by'], $provider)
+            ));
+            if ($others !== []) {
+                $candidates[] = self::pickBest($others);
+            }
+        }
+        foreach ($sameProvider as $m) {
+            if (! in_array($m['id'], $candidates, true)) {
                 $candidates[] = $m['id'];
             }
-            break;
         }
 
         return array_values(array_unique($candidates));
+    }
+
+    /**
+     * Provider OAuth untuk sebuah model dari katalog gateway
+     * ('google' | 'codex' | 'anthropic' | null bila tak dikenali).
+     * Dipakai untuk mencatat model/provider di log kegagalan vote.
+     */
+    public function providerForModel(string $model): ?string
+    {
+        foreach ($this->models() as $m) {
+            if ($m['id'] !== $model) {
+                continue;
+            }
+            foreach (['codex', 'google', 'anthropic'] as $provider) {
+                if (self::modelMatchesProvider($m['id'], $m['owned_by'], $provider)) {
+                    return $provider;
+                }
+            }
+
+            return null;
+        }
+
+        return null;
     }
 
     private static function modelMatchesProvider(string $id, string $ownedBy, string $provider): bool

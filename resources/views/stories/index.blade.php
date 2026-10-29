@@ -111,6 +111,7 @@
                                             @if ($failedAgent)
                                                 @php($failureText = match ($failedAgent->error_code) {
                                                     'PROVIDER_OVERLOADED' => 'provider sedang sibuk',
+                                                    'PROVIDER_RATE_LIMITED' => 'provider sedang dibatasi (rate limit)',
                                                     'PROVIDER_TIMEOUT' => 'provider melewati batas waktu',
                                                     'PROVIDER_CONNECTION' => 'provider tidak dapat dihubungi',
                                                     'INVALID_JSON_SCHEMA' => 'jawaban agent tidak valid',
@@ -261,7 +262,7 @@
 
                 const labels = { 'backend-developer': 'Backend', 'frontend-developer': 'Frontend', 'qa-engineer': 'QA' };
                 const errorLabels = {
-                    PROVIDER_OVERLOADED: 'Provider sedang sibuk.', PROVIDER_TIMEOUT: 'Provider melewati batas waktu.',
+                    PROVIDER_OVERLOADED: 'Provider sedang sibuk.', PROVIDER_RATE_LIMITED: 'Provider sedang dibatasi (rate limit, coba lagi nanti).', PROVIDER_TIMEOUT: 'Provider melewati batas waktu.',
                     PROVIDER_CONNECTION: 'Provider tidak dapat dihubungi.', INVALID_JSON_SCHEMA: 'Jawaban agent tidak valid.',
                     SAFETY_REJECTION: 'Jawaban ditolak oleh kebijakan keamanan.', LENGTH_REJECTION: 'Jawaban agent terlalu panjang.', EMPTY_RESPONSE: 'Jawaban agent kosong.', STALE_OR_CANCELLED: 'Run kedaluwarsa atau dibatalkan.',
                     WORKER_FAILED: 'Worker diskusi berhenti sebelum proses selesai.',

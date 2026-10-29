@@ -100,6 +100,7 @@
                         @php
                             $failureText = match ($failedAgent->error_code) {
                                 'PROVIDER_OVERLOADED' => 'Provider sedang sibuk.',
+                                'PROVIDER_RATE_LIMITED' => 'Provider sedang dibatasi (rate limit, coba lagi nanti).',
                                 'PROVIDER_TIMEOUT' => 'Provider melewati batas waktu.',
                                 'PROVIDER_CONNECTION' => 'Provider tidak dapat dihubungi.',
                                 'INVALID_JSON_SCHEMA' => 'Jawaban agent tidak mengikuti format yang diminta.',

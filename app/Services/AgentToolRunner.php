@@ -99,7 +99,7 @@ class AgentToolRunner
                 $result = $this->cliproxy->chatWithToolsHistory($model, $system, $messages, self::tools());
                 if ($result['error'] !== null) {
                     if (AiGateway::isTransient($result['error'])) {
-                        throw new AiUnavailableException($result['error'], '', $result['retry_after'] ?? null);
+                        throw new AiUnavailableException($result['error'], '', $result['retry_after'] ?? null, $model);
                     }
                     throw new RuntimeException('Tool call gagal: '.$result['error']);
                 }

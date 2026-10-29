@@ -192,9 +192,18 @@ class StoryEstimationService
     private function logVoteFailure(StoryEstimationRun $run, string $slug, int $round, Throwable $exception, string $raw): void
     {
         $excerpt = mb_substr($raw, 0, 2000);
+        // Model yang dicoba dibawa oleh AiUnavailableException (diisi oleh
+        // AgentProfileClient::sendMessage) — tanpa panggilan resolve kedua
+        // yang akan merusak mock agent di tes konsensus.
+        $attemptedModel = $exception instanceof \App\Exceptions\AiUnavailableException ? $exception->attemptedModel : null;
         Log::warning('Story estimation vote failed validation', [
-            'run_id' => $run->id, 'profile_slug' => $slug, 'round' => $round,
+            'run_id' => $run->id, 'story_id' => $run->story_id, 'profile_slug' => $slug, 'round' => $round,
             'error_code' => $this->failureCode($exception, $run),
+            // Kode mentah dari gateway (mis. RATE_LIMITED) + model/provider
+            // yang dicoba, agar penyebab tidak lagi tertutup kode generik.
+            'upstream_error' => $exception instanceof \App\Exceptions\AiUnavailableException ? $exception->errorCode : null,
+            'attempted_model' => $attemptedModel,
+            'attempted_provider' => $attemptedModel !== null ? app(\App\Services\CliProxyApiClient::class)->providerForModel($attemptedModel) : null,
             // Kategori pola yang cocok dicatat (bukan teksnya) agar
             // diagnosis berikutnya tepat tanpa membuka nilai secret.
             'matched_categories' => $this->disclosure->matchedSecretCategories($excerpt),
@@ -884,12 +893,29 @@ class StoryEstimationService
         if ($exception instanceof ConnectionException || str_contains($exception->getMessage(), 'RUNTIME_CONNECTION_FAILED')) {
             return 'PROVIDER_CONNECTION';
         }
+        // AiUnavailableException membawa kode mentah gateway di errorCode,
+        // sementara pesannya ("AI unavailable: RATE_LIMITED") tidak memuat
+        // "RATE LIMIT" (spasi) maupun "429" — tanpa cabang ini, rate limit
+        // jatuh ke PROVIDER_REQUEST_FAILED generik (kasus Run 9–12).
+        if ($exception instanceof \App\Exceptions\AiUnavailableException) {
+            return match ($exception->errorCode) {
+                'RATE_LIMITED' => 'PROVIDER_RATE_LIMITED',
+                'UPSTREAM_OVERLOADED' => 'PROVIDER_OVERLOADED',
+                'TIMEOUT' => 'PROVIDER_TIMEOUT',
+                'GATEWAY_UNREACHABLE' => 'PROVIDER_CONNECTION',
+                'EMPTY_RESPONSE' => 'EMPTY_RESPONSE',
+                default => 'PROVIDER_REQUEST_FAILED',
+            };
+        }
         $message = strtoupper($exception->getMessage());
         if (str_contains($message, 'TIMEOUT') || str_contains($message, 'TIMED OUT')) {
             return 'PROVIDER_TIMEOUT';
         }
-        if (str_contains($message, 'OVERLOAD') || str_contains($message, 'RATE LIMIT') || str_contains($message, '429')) {
+        if (str_contains($message, 'OVERLOAD')) {
             return 'PROVIDER_OVERLOADED';
+        }
+        if (str_contains($message, 'RATE_LIMITED') || str_contains($message, 'RATE LIMIT') || str_contains($message, '429')) {
+            return 'PROVIDER_RATE_LIMITED';
         }
         if (str_contains($message, 'EXCEEDS LENGTH')) {
             return 'LENGTH_REJECTION';
