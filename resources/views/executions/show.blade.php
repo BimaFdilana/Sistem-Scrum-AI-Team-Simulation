@@ -45,10 +45,19 @@
             <div class="task-row">
                 <div>
                     <strong>{{ $task->title }}</strong>
-                    <small>{{ $task->assigneeName() }} · {{ str_replace('_', ' ', $task->status) }}@if($task->revision_count) · revisi QA: {{ $task->revision_count }}@endif</small>
+                    <small>{{ $task->assigneeName() }} · {{ str_replace('_', ' ', $task->status) }}{{ $task->revision_count ? ' · revisi QA: '.$task->revision_count : '' }}{{ $task->branch ? ' · cabang: '.$task->branch : '' }}{{ $task->last_error ? ' · error terakhir: '.$task->last_error : '' }}</small>
                     <p>{{ $task->description }}</p>
                     @if ($task->qa_feedback && in_array($task->status, ['REVISION', 'BLOCKED'], true))
                         <p class="qa-feedback"><strong>Feedback QA:</strong> {{ $task->qa_feedback }}</p>
+                    @endif
+                    @if ($task->gate_output)
+                        <p class="qa-feedback"><strong>Hasil gerbang tes:</strong> {{ $task->gate_output }}@if($task->gate_fail_count) (gagal {{ $task->gate_fail_count }}x)@endif</p>
+                    @endif
+                    @if ($task->diff_snapshot)
+                        <details style="margin-top:.5rem">
+                            <summary>Diff task ({{ strlen($task->diff_snapshot) }} karakter)</summary>
+                            <pre style="white-space:pre-wrap;word-break:break-word;font-size:.8rem">{{ $task->diff_snapshot }}</pre>
+                        </details>
                     @endif
                 </div>
             </div>

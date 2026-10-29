@@ -60,4 +60,16 @@
         <p>Satu Sprint Backlog untuk project ini. Buat beberapa Sprint dan susun User Story di dalam Sprint masing-masing.</p>
         <a class="button button-primary" href="{{ route('projects.sprint-backlog.index', $project) }}">Buka Sprint Backlog <span aria-hidden="true">→</span></a>
     </section>
+
+    <section class="empty-panel">
+        <div class="panel-heading"><div><p class="section-kicker">GERBANG TES QA</p><h2>Perintah tes project (opsional)</h2></div></div>
+        <p>Sebelum review QA, gerbang selalu menjalankan <code>php -l</code> untuk file PHP yang berubah. Perintah di bawah ini bersifat opsional dan dijalankan di worktree task bila diisi; kosong berarti tidak dijalankan. Contoh: <code>php artisan test</code> atau <code>vendor/bin/phpunit</code>. Approval QA tidak bisa meng-override gerbang yang gagal.</p>
+        <form method="POST" action="{{ route('projects.test-command.update', $project) }}" style="display:flex;gap:.5rem;flex-wrap:wrap">
+            @csrf
+            @method('PUT')
+            <input type="text" name="test_command" value="{{ old('test_command', $project->test_command) }}" placeholder="Kosong = gerbang tes mati" style="flex:1;min-width:260px">
+            <button class="button button-primary" type="submit">Simpan perintah tes</button>
+        </form>
+        @error('test_command')<p style="color:#b91c1c">{{ $message }}</p>@enderror
+    </section>
 @endsection

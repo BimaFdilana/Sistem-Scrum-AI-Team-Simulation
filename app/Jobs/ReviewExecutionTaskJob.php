@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\ExecutionRun;
 use App\Models\ExecutionTask;
 use App\Services\AgentProfileClient;
+use App\Services\TestGate;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -44,6 +45,37 @@ class ReviewExecutionTaskJob implements ShouldQueue
         $project = $run->project();
         if (! $project?->workspace_path) {
             $task->forceFill(['status' => 'BLOCKED', 'qa_feedback' => 'Baseline project tidak tersedia.'])->save();
+
+            return;
+        }
+
+        // Gerbang tes QA — SEBELUM review, dan approval QA tidak bisa
+        // meng-override gerbang yang gagal (rencana arsitektur baru).
+        // Gerbang gagal BUKAN penolakan QA: kirim revisi tanpa menambah
+        // hitungan revisi QA; gagal 3x -> task + run FAILED (GATE_FAILED).
+        $gateError = app(TestGate::class)->run(
+            $task->worktree_path ?? '',
+            $worktrees->changedFiles($project->workspace_path, $task->branch),
+            $project->test_command,
+        );
+        if ($gateError !== null) {
+            $gateFails = $task->gate_fail_count + 1;
+            $task->forceFill(['gate_output' => $gateError, 'gate_fail_count' => $gateFails])->save();
+            if ($gateFails >= 3) {
+                $task->forceFill(['status' => 'FAILED', 'last_error' => 'GATE_FAILED'])->save();
+                $run->forceFill(['status' => 'FAILED', 'error_code' => 'GATE_FAILED', 'summary' => 'Task "'.$task->title.'" gagal gerbang tes 3x: '.$gateError, 'completed_at' => now()])->save();
+
+                return;
+            }
+            $task->forceFill(['status' => 'REVISION', 'qa_feedback' => 'Gerbang tes gagal (bukan penolakan QA): '.$gateError])->save();
+            $run->messages()->create([
+                'execution_task_id' => $task->id,
+                'sender_slug' => 'qa-engineer',
+                'recipient_slug' => $task->assignee,
+                'content' => 'Gerbang tes gagal untuk "'.$task->title.'": '.$gateError,
+                'metadata' => ['gate_failed' => true, 'gate_fail_count' => $gateFails],
+            ]);
+            ExecuteExecutionTaskJob::dispatch($run->id, $task->id);
 
             return;
         }
@@ -118,6 +150,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
                 && \App\Services\AiGateway::isTransient($exception->errorCode)
                 && $this->attempts() < \App\Services\AiGateway::MAX_QUEUE_ATTEMPTS) {
                 \App\Services\AiGateway::logFailure($this->runId, $this->taskId, 'ReviewExecutionTaskJob', $exception, $this->attempts(), true);
+                $task->forceFill(['last_error' => $exception->errorCode])->save();
                 $this->release(\App\Services\AiGateway::releaseDelay($this->attempts(), $exception->retryAfter));
 
                 return;

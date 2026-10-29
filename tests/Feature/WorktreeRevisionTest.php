@@ -83,6 +83,18 @@ class WorktreeRevisionTest extends TestCase
         $this->assertSame('', $branches);
     }
 
+    public function test_changed_files_lists_diff_against_baseline(): void
+    {
+        [$baseline, $worktrees] = $this->makeBaseline();
+
+        $this->assertSame([], $worktrees->changedFiles($baseline, null));
+        $path = $worktrees->create($baseline, 'wt-7-7-1');
+        file_put_contents($path.'/baru.css', '.x{}');
+        $worktrees->commit($path, 'Tambah baru.css');
+
+        $this->assertSame(['baru.css'], $worktrees->changedFiles($baseline, 'wt-7-7-1'));
+    }
+
     public function test_revision_rework_uses_new_attempt_worktree(): void
     {
         // End-to-end regresi #6: pengerjaan pertama -> IN_REVIEW, QA

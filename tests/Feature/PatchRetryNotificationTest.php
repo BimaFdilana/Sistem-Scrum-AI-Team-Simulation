@@ -69,6 +69,7 @@ class PatchRetryNotificationTest extends TestCase
 
         $this->assertSame('IN_REVIEW', $task->fresh()->status);
         $this->assertSame('REVIEWING', $run->fresh()->status);
+        $this->assertStringContainsString('app/Ok.php', $task->fresh()->diff_snapshot ?? '', 'Diff hasil host harus tersimpan per task.');
         $this->assertSame(0, Notification::query()->count(), 'Sukses tidak boleh buat notifikasi.');
         $worktree = $task->fresh()->worktree_path;
         $this->assertNotEmpty($worktree);

@@ -75,4 +75,26 @@ class ProjectController extends Controller
             'activePage' => 'projects',
         ]);
     }
+
+    /**
+     * Perintah tes opsional per project (gerbang QA). Kosong = gerbang
+     * tes tidak dijalankan (default MATI, sesuai keputusan). Perintah
+     * dijalankan di worktree task oleh TestGate sebelum review QA.
+     */
+    public function updateTestCommand(Request $request, Project $project): RedirectResponse
+    {
+        $validated = $request->validate([
+            'test_command' => ['nullable', 'string', 'max' => 500],
+        ]);
+        $project->forceFill([
+            'test_command' => ($validated['test_command'] ?? null) !== null && trim($validated['test_command']) !== ''
+                ? trim($validated['test_command'])
+                : null,
+        ])->save();
+
+        return redirect()->route('projects.show', $project)
+            ->with('status', $project->test_command
+                ? 'Perintah tes disimpan: gerbang QA akan menjalankannya sebelum review.'
+                : 'Perintah tes dikosongkan: gerbang tes tidak dijalankan (hanya php -l).');
+    }
 }

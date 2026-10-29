@@ -57,6 +57,7 @@ Route::middleware('auth')->group(function (): void {
         ->name('agents.chat.messages.store');
     Route::resource('actors', ActorController::class)->except(['show']);
     Route::resource('projects', ProjectController::class)->only(['index', 'create', 'store', 'show']);
+    Route::put('/projects/{project}/test-command', [ProjectController::class, 'updateTestCommand'])->name('projects.test-command.update');
     Route::get('/projects/{project}/stories', [StoryController::class, 'index'])->name('projects.stories.index');
     Route::get('/projects/{project}/sprint-backlog', [StoryController::class, 'index'])->name('projects.sprint-backlog.index');
     Route::put('/projects/{project}/backlog', [StoryController::class, 'updateBacklog'])->name('projects.backlog.update');

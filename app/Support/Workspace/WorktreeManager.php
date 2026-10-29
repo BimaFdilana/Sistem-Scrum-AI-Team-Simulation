@@ -119,6 +119,22 @@ class WorktreeManager
         ]);
     }
 
+    /** Daftar file yang berubah antara baseline HEAD dan branch task. */
+    public function changedFiles(string $baselinePath, ?string $branch): array
+    {
+        if ($branch === null || $branch === '') {
+            return [];
+        }
+        try {
+            $output = $this->git($baselinePath, ['diff', '--name-only', 'HEAD', $branch, '--']);
+        } catch (RuntimeException) {
+            return [];
+        }
+        $files = array_filter(array_map('trim', explode("\n", $output)));
+
+        return array_values($files);
+    }
+
     /** Diff statistik + isi (dibatasi) antara baseline HEAD dan branch task. */
     public function diff(string $baselinePath, string $branch, int $maxBytes = 20000): string
     {

@@ -103,7 +103,9 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                 'metadata' => ['files' => $applied, 'revision' => $task->revision_count],
             ]);
 
-            $task->forceFill(['status' => 'IN_REVIEW'])->save();
+            // Simpan diff hasil host per task agar halaman eksekusi bisa
+            // menampilkannya walau cabang/worktree sudah dibersihkan.
+            $task->forceFill(['status' => 'IN_REVIEW', 'diff_snapshot' => $worktrees->diff($baseline, $branch)])->save();
             $run->forceFill(['status' => 'REVIEWING'])->save();
             ReviewExecutionTaskJob::dispatch($run->id, $task->id);
         } catch (Throwable $exception) {
@@ -116,7 +118,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             if ($exception instanceof \App\Exceptions\AiUnavailableException
                 && \App\Services\AiGateway::isTransient($exception->errorCode)
                 && $this->attempts() < \App\Services\AiGateway::MAX_QUEUE_ATTEMPTS) {
-                $task->forceFill(['status' => $originalStatus])->save();
+                $task->forceFill(['status' => $originalStatus, 'last_error' => $exception->errorCode])->save();
                 \App\Services\AiGateway::logFailure($this->runId, $this->taskId, 'ExecuteExecutionTaskJob', $exception, $this->attempts(), true);
                 $this->release(\App\Services\AiGateway::releaseDelay($this->attempts(), $exception->retryAfter));
 
@@ -255,7 +257,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
 
     private function failRun(ExecutionRun $run, ExecutionTask $task, string $code, ?WorktreeManager $worktrees = null, ?string $baseline = null, ?string $errorMessage = null): void
     {
-        $task->forceFill(['status' => 'FAILED'])->save();
+        $task->forceFill(['status' => 'FAILED', 'last_error' => $errorMessage ?: $code])->save();
         $run->forceFill(['status' => 'FAILED', 'error_code' => $code, 'completed_at' => now()])->save();
 
         // Notifikasi ke PO untuk SEMUA kegagalan eksekusi (AI error, JSON invalid,

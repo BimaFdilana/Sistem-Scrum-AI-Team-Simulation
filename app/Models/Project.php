@@ -24,6 +24,7 @@ class Project extends Model
         'github_owner',
         'github_repo',
         'stack',
+        'test_command',
         'status',
     ];
 
