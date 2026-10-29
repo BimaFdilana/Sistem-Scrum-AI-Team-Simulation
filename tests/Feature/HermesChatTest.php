@@ -51,6 +51,40 @@ class HermesChatTest extends TestCase
         );
     }
 
+    public function test_chat_message_can_be_scoped_to_a_project_and_general_chat_stays_separate(): void
+    {
+        config([
+            'services.hermes.base_url' => 'http://127.0.0.1:8643/v1',
+            'services.hermes.api_key' => 'test-hermes-server-key',
+            'services.hermes.model' => 'scrumagent',
+        ]);
+
+        Http::fake([
+            'http://127.0.0.1:8643/v1/chat/completions' => Http::response([
+                'choices' => [[
+                    'message' => ['role' => 'assistant', 'content' => 'Siap, fokus ke project ini.'],
+                ]],
+            ]),
+        ]);
+
+        $project = \App\Models\Project::create(['name' => 'Toko Online', 'project_type' => 'web']);
+        $user = User::factory()->create();
+
+        $this->actingAs($user)
+            ->postJson('/chat/messages', ['message' => 'Apa prioritas sprint ini?', 'project_id' => $project->id])
+            ->assertOk();
+
+        $this->assertDatabaseHas('chat_conversations', ['project_id' => $project->id, 'title' => 'Apa prioritas sprint ini?']);
+
+        // Halaman chat project menampilkan dropdown dengan project terpilih,
+        // dan chat umum tidak ikut tercampur (riwayat project saja yang tampil).
+        $this->actingAs($user)
+            ->get('/chat?project_id='.$project->id)
+            ->assertOk()
+            ->assertSee('Tanpa project (chat umum)', false)
+            ->assertSee('Toko Online', false);
+    }
+
     public function test_guest_cannot_send_a_message_to_hermes(): void
     {
         $this->postJson('/chat/messages', ['message' => 'Halo'])

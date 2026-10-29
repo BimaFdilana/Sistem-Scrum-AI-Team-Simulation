@@ -16,11 +16,17 @@ class ChatConversation extends Model
         'uuid',
         'title',
         'agent_profile',
+        'project_id',
     ];
 
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(Project::class);
     }
 
     public function messages(): HasMany

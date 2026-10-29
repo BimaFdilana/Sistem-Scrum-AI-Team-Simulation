@@ -22,7 +22,7 @@
         <link rel="stylesheet" href="/css/agents.css">
     @endif
     @if (in_array(($activePage ?? ''), ['chat', 'agent-chat', 'discussion'], true))
-        <link rel="stylesheet" href="{{ asset('css/chat.css') }}">
+        <link rel="stylesheet" href="{{ asset('css/chat.css') }}?v=2">
     @endif
     @if (($activePage ?? '') === 'discussion')
         <link rel="stylesheet" href="{{ asset('css/discussion.css') }}">

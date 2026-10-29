@@ -18,12 +18,19 @@ use Throwable;
 
 class ChatController extends Controller
 {
-    public function index(HermesClient $hermes, ChatDisclosurePolicy $disclosurePolicy): View
+    public function index(Request $request, HermesClient $hermes, ChatDisclosurePolicy $disclosurePolicy): View
     {
         $agent = collect(config('agents.profiles'))->firstWhere('slug', 'scrum-master');
+        // Dropdown project di halaman chat: tiap project punya riwayat chat
+        // sendiri; tanpa project = chat umum (termasuk semua percakapan lama).
+        $projects = Project::query()->orderBy('name')->get(['id', 'name']);
+        $selectedProject = $request->query('project_id') !== null
+            ? $projects->firstWhere('id', (int) $request->query('project_id'))
+            : null;
         $conversation = ChatConversation::query()
             ->where('user_id', auth()->id())
             ->where('agent_profile', 'scrum-master')
+            ->where('project_id', $selectedProject?->id)
             ->latest('updated_at')
             ->first();
 
@@ -40,6 +47,8 @@ class ChatController extends Controller
             'messages' => $messages,
             'chatAvailable' => $hermes->isAvailable(),
             'chatAction' => route('chat.messages.store', [], false),
+            'projects' => $projects,
+            'selectedProject' => $selectedProject,
             'activePage' => 'chat',
         ]);
     }
@@ -60,6 +69,7 @@ class ChatController extends Controller
         $data = $request->validate([
             'message' => ['required', 'string', 'max:8000'],
             'conversation_id' => ['nullable', 'uuid'],
+            'project_id' => ['nullable', 'integer', 'exists:projects,id'],
             // Lampiran gambar: JPG/PNG maks 5MB. Disimpan permanen di storage
             // agar tidak hilang setelah dikirim ke AI sebagai prompt vision.
             'image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:5120'],
@@ -89,6 +99,7 @@ class ChatController extends Controller
                 'uuid' => (string) Str::uuid(),
                 'title' => Str::limit(trim($data['message']), 160, ''),
                 'agent_profile' => 'scrum-master',
+                'project_id' => $data['project_id'] ?? null,
             ]);
 
         $userMessage = $conversation->messages()->create([
@@ -120,7 +131,16 @@ class ChatController extends Controller
         }
 
         try {
-            $content = $hermes->sendMessage($userMessage->content, $conversation->uuid, $image);
+            // Konteks project hanya ditempel ke pesan yang dikirim ke AI,
+            // bukan ke pesan tersimpan — riwayat chat tetap berisi kata-kata
+            // pengguna apa adanya.
+            $aiMessage = $userMessage->content;
+            $project = $conversation->project;
+            if ($project !== null) {
+                $aiMessage = '[Konteks chat: project ScrumSpace "'.$project->name.'"'
+                    .($project->description ? ' — '.$project->description : '').". Jawablah dalam konteks project ini.]\n\n".$aiMessage;
+            }
+            $content = $hermes->sendMessage($aiMessage, $conversation->uuid, $image);
         } catch (\App\Exceptions\AiUnavailableException $e) {
             return response()->json([
                 'conversation_id' => $conversation->uuid,

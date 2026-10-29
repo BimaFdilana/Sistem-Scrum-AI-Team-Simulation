@@ -12,6 +12,17 @@
         </span>
     </section>
 
+    <section class="chat-project-picker" aria-label="Pilih project untuk chat ini">
+        <label for="projectSelect">Project</label>
+        <select id="projectSelect">
+            <option value="">Tanpa project (chat umum)</option>
+            @foreach ($projects as $project)
+                <option value="{{ $project->id }}" @selected($selectedProject?->id === $project->id)>{{ $project->name }}</option>
+            @endforeach
+        </select>
+        <span class="chat-project-note">{{ $selectedProject ? 'Riwayat chat project "'.$selectedProject->name.'".' : 'Riwayat chat umum — terpisah dari chat tiap project.' }}</span>
+    </section>
+
     <section class="chat-panel" aria-label="Chat dengan {{ $agent['name'] }}">
         <div class="chat-transcript" id="chatTranscript" aria-live="polite" aria-relevant="additions text">
             @forelse ($messages as $message)
@@ -63,6 +74,20 @@
             const sendButton = document.getElementById('chatSend');
             const error = document.getElementById('chatError');
             const csrf = document.querySelector('meta[name="csrf-token"]').content;
+            // Dropdown project: pindah ke riwayat chat project itu (atau
+            // chat umum bila "Tanpa project"). Satu project = satu riwayat.
+            const projectSelect = document.getElementById('projectSelect');
+            projectSelect.addEventListener('change', () => {
+                const value = projectSelect.value;
+                const url = new URL(window.location.href);
+                if (value) {
+                    url.searchParams.set('project_id', value);
+                } else {
+                    url.searchParams.delete('project_id');
+                }
+                window.location.href = url.toString();
+            });
+
             const attachButton = document.getElementById('attachButton');
             const attachInput = document.getElementById('chatImage');
             const attachPreview = document.getElementById('attachPreview');
@@ -298,6 +323,7 @@
                         payload.append('message', message);
                         payload.append('image', fileToSend);
                         if (conversationId.value) payload.append('conversation_id', conversationId.value);
+                        if (projectSelect.value) payload.append('project_id', projectSelect.value);
                         response = await fetch(form.action, {
                             method: 'POST',
                             headers: { 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf },
@@ -314,6 +340,7 @@
                             body: JSON.stringify({
                                 message,
                                 conversation_id: conversationId.value || null,
+                                project_id: projectSelect.value ? Number(projectSelect.value) : null,
                             }),
                         });
                     }

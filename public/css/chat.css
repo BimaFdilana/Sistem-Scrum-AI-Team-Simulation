@@ -11,3 +11,4 @@
 .repair-card-note{margin-top:10px!important;font-size:13px;color:var(--accent)}
 .repair-card-link{display:inline-block;margin-top:6px;font-size:13px;color:var(--accent)}
 .chat-attach-preview[hidden]{display:none}
+.chat-project-picker{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px}.chat-project-picker label{font-size:13px;font-weight:700}.chat-project-picker select{padding:8px 10px;border:1px solid var(--line-strong);border-radius:9px;background:var(--input-bg);color:var(--text);font:inherit;font-size:14px}.chat-project-note{color:var(--muted);font-size:12px}
