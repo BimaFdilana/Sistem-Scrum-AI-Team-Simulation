@@ -104,6 +104,8 @@
                                 'PROVIDER_CONNECTION' => 'Provider tidak dapat dihubungi.',
                                 'INVALID_JSON_SCHEMA' => 'Jawaban agent tidak mengikuti format yang diminta.',
                                 'SAFETY_REJECTION' => 'Jawaban ditolak oleh kebijakan keamanan.',
+                                'LENGTH_REJECTION' => 'Jawaban agent melebihi batas panjang yang diizinkan.',
+                                'EMPTY_RESPONSE' => 'Jawaban agent kosong.',
                                 'STALE_OR_CANCELLED' => 'Run menjadi kedaluwarsa atau dibatalkan.',
                                 'WORKER_FAILED' => 'Worker diskusi berhenti sebelum proses selesai.',
                                 'WORKER_TIMEOUT' => 'Worker diskusi melewati batas waktu.',

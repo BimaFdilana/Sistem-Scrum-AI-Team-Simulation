@@ -49,6 +49,79 @@ class StoryEstimationDisclosureTest extends TestCase
         $this->assertSame(5, $story->fresh()->estimate_points);
     }
 
+    public function test_qa_long_scenario_rationale_like_run7_is_accepted(): void
+    {
+        // Regresi Run #7: rationale QA ~2000 karakter (daftar skenario
+        // uji) dulu ditolak batas 1000; kini batas QA putaran 1 = 3000.
+        [$story, $owner] = $this->story();
+        $long = str_repeat('Skenario uji tombol kembali ke atas. ', 60); // ~2100 karakter
+
+        $agents = Mockery::mock(AgentProfileClient::class);
+        $agents->shouldReceive('sendMessage')->andReturnUsing(function ($slug, $prompt) use ($long) {
+            if (str_contains($prompt, 'PUTARAN 1')) {
+                return json_encode(['estimate_points' => 5, 'rationale' => $slug === 'qa-engineer' ? $long : 'Alasan singkat.']);
+            }
+
+            return json_encode([
+                'estimate_points' => 5,
+                'rationale' => 'Setuju.',
+                'response' => 'Menanggapi tim: setuju.',
+                'explicit_agree' => true,
+            ]);
+        });
+        $this->app->instance(AgentProfileClient::class, $agents);
+        $sm = Mockery::mock(HermesClient::class);
+        $sm->shouldReceive('sendMessage')->andReturn('Laporan berdasar diskusi.');
+        $this->app->instance(HermesClient::class, $sm);
+
+        $run = app(StoryEstimationService::class)->estimate($story, $owner);
+
+        $this->assertSame('COMPLETED', $run->status);
+        $this->assertSame(5, $run->consensus_points);
+    }
+
+    public function test_qa_rationale_beyond_qa_limit_maps_to_length_rejection(): void
+    {
+        // Batas baru QA bukan tanpa batas: di atas 3000 karakter,
+        // kegagalan harus berkode LENGTH_REJECTION — bukan lagi
+        // SAFETY_REJECTION yang dulu mengaburkan penyebabnya.
+        [$story, $owner] = $this->story();
+        $tooLong = str_repeat('Skenario uji. ', 250); // ~3750 karakter
+
+        $agents = Mockery::mock(AgentProfileClient::class);
+        $agents->shouldReceive('sendMessage')->andReturnUsing(function ($slug) use ($tooLong) {
+            return $slug === 'qa-engineer'
+                ? json_encode(['estimate_points' => 5, 'rationale' => $tooLong])
+                : json_encode(['estimate_points' => 5, 'rationale' => 'Alasan singkat.']);
+        });
+        $this->app->instance(AgentProfileClient::class, $agents);
+
+        $run = app(StoryEstimationService::class)->estimate($story, $owner);
+        $qaRun = $run->agentRuns()->where('profile_slug', 'qa-engineer')->firstOrFail();
+
+        $this->assertSame('FAILED', $qaRun->status);
+        $this->assertSame('LENGTH_REJECTION', $qaRun->error_code);
+    }
+
+    public function test_empty_rationale_maps_to_empty_response(): void
+    {
+        [$story, $owner] = $this->story();
+
+        $agents = Mockery::mock(AgentProfileClient::class);
+        $agents->shouldReceive('sendMessage')->andReturnUsing(function ($slug) {
+            return $slug === 'qa-engineer'
+                ? '{"estimate_points":5,"rationale":""}'
+                : '{"estimate_points":5,"rationale":"Alasan singkat."}';
+        });
+        $this->app->instance(AgentProfileClient::class, $agents);
+
+        $run = app(StoryEstimationService::class)->estimate($story, $owner);
+        $qaRun = $run->agentRuns()->where('profile_slug', 'qa-engineer')->firstOrFail();
+
+        $this->assertSame('FAILED', $qaRun->status);
+        $this->assertSame('EMPTY_RESPONSE', $qaRun->error_code);
+    }
+
     private function story(): array
     {
         $owner = User::factory()->create();

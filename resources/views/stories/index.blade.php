@@ -115,6 +115,8 @@
                                                     'PROVIDER_CONNECTION' => 'provider tidak dapat dihubungi',
                                                     'INVALID_JSON_SCHEMA' => 'jawaban agent tidak valid',
                                                     'SAFETY_REJECTION' => 'jawaban ditolak kebijakan keamanan',
+                                                    'LENGTH_REJECTION' => 'jawaban agent terlalu panjang',
+                                                    'EMPTY_RESPONSE' => 'jawaban agent kosong',
                                                     'STALE_OR_CANCELLED' => 'run kedaluwarsa atau dibatalkan',
                                                     'WORKER_FAILED' => 'worker diskusi berhenti',
                                                     'WORKER_TIMEOUT' => 'worker diskusi timeout',
@@ -261,7 +263,7 @@
                 const errorLabels = {
                     PROVIDER_OVERLOADED: 'Provider sedang sibuk.', PROVIDER_TIMEOUT: 'Provider melewati batas waktu.',
                     PROVIDER_CONNECTION: 'Provider tidak dapat dihubungi.', INVALID_JSON_SCHEMA: 'Jawaban agent tidak valid.',
-                    SAFETY_REJECTION: 'Jawaban ditolak oleh kebijakan keamanan.', STALE_OR_CANCELLED: 'Run kedaluwarsa atau dibatalkan.',
+                    SAFETY_REJECTION: 'Jawaban ditolak oleh kebijakan keamanan.', LENGTH_REJECTION: 'Jawaban agent terlalu panjang.', EMPTY_RESPONSE: 'Jawaban agent kosong.', STALE_OR_CANCELLED: 'Run kedaluwarsa atau dibatalkan.',
                     WORKER_FAILED: 'Worker diskusi berhenti sebelum proses selesai.',
                     WORKER_TIMEOUT: 'Worker diskusi melewati batas waktu.',
                     WORKER_STALE: 'Worker diskusi tidak mengirim heartbeat.'

@@ -169,7 +169,7 @@ class StoryEstimationService
 
                 return;
             }
-            $data = $this->validatedResponse($raw, $round);
+            $data = $this->validatedResponse($raw, $round, $entry->profile_slug);
             $content = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
             DB::transaction(function () use ($entry, $run, $data, $content): void {
                 $entry->forceFill(['status' => 'COMPLETED', 'estimate_points' => $data['estimate_points'], 'rationale' => $data['rationale'], 'heartbeat_at' => now(), 'completed_at' => now()])->save();
@@ -554,7 +554,7 @@ class StoryEstimationService
                     ])->save();
                     break;
                 }
-                $data = $this->validatedResponse($raw, $round);
+                $data = $this->validatedResponse($raw, $round, $slug);
                 $content = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
                 $entry->forceFill([
                     'status' => 'COMPLETED', 'estimate_points' => $data['estimate_points'],
@@ -605,10 +605,13 @@ class StoryEstimationService
         return substr($text, $start, $end - $start + 1);
     }
 
-    private function validatedResponse(string $raw, int $round): array
+    private function validatedResponse(string $raw, int $round, string $slug = ''): array
     {
         $candidate = $this->extractJsonObject($raw);
-        if ($candidate === null || strlen($candidate) > 5000) {
+        // QA butuh ruang lebih: rationale-nya berisi daftar skenario uji
+        // (kasus US-01 Run #7: rationale ~2000 karakter).
+        $candidateMax = $slug === 'qa-engineer' ? 8000 : 5000;
+        if ($candidate === null || strlen($candidate) > $candidateMax) {
             throw new RuntimeException('Invalid response schema.');
         }
         try {
@@ -629,10 +632,26 @@ class StoryEstimationService
         }
         $fields = $round === self::MAX_DISCUSSION_ROUNDS ? ['rationale', 'response'] : ['rationale'];
         foreach ($fields as $field) {
-            $maxLength = $round === self::MAX_DISCUSSION_ROUNDS ? 500 : 1000;
-            if (! is_string($data[$field]) || trim($data[$field]) === '' || mb_strlen($data[$field]) > $maxLength
-                || $this->disclosure->containsStructuredEvidenceSecret($data[$field])) {
-                throw new RuntimeException('Unsafe or empty response.');
+            // Batas panjang dibedakan per peran: QA merinci skenario uji
+            // di rationale/response, jadi batasnya lebih longgar. Peran
+            // lain tetap di batas lama. Tiga penyebab kegagalan sengaja
+            // dilempar sebagai pesan BERBEDA (kosong / terlalu panjang /
+            // secret) agar failureCode memetakannya ke kode error yang
+            // berbeda — dulu ketiganya menyatu di "Unsafe or empty
+            // response." sehingga log tidak bisa membedakan penyebabnya
+            // (kasus US-01 Run #7: rationale panjang dikira penolakan
+            // keamanan).
+            $maxLength = $round === self::MAX_DISCUSSION_ROUNDS
+                ? ($slug === 'qa-engineer' ? 1000 : 500)
+                : ($slug === 'qa-engineer' ? 3000 : 1000);
+            if (! is_string($data[$field]) || trim($data[$field]) === '') {
+                throw new RuntimeException('Empty response.');
+            }
+            if (mb_strlen($data[$field]) > $maxLength) {
+                throw new RuntimeException('Response exceeds length limit.');
+            }
+            if ($this->disclosure->containsStructuredEvidenceSecret($data[$field])) {
+                throw new RuntimeException('Unsafe response.');
             }
             $data[$field] = trim($data[$field]);
         }
@@ -871,6 +890,12 @@ class StoryEstimationService
         }
         if (str_contains($message, 'OVERLOAD') || str_contains($message, 'RATE LIMIT') || str_contains($message, '429')) {
             return 'PROVIDER_OVERLOADED';
+        }
+        if (str_contains($message, 'EXCEEDS LENGTH')) {
+            return 'LENGTH_REJECTION';
+        }
+        if (str_contains($message, 'EMPTY RESPONSE')) {
+            return 'EMPTY_RESPONSE';
         }
         if ($exception instanceof \JsonException || str_contains($message, 'JSON') || str_contains($message, 'SCHEMA') || str_contains($message, 'RESPONSE TOO LONG')) {
             return 'INVALID_JSON_SCHEMA';
