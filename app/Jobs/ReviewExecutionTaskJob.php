@@ -130,11 +130,45 @@ class ReviewExecutionTaskJob implements ShouldQueue
         ]);
     }
 
+    /**
+     * Ekstraksi JSON toleran — sama seperti validatedPatch (perbaikan
+     * eksekusi US-01 #2): review QA yang dibungkus fence + prosa dulu
+     * langsung gagal JsonException "Syntax error" (13:27:19 UTC) dan
+     * menimpa kode akhir eksekusi menjadi REVIEW_FAILED.
+     */
+    private function extractJsonObject(string $raw): ?string
+    {
+        $text = trim($raw);
+        if (preg_match('/```(?:json)?\s*(.*?)```/s', $text, $matches)) {
+            $text = trim($matches[1]);
+        }
+        $start = strpos($text, '{');
+        $end = strrpos($text, '}');
+        if ($start === false || $end === false || $end <= $start) {
+            return null;
+        }
+
+        return substr($text, $start, $end - $start + 1);
+    }
+
     /** @return array{approved:bool,feedback:string} */
     private function validatedReview(string $raw): array
     {
-        $json = trim(preg_replace('/^```(?:json)?\s*|\s*```$/i', '', trim($raw)) ?? $raw);
-        $data = json_decode($json, true, 32, JSON_THROW_ON_ERROR);
+        $candidate = $this->extractJsonObject($raw);
+        if ($candidate === null) {
+            throw new RuntimeException('Format review QA tidak valid.');
+        }
+        try {
+            $data = json_decode($candidate, true, 32, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $exception) {
+            // Catat potongan jawaban gagal agar kegagalan berikutnya bisa
+            // didiagnosis (pelajaran dari eksekusi US-01 #2).
+            \Illuminate\Support\Facades\Log::warning('Execution review failed validation', [
+                'raw_excerpt' => mb_substr($raw, 0, 2000),
+                'error' => $exception->getMessage(),
+            ]);
+            throw $exception;
+        }
         if (! is_array($data) || ! is_bool($data['approved'] ?? null)) {
             throw new RuntimeException('Format review QA tidak valid.');
         }

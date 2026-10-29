@@ -109,15 +109,50 @@ class ExecuteExecutionTaskJob implements ShouldQueue
         }
     }
 
+    /**
+     * Ekstraksi JSON toleran — sama seperti vote estimasi (68878fb) dan
+     * breakdown (435016d). Sebelum perbaikan ini, validatedPatch hanya
+     * mengupas fence bila fence persis di awal/akhir jawaban, sehingga
+     * fence + prosa dari agent langsung menggagalkan eksekusi dengan
+     * JsonException "Syntax error" (kasus eksekusi US-01 #2, task #2).
+     */
+    private function extractJsonObject(string $raw): ?string
+    {
+        $text = trim($raw);
+        if (preg_match('/```(?:json)?\s*(.*?)```/s', $text, $matches)) {
+            $text = trim($matches[1]);
+        }
+        $start = strpos($text, '{');
+        $end = strrpos($text, '}');
+        if ($start === false || $end === false || $end <= $start) {
+            return null;
+        }
+
+        return substr($text, $start, $end - $start + 1);
+    }
+
     /** @return array{files:array,summary:string} */
     private function validatedPatch(string $raw): array
     {
         if (strlen($raw) > 2000000) {
             throw new RuntimeException('Patch terlalu besar.');
         }
-        // Agent kadang membungkus JSON dengan markdown fence; kupas bila ada.
-        $json = trim(preg_replace('/^```(?:json)?\s*|\s*```$/i', '', trim($raw)) ?? $raw);
-        $data = json_decode($json, true, 32, JSON_THROW_ON_ERROR);
+        $candidate = $this->extractJsonObject($raw);
+        if ($candidate === null) {
+            throw new RuntimeException('Format patch agent tidak valid.');
+        }
+        try {
+            $data = json_decode($candidate, true, 32, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $exception) {
+            // Catat potongan jawaban gagal — kegagalan eksekusi US-01 #2
+            // dulu tidak bisa didiagnosis karena payload mentah tidak
+            // tercatat di mana pun.
+            \Illuminate\Support\Facades\Log::warning('Execution patch failed validation', [
+                'raw_excerpt' => mb_substr($raw, 0, 2000),
+                'error' => $exception->getMessage(),
+            ]);
+            throw $exception;
+        }
         if (! is_array($data) || ! is_array($data['files'] ?? null) || ! is_string($data['summary'] ?? null)) {
             throw new RuntimeException('Format patch agent tidak valid.');
         }
