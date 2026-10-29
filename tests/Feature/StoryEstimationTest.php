@@ -60,6 +60,39 @@ class StoryEstimationTest extends TestCase
         $this->get('/agents/backend-developer/activity')->assertOk()->assertSee('REFINEMENT FIBONACCI');
     }
 
+    public function test_qa_answer_wrapped_in_markdown_fence_and_prose_is_still_accepted(): void
+    {
+        $this->configureEstimationProfiles();
+        Http::fake(function (Request $request) {
+            if (str_contains($request->url(), 'scrum-master.test')) {
+                return Http::response(['choices' => [['message' => ['content' => 'Scrum Master: ketiganya setuju 5 poin.']]]]);
+            }
+            $content = $request['messages'][1]['content'] ?? '';
+            $isFinal = str_contains($content, 'KONFIRMASI FINAL PUTARAN 2');
+            if ($isFinal) {
+                $response = ['estimate_points' => 5, 'rationale' => 'Konfirmasi akhir setelah membaca ringkasan.', 'response' => 'Saya menyetujui 5 poin.', 'explicit_agree' => true];
+            } else {
+                $response = ['estimate_points' => 5, 'rationale' => 'Cakupan keseluruhan dan kriteria diperiksa.'];
+            }
+            $body = json_encode($response);
+            // QA membungkus JSON dengan prosa + pagar kode (gaya jawaban yang
+            // sebelumnya ditolak INVALID_JSON_SCHEMA); BE/FE mengembalikan murni.
+            if (str_contains($request->url(), 'qa.test') && ! $isFinal) {
+                $body = "Berikut estimasi saya:\n```json\n".$body."\n```\nSemoga membantu.";
+            }
+
+            return Http::response(['choices' => [['message' => ['content' => $body]]]]);
+        });
+        [$owner, $project, $story] = $this->makeStory();
+        $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs')
+            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog')->assertSessionHas('status');
+        $run = StoryEstimationRun::query()->where('story_id', $story->id)->firstOrFail();
+        $this->assertSame('COMPLETED', $run->status);
+        $this->assertSame(5, $run->consensus_points);
+        $this->assertSame(5, $story->fresh()->estimate_points);
+        $this->assertSame('COMPLETED', $run->agentRuns()->where('profile_slug', 'qa-engineer')->where('round', 1)->value('status'));
+    }
+
     public function test_deadlock_applies_maximum_and_queues_sm_report(): void
     {
         $this->configureEstimationProfiles();

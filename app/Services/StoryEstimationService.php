@@ -14,6 +14,7 @@ use App\Support\Workspace\ProjectInspector;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
@@ -545,6 +546,18 @@ class StoryEstimationService
                     'explicit_agree' => $data['explicit_agree'] ?? null,
                 ];
             } catch (Throwable $exception) {
+                // Simpan bukti diagnosis: jawaban mentah yang gagal sebelumnya
+                // dibuang begitu saja, sehingga kegagalan format tidak bisa
+                // ditelusuri. Potongan dibatasi 2000 karakter dan disensor bila
+                // mengandung secret terstruktur.
+                $excerpt = mb_substr($raw ?? '', 0, 2000);
+                Log::warning('Story estimation vote failed validation', [
+                    'run_id' => $run->id, 'profile_slug' => $slug, 'round' => $round,
+                    'error_code' => $this->failureCode($exception, $run),
+                    'raw_excerpt' => $this->disclosure->containsStructuredEvidenceSecret($excerpt)
+                        ? '[redacted: possible secret]'
+                        : $excerpt,
+                ]);
                 $entry->forceFill([
                     'status' => 'FAILED', 'error_code' => $this->failureCode($exception, $run),
                     'completed_at' => now(),
@@ -555,12 +568,40 @@ class StoryEstimationService
         return $responses;
     }
 
+    /**
+     * Ambil objek JSON dari jawaban agent. Model kadang membungkus JSON
+     * dengan pagar kode markdown atau kalimat pembuka/penutup — sebelumnya
+     * jawaban seperti itu langsung ditolak padahal isinya valid. Ekstraksi
+     * ini menyamakan parser vote dengan parser refined story; validasi
+     * skema ketat (key persis, poin Fibonacci, rationale) tetap berlaku
+     * sesudah ekstraksi.
+     */
+    private function extractJsonObject(string $raw): ?string
+    {
+        $text = trim($raw);
+        if (preg_match('/```(?:json)?\s*(.*?)```/s', $text, $matches)) {
+            $text = trim($matches[1]);
+        }
+        $start = strpos($text, '{');
+        $end = strrpos($text, '}');
+        if ($start === false || $end === false || $end <= $start) {
+            return null;
+        }
+
+        return substr($text, $start, $end - $start + 1);
+    }
+
     private function validatedResponse(string $raw, int $round): array
     {
-        if (strlen($raw) > 5000) {
-            throw new RuntimeException('Response too long.');
+        $candidate = $this->extractJsonObject($raw);
+        if ($candidate === null || strlen($candidate) > 5000) {
+            throw new RuntimeException('Invalid response schema.');
         }
-        $data = json_decode($raw, true, 32, JSON_THROW_ON_ERROR);
+        try {
+            $data = json_decode($candidate, true, 32, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $exception) {
+            throw new RuntimeException('Invalid response schema.', 0, $exception);
+        }
         $expected = match ($round) {
             1 => ['estimate_points', 'rationale'],
             self::MAX_DISCUSSION_ROUNDS => ['estimate_points', 'rationale', 'response', 'explicit_agree'],
