@@ -19,6 +19,7 @@ class AiProviderController extends Controller
             'providers' => $status->providers(),
             'gatewayUp' => $gatewayUp,
             'managementUp' => $managementUp,
+            'usage' => \App\Services\AiUsageRecorder::summary(30),
             'activePage' => 'ai-providers',
         ]);
     }

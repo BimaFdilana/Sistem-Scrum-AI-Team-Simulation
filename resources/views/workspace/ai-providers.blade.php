@@ -30,6 +30,30 @@
         </div>
     </section>
 
+    <section class="empty-panel">
+        <div class="panel-heading"><div><p class="section-kicker">PEMAKAIAN TOKEN</p><h2>Limit / kredit / token yang terpakai (30 hari terakhir)</h2></div><span class="soft-badge">{{ number_format($usage['grand_total']) }} token</span></div>
+        <p style="margin-top:0">Gateway tidak menyediakan angka limit resmi, jadi bar di bawah menunjukkan <strong>proporsi pemakaian antar provider</strong> dari pencatatan ScrumSpace sendiri (bukan persentase terhadap limit langgananmu). Angka token berasal dari laporan pemakaian tiap panggilan AI yang berhasil.</p>
+        @forelse ($usage['providers'] as $row)
+            @php $pct = $usage['grand_total'] > 0 ? round($row['total'] / $usage['grand_total'] * 100) : 0; @endphp
+            <div style="margin-bottom:.75rem">
+                <div style="display:flex;justify-content:space-between;gap:1rem"><strong>{{ $row['provider'] }}</strong><span>{{ number_format($row['total']) }} token · {{ $row['calls'] }} panggilan · {{ $pct }}%</span></div>
+                <div style="background:#e5e7eb;border-radius:999px;height:12px;overflow:hidden;margin-top:.25rem"><div style="background:#2563eb;height:12px;width:{{ $pct }}%"></div></div>
+            </div>
+        @empty
+            <p>Belum ada pemakaian tercatat. Setelah chat atau eksekusi AI berjalan, pemakaian token akan muncul di sini.</p>
+        @endforelse
+        @if ($usage['models'])
+            <table style="width:100%;margin-top:1rem">
+                <thead><tr><th style="text-align:left">Model</th><th style="text-align:left">Provider</th><th style="text-align:right">Token</th><th style="text-align:right">Panggilan</th></tr></thead>
+                <tbody>
+                    @foreach ($usage['models'] as $model)
+                        <tr><td>{{ $model['model'] }}</td><td>{{ $model['provider'] }}</td><td style="text-align:right">{{ number_format($model['total']) }}</td><td style="text-align:right">{{ $model['calls'] }}</td></tr>
+                    @endforeach
+                </tbody>
+            </table>
+        @endif
+    </section>
+
     <section class="agent-directory-list">
         @foreach ($providers as $slug => $info)
             @php($connected = $info['connected'])

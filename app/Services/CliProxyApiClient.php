@@ -512,7 +512,8 @@ class CliProxyApiClient
                 }
                 $outcome = $this->attemptChat($candidate, $systemPrompt, $userMessage, $timeout, $image);
                 if ($outcome['status'] === 'ok') {
-                    return ['text' => $outcome['text'], 'error' => null, 'model' => $candidate, 'retry_after' => null];
+                    AiUsageRecorder::record($candidate, $outcome['usage'] ?? []);
+                    return ['text' => $outcome['text'], 'error' => null, 'model' => $candidate, 'retry_after' => null, 'usage' => $outcome['usage'] ?? []];
                 }
                 $lastError = $outcome['error'];
                 $lastRetryAfter = $outcome['retry_after'] ?? null;
@@ -684,6 +685,7 @@ class CliProxyApiClient
                 }
                 $outcome = $this->attemptChatMessages($candidate, $systemPrompt, $messages, $timeout, $tools);
                 if ($outcome['status'] === 'ok') {
+                    AiUsageRecorder::record($candidate, $outcome['usage'] ?? []);
                     return ['tool_calls' => $outcome['tool_calls'], 'text' => $outcome['text'], 'error' => null, 'model' => $candidate, 'usage' => $outcome['usage'], 'retry_after' => null];
                 }
                 $lastError = $outcome['error'];
