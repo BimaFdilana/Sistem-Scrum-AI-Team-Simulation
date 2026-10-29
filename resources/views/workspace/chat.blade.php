@@ -64,8 +64,23 @@
         </form>
     </section>
 
+    <script src="{{ asset('js/chat-markdown.js') }}?v=1"></script>
     <script>
         (() => {
+            // Balasan AI lama (dari server) diformat saat halaman dimuat:
+            // Markdown mentah diubah jadi heading/tabel/daftar yang rapi.
+            // Pesan pengguna tidak disentuh — tetap teks biasa.
+            if (window.ScrumChatMarkdown) {
+                document.querySelectorAll('.chat-message-assistant:not(.repair-card)').forEach((article) => {
+                    const p = article.querySelector(':scope > p');
+                    if (!p) return;
+                    const div = document.createElement('div');
+                    div.className = 'md-content';
+                    div.innerHTML = window.ScrumChatMarkdown.render(p.textContent);
+                    p.replaceWith(div);
+                });
+            }
+
             const agentName = @json($agent['name']);
             const form = document.getElementById('chatForm');
             const input = document.getElementById('chatInput');
@@ -142,9 +157,17 @@
                     img.className = 'chat-message-image';
                     article.append(img);
                 }
-                const paragraph = document.createElement('p');
-                paragraph.textContent = content;
-                article.append(paragraph);
+                // Balasan AI baru diformat Markdown; pesan pengguna tetap teks biasa.
+                if (role === 'assistant' && window.ScrumChatMarkdown) {
+                    const formatted = document.createElement('div');
+                    formatted.className = 'md-content';
+                    formatted.innerHTML = window.ScrumChatMarkdown.render(content);
+                    article.append(formatted);
+                } else {
+                    const paragraph = document.createElement('p');
+                    paragraph.textContent = content;
+                    article.append(paragraph);
+                }
                 transcript.append(article);
                 article.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             };
