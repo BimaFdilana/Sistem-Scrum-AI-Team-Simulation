@@ -156,6 +156,12 @@ class ReviewExecutionTaskJob implements ShouldQueue
     {
         $candidate = $this->extractJsonObject($raw);
         if ($candidate === null) {
+            // Sama seperti patch: catat selalu, agar kegagalan bentuk
+            // berikutnya bisa didiagnosis (pelajaran eksekusi US-01 #3).
+            \Illuminate\Support\Facades\Log::warning('Execution review failed validation', [
+                'raw_excerpt' => mb_substr($raw, 0, 2000),
+                'error' => 'Format review QA tidak valid (tanpa kurung kurawal).',
+            ]);
             throw new RuntimeException('Format review QA tidak valid.');
         }
         try {
@@ -170,6 +176,10 @@ class ReviewExecutionTaskJob implements ShouldQueue
             throw $exception;
         }
         if (! is_array($data) || ! is_bool($data['approved'] ?? null)) {
+            \Illuminate\Support\Facades\Log::warning('Execution review failed validation', [
+                'raw_excerpt' => mb_substr($raw, 0, 2000),
+                'error' => 'Format review QA tidak valid (bentuk JSON salah).',
+            ]);
             throw new RuntimeException('Format review QA tidak valid.');
         }
         $feedback = is_string($data['feedback'] ?? null) ? trim($data['feedback']) : '';

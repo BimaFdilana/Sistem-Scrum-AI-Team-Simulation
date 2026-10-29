@@ -76,19 +76,29 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // Pekerjaan atas project PO: tanpa filter sensor (aturan PO:
             // tidak ada batasan terhadap project, termasuk env/kuncinya).
             $raw = $agents->sendMessage($task->assignee, $prompt, 'execution-'.$run->id.'-task-'.$task->id.'-r'.$task->revision_count, false);
-            $patch = $this->validatedPatch($raw);
 
             // Guardrail perintah perbaikan: penegakan di level sistem, bukan cuma prompt.
-            // Bila patch DITOLAK validasi -> 1x retry otomatis dengan patch lebih kecil.
+            // Bila patch DITOLAK validasi penerapan -> 1x retry otomatis dengan patch lebih kecil.
+            // Bila patch GAGAL BENTUK (validatedPatch) -> 1x retry juga (perbaikan eksekusi
+            // US-01 #3: satu jawaban agent yang malformed tidak boleh langsung membunuh
+            // seluruh eksekusi; $patch yang masih null menandakan gagalnya di validasi format).
             // Bila patch GAGAL TULIS (disk/izin) -> langsung fail, retry tidak ada gunanya.
+            $patch = null;
+            $applied = null;
             try {
+                $patch = $this->validatedPatch($raw);
                 $applied = $patcher->apply($worktree, $patch['files'], $run->repair_order_id === null);
             } catch (PatchValidationException $validationError) {
-                $patch = $this->retryWithSmallerPatch($agents, $run, $task, $patcher, $worktree, $validationError);
-                $applied = $patch['applied'];
-                $patch = $patch['patch'];
-            } catch (Throwable $writeError) {
-                throw $writeError;
+                $retry = $this->retryWithSmallerPatch($agents, $run, $task, $patcher, $worktree, $validationError);
+                $applied = $retry['applied'];
+                $patch = $retry['patch'];
+            } catch (Throwable $error) {
+                if ($patch !== null) {
+                    throw $error;
+                }
+                $retry = $this->retryWithSmallerPatch($agents, $run, $task, $patcher, $worktree, $error);
+                $applied = $retry['applied'];
+                $patch = $retry['patch'];
             }
             $worktrees->commit($worktree, 'Task #'.$task->id.': '.$task->title);
 
@@ -139,6 +149,13 @@ class ExecuteExecutionTaskJob implements ShouldQueue
         }
         $candidate = $this->extractJsonObject($raw);
         if ($candidate === null) {
+            // Kegagalan eksekusi US-01 #3 (13:42:12 UTC) justru jalur ini:
+            // RuntimeException tanpa payload tercatat, sehingga bentuk
+            // jawaban agent tidak bisa didiagnosis. Catat selalu.
+            \Illuminate\Support\Facades\Log::warning('Execution patch failed validation', [
+                'raw_excerpt' => mb_substr($raw, 0, 2000),
+                'error' => 'Format patch agent tidak valid (tanpa kurung kurawal).',
+            ]);
             throw new RuntimeException('Format patch agent tidak valid.');
         }
         try {
@@ -154,6 +171,10 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             throw $exception;
         }
         if (! is_array($data) || ! is_array($data['files'] ?? null) || ! is_string($data['summary'] ?? null)) {
+            \Illuminate\Support\Facades\Log::warning('Execution patch failed validation', [
+                'raw_excerpt' => mb_substr($raw, 0, 2000),
+                'error' => 'Format patch agent tidak valid (bentuk JSON salah).',
+            ]);
             throw new RuntimeException('Format patch agent tidak valid.');
         }
 
@@ -162,7 +183,8 @@ class ExecuteExecutionTaskJob implements ShouldQueue
 
     /**
      * Retry otomatis 1x dengan patch yang lebih kecil (maks 2 file) bila patch
-     * asli ditolak validasi. Guard patch_retry_count mencegah infinite loop:
+     * asli ditolak validasi penerapan ATAU gagal validasi bentuk (kasus
+     * eksekusi US-01 #3). Guard patch_retry_count mencegah infinite loop:
      * retry tidak pernah me-retry lagi — gagal -> notifikasi + throw.
      *
      * @return array{applied:string[],patch:array{files:array,summary:string}}
@@ -173,7 +195,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
         ExecutionTask $task,
         PatchApplier $patcher,
         string $worktree,
-        PatchValidationException $validationError,
+        Throwable $validationError,
     ): array {
         if ($task->patch_retry_count >= 1) {
             // Seharusnya tidak terjadi (hanya dipanggil sekali), tapi jaga-jaga.
