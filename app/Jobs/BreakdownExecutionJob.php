@@ -76,6 +76,19 @@ class BreakdownExecutionJob implements ShouldQueue
 
             $run->forceFill(['status' => 'AWAITING_PERMISSION'])->save();
         } catch (Throwable $exception) {
+            // Catat jawaban mentah yang gagal (dibatasi + disensor bila
+            // mengandung nilai platform) — kegagalan breakdown eksekusi
+            // US-01 #1 dulu tidak bisa didiagnosis karena payload mentah
+            // tidak tercatat di mana pun.
+            $excerpt = mb_substr($raw ?? '', 0, 2000);
+            \Illuminate\Support\Facades\Log::warning('Execution breakdown failed validation', [
+                'run_id' => $run->id,
+                'error' => $exception->getMessage(),
+                'matched_categories' => $disclosure->matchedSecretCategories($excerpt),
+                'raw_excerpt' => $disclosure->containsStructuredEvidenceSecret($excerpt)
+                    ? '[redacted: possible secret]'
+                    : $excerpt,
+            ]);
             $run->forceFill(['status' => 'FAILED', 'error_code' => 'BREAKDOWN_FAILED', 'completed_at' => now()])->save();
             throw $exception;
         }
@@ -105,10 +118,36 @@ class BreakdownExecutionJob implements ShouldQueue
         ]);
     }
 
+    /**
+     * Ekstraksi JSON toleran — sama seperti vote estimasi (68878fb).
+     * Sebelum perbaikan ini, validatedTasks melakukan json_decode atas
+     * SELURUH jawaban SM, sehingga fence ```json / prosa pembuka yang
+     * umum dari model langsung menggagalkan breakdown (kasus eksekusi
+     * US-01 #1: JsonException Syntax error, 0 task).
+     */
+    private function extractJsonObject(string $raw): ?string
+    {
+        $text = trim($raw);
+        if (preg_match('/```(?:json)?\s*(.*?)```/s', $text, $matches)) {
+            $text = trim($matches[1]);
+        }
+        $start = strpos($text, '{');
+        $end = strrpos($text, '}');
+        if ($start === false || $end === false || $end <= $start) {
+            return null;
+        }
+
+        return substr($text, $start, $end - $start + 1);
+    }
+
     /** @return array<int, array{title:string,description:string,assignee:string,files:array}> */
     private function validatedTasks(string $raw): array
     {
-        $data = json_decode($raw, true, 32, JSON_THROW_ON_ERROR);
+        $candidate = $this->extractJsonObject($raw);
+        if ($candidate === null) {
+            throw new RuntimeException('Breakdown tasks tidak valid.');
+        }
+        $data = json_decode($candidate, true, 32, JSON_THROW_ON_ERROR);
         $tasks = $data['tasks'] ?? null;
         if (! is_array($tasks) || count($tasks) < 1 || count($tasks) > 6) {
             throw new RuntimeException('Breakdown tasks tidak valid.');
