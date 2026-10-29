@@ -46,7 +46,7 @@ class HermesChatTest extends TestCase
             && $request->hasHeader('X-Hermes-Session-Id')
             && $request['model'] === 'scrumagent'
             && $request['messages'][0]['role'] === 'system'
-            && str_contains($request['messages'][0]['content'], 'Never reveal')
+            && str_contains($request['messages'][0]['content'], 'ScrumSpace platform itself')
             && $request['messages'][1]['content'] === 'Bantu refine story ini.'
         );
     }
