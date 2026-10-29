@@ -231,6 +231,32 @@ class StoryEstimationAsyncTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_process_agent_logs_raw_answer_when_async_vote_fails_validation(): void
+    {
+        config([
+            'services.agent_profiles.qa-engineer.base_url' => 'http://qa.test/v1',
+            'services.agent_profiles.qa-engineer.api_key' => 'qa-test-key',
+            'services.agent_profiles.qa-engineer.model' => 'qa-engineer',
+        ]);
+        \Illuminate\Support\Facades\Http::fake([
+            'qa.test/*' => \Illuminate\Support\Facades\Http::response(['choices' => [['message' => ['content' => 'Saya menilai story ini 5 poin.']]]]),
+        ]);
+        \Illuminate\Support\Facades\Log::spy();
+        [$owner, $project, $story] = $this->makeStory();
+        [$run] = app(StoryEstimationService::class)->claimRun($story, $owner);
+        $run->forceFill(['status' => 'RUNNING'])->save();
+        $entry = $run->agentRuns()->create(['profile_slug' => 'qa-engineer', 'round' => 1, 'status' => 'QUEUED']);
+        app(StoryEstimationService::class)->processAgent($entry);
+        $this->assertSame('FAILED', $entry->fresh()->status);
+        $this->assertSame('INVALID_JSON_SCHEMA', $entry->fresh()->error_code);
+        \Illuminate\Support\Facades\Log::shouldHaveReceived('warning')
+            ->with('Story estimation vote failed validation', \Mockery::on(function (array $context) {
+                return $context['profile_slug'] === 'qa-engineer'
+                    && $context['error_code'] === 'INVALID_JSON_SCHEMA'
+                    && str_contains($context['raw_excerpt'], 'Saya menilai story ini 5 poin.');
+            }));
+    }
+
     private function makeStory(): array
     {
         $owner = User::factory()->create();

@@ -175,8 +175,27 @@ class StoryEstimationService
                 }
             });
         } catch (Throwable $exception) {
+            $this->logVoteFailure($run, $entry->profile_slug, $round, $exception, $raw ?? '');
             $this->failAgent($entry, $this->failureCode($exception, $run));
         }
+    }
+
+    /**
+     * Catat jawaban mentah yang gagal validasi. Jalur async (processAgent)
+     * adalah jalur yang dipakai worker di produksi; pencatatan yang sama
+     * juga dipakai jalur sinkron (collectRound) agar kegagalan format
+     * selalu bisa ditelusuri dari log, bukan ditebak.
+     */
+    private function logVoteFailure(StoryEstimationRun $run, string $slug, int $round, Throwable $exception, string $raw): void
+    {
+        $excerpt = mb_substr($raw, 0, 2000);
+        Log::warning('Story estimation vote failed validation', [
+            'run_id' => $run->id, 'profile_slug' => $slug, 'round' => $round,
+            'error_code' => $this->failureCode($exception, $run),
+            'raw_excerpt' => $this->disclosure->containsStructuredEvidenceSecret($excerpt)
+                ? '[redacted: possible secret]'
+                : $excerpt,
+        ]);
     }
 
     public function failAgent(StoryEstimationAgentRun $entry, string $errorCode): void
@@ -546,18 +565,7 @@ class StoryEstimationService
                     'explicit_agree' => $data['explicit_agree'] ?? null,
                 ];
             } catch (Throwable $exception) {
-                // Simpan bukti diagnosis: jawaban mentah yang gagal sebelumnya
-                // dibuang begitu saja, sehingga kegagalan format tidak bisa
-                // ditelusuri. Potongan dibatasi 2000 karakter dan disensor bila
-                // mengandung secret terstruktur.
-                $excerpt = mb_substr($raw ?? '', 0, 2000);
-                Log::warning('Story estimation vote failed validation', [
-                    'run_id' => $run->id, 'profile_slug' => $slug, 'round' => $round,
-                    'error_code' => $this->failureCode($exception, $run),
-                    'raw_excerpt' => $this->disclosure->containsStructuredEvidenceSecret($excerpt)
-                        ? '[redacted: possible secret]'
-                        : $excerpt,
-                ]);
+                $this->logVoteFailure($run, $slug, $round, $exception, $raw ?? '');
                 $entry->forceFill([
                     'status' => 'FAILED', 'error_code' => $this->failureCode($exception, $run),
                     'completed_at' => now(),
