@@ -74,18 +74,21 @@ class AiStatusService
         return $result;
     }
 
-    /** Label provider ("ChatGPT (Codex)") untuk sebuah model ID. */
+    /** Label provider untuk sebuah model ID. */
     public function providerLabelForModel(string $model): ?string
     {
-        // modelsByProvider() memakai grup 'anthropic'/'codex'/'google';
-        // slug config untuk Google adalah 'antigravity'.
+        // modelsByProvider() memakai grup registry (google/codex/anthropic/
+        // mimo/...); slug config OAuth untuk Google adalah 'antigravity'.
         $groupToSlug = ['anthropic' => 'anthropic', 'codex' => 'codex', 'google' => 'antigravity'];
 
         foreach ($this->client->modelsByProvider() as $group => $ids) {
             if (in_array($model, $ids, true)) {
                 $slug = $groupToSlug[$group] ?? null;
+                if ($slug !== null) {
+                    return config("ai.providers.{$slug}.label") ?? $slug;
+                }
 
-                return $slug ? (config("ai.providers.{$slug}.label") ?? $slug) : null;
+                return config("ai.model_providers.{$group}.label") ?? $group;
             }
         }
 

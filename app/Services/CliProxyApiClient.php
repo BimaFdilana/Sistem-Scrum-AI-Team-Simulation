@@ -430,7 +430,7 @@ class CliProxyApiClient
         if (! $this->agentsEnabled()) {
             return [];
         }
-        $grouped = ['anthropic' => [], 'codex' => [], 'google' => []];
+        $grouped = array_fill_keys(self::modelProviderSlugs(), []);
         foreach ($this->models() as $m) {
             foreach (array_keys($grouped) as $provider) {
                 if (self::modelMatchesProvider($m['id'], $m['owned_by'], $provider)) {
@@ -734,7 +734,7 @@ class CliProxyApiClient
             return $candidates;
         }
         $primaryProvider = null;
-        foreach (['codex', 'google', 'anthropic'] as $provider) {
+        foreach (self::modelProviderSlugs() as $provider) {
             if (self::modelMatchesProvider($primary['id'], $primary['owned_by'], $provider)) {
                 $primaryProvider = $provider;
                 break;
@@ -755,7 +755,7 @@ class CliProxyApiClient
         if ($sameProvider !== []) {
             $candidates[] = self::pickBest($sameProvider);
         }
-        foreach (['google', 'codex', 'anthropic'] as $provider) {
+        foreach (self::modelProviderSlugs() as $provider) {
             if ($provider === $primaryProvider) {
                 continue;
             }
@@ -780,8 +780,9 @@ class CliProxyApiClient
 
     /**
      * Provider OAuth untuk sebuah model dari katalog gateway
-     * ('google' | 'codex' | 'anthropic' | null bila tak dikenali).
-     * Dipakai untuk mencatat model/provider di log kegagalan vote.
+     * (slug registry, mis. 'google' | 'codex' | 'anthropic' | 'mimo',
+     * atau null bila tak dikenali). Dipakai untuk mencatat
+     * model/provider di log kegagalan vote.
      */
     public function providerForModel(string $model): ?string
     {
@@ -789,7 +790,7 @@ class CliProxyApiClient
             if ($m['id'] !== $model) {
                 continue;
             }
-            foreach (['codex', 'google', 'anthropic'] as $provider) {
+            foreach (self::modelProviderSlugs() as $provider) {
                 if (self::modelMatchesProvider($m['id'], $m['owned_by'], $provider)) {
                     return $provider;
                 }
@@ -801,17 +802,50 @@ class CliProxyApiClient
         return null;
     }
 
+    /**
+     * Slug grup provider dari registry config ai.model_providers, sesuai
+     * urutan prioritas fallback. Provider baru cukup ditambahkan di
+     * config — tidak perlu mengubah logika routing di sini.
+     *
+     * @return string[]
+     */
+    public static function modelProviderSlugs(): array
+    {
+        $registry = config('ai.model_providers', []);
+        $slugs = is_array($registry) ? array_keys($registry) : [];
+
+        return $slugs !== [] ? $slugs : ['google', 'codex', 'anthropic'];
+    }
+
     private static function modelMatchesProvider(string $id, string $ownedBy, string $provider): bool
     {
+        $provider = strtolower($provider);
+        if ($provider === 'any') {
+            return true;
+        }
+        // Alias lama: kanal Antigravity/Gemini = grup Google.
+        if (in_array($provider, ['antigravity', 'gemini'], true)) {
+            $provider = 'google';
+        }
+        $registry = config('ai.model_providers', []);
+        $entry = is_array($registry) ? ($registry[$provider] ?? null) : null;
+        if (! is_array($entry)) {
+            return false;
+        }
         $id = strtolower($id);
         $ownedBy = strtolower($ownedBy);
+        foreach ((array) ($entry['id'] ?? []) as $needle) {
+            if (str_contains($id, strtolower((string) $needle))) {
+                return true;
+            }
+        }
+        foreach ((array) ($entry['owned_by'] ?? []) as $needle) {
+            if (str_contains($ownedBy, strtolower((string) $needle))) {
+                return true;
+            }
+        }
 
-        return match ($provider) {
-            'anthropic' => str_contains($id, 'claude') || str_contains($ownedBy, 'anthropic'),
-            'codex' => str_contains($id, 'gpt') || str_contains($id, 'codex') || str_contains($ownedBy, 'openai'),
-            'google', 'antigravity', 'gemini' => str_contains($id, 'gemini') || str_contains($ownedBy, 'google'),
-            default => true,
-        };
+        return false;
     }
 
     /** Heuristik "terbaik": hindari model image, utamakan flagship. */

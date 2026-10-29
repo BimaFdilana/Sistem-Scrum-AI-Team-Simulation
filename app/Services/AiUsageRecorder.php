@@ -40,13 +40,24 @@ class AiUsageRecorder
     public static function providerForModel(string $model): string
     {
         $lower = strtolower($model);
-        if (str_contains($lower, 'gemini') || str_contains($lower, 'google')) {
+        foreach ((array) config('ai.model_providers', []) as $entry) {
+            if (! is_array($entry) || ! isset($entry['label'])) {
+                continue;
+            }
+            foreach ((array) ($entry['id'] ?? []) as $needle) {
+                if (str_contains($lower, strtolower((string) $needle))) {
+                    return (string) $entry['label'];
+                }
+            }
+        }
+        // Pola lama yang dipertahankan: penanda di nama model, bukan di registry.
+        if (str_contains($lower, 'google')) {
             return 'Google';
         }
-        if (str_contains($lower, 'claude') || str_contains($lower, 'anthropic')) {
+        if (str_contains($lower, 'anthropic')) {
             return 'Anthropic';
         }
-        if (str_contains($lower, 'gpt') || str_contains($lower, 'codex') || str_contains($lower, 'openai') || str_starts_with($lower, 'o1') || str_starts_with($lower, 'o3') || str_starts_with($lower, 'o4')) {
+        if (str_contains($lower, 'openai') || str_starts_with($lower, 'o1') || str_starts_with($lower, 'o3') || str_starts_with($lower, 'o4')) {
             return 'OpenAI';
         }
 
