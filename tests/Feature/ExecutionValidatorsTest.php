@@ -99,4 +99,35 @@ class ExecutionValidatorsTest extends TestCase
         $this->expectException(\Throwable::class);
         $this->callPrivate(new ReviewExecutionTaskJob(0, 0), 'validatedReview', '"feedback":"Tidak ada field approved di sini."');
     }
+
+    public function test_nonapproved_review_with_empty_feedback_fails(): void
+    {
+        // Regresi eksekusi US-01 #7: feedback akhir task styling tersimpan
+        // kosong, sehingga putaran revisi berjalan tanpa arahan perbaikan.
+        // Penolakan tanpa feedback kini diperlakukan sebagai review
+        // malformed (masuk jalur retry), bukan disimpan apa adanya.
+        $this->expectException(\Throwable::class);
+        $this->callPrivate(new ReviewExecutionTaskJob(0, 0), 'validatedReview', json_encode(['approved' => false, 'feedback' => '']));
+    }
+
+    public function test_nonapproved_review_with_missing_feedback_fails(): void
+    {
+        $this->expectException(\Throwable::class);
+        $this->callPrivate(new ReviewExecutionTaskJob(0, 0), 'validatedReview', json_encode(['approved' => false]));
+    }
+
+    public function test_braceless_nonapproved_review_with_empty_feedback_fails(): void
+    {
+        $this->expectException(\Throwable::class);
+        $this->callPrivate(new ReviewExecutionTaskJob(0, 0), 'validatedReview', '"approved":false, "feedback":""');
+    }
+
+    public function test_approved_review_with_empty_feedback_passes(): void
+    {
+        $job = new ReviewExecutionTaskJob(0, 0);
+        $review = $this->callPrivate($job, 'validatedReview', json_encode(['approved' => true, 'feedback' => '']));
+
+        $this->assertTrue($review['approved']);
+        $this->assertSame('', $review['feedback']);
+    }
 }

@@ -179,6 +179,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
         $retryPrompt = implode("\n\n", [
             'Jawaban review kamu sebelumnya DITOLAK sistem karena bukan objek JSON yang valid.',
             'Kembalikan HANYA objek JSON persis: {"approved":true,"feedback":"..."}. Diawali dengan { dan diakhiri dengan }, tanpa fence, tanpa kalimat lain di luar JSON.',
+            'Bila approved false, feedback WAJIB berisi daftar konkret yang harus diperbaiki — tidak boleh kosong.',
             $prompt,
         ]);
         $rawRetry = $agents->sendMessage('qa-engineer', $retryPrompt, 'execution-'.$run->id.'-task-'.$task->id.'-qa-retry1', false, true);
@@ -225,6 +226,31 @@ class ReviewExecutionTaskJob implements ShouldQueue
         return ['approved' => strtolower($approvedMatch[1]) === 'true', 'feedback' => mb_substr(trim($feedback), 0, 2000)];
     }
 
+    /**
+     * Penolakan QA tanpa feedback membuat putaran revisi berjalan buta
+     * (pelajaran eksekusi US-01 #7: feedback akhir task styling tersimpan
+     * kosong, sehingga FE tidak punya arahan perbaikan). Review yang tidak
+     * approve WAJIB membawa feedback non-empty; bila kosong, perlakukan
+     * sebagai review malformed — dicatat, lalu masuk jalur retry di
+     * reviewWithOneRetry. Review yang approve boleh tanpa feedback.
+     *
+     * @param  array{approved:bool,feedback:string}  $review
+     * @return array{approved:bool,feedback:string}
+     */
+    private function requireFeedback(array $review): array
+    {
+        if (! $review['approved'] && $review['feedback'] === '') {
+            \Illuminate\Support\Facades\Log::warning('Execution review failed validation', [
+                'execution_run_id' => $this->runId,
+                'execution_task_id' => $this->taskId,
+                'error' => 'Format review QA tidak valid (feedback kosong untuk review yang tidak approve).',
+            ]);
+            throw new RuntimeException('Format review QA tidak valid (feedback kosong).');
+        }
+
+        return $review;
+    }
+
     /** @return array{approved:bool,feedback:string} */
     private function validatedReview(string $raw): array
     {
@@ -237,7 +263,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
             // dibuktikan dari log saja).
             $fields = $this->extractReviewFields($raw);
             if ($fields !== null) {
-                return $fields;
+                return $this->requireFeedback($fields);
             }
             \Illuminate\Support\Facades\Log::warning('Execution review failed validation', [
                 'execution_run_id' => $this->runId,
@@ -255,7 +281,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
             // langsung membunuh eksekusi.
             $fields = $this->extractReviewFields($raw);
             if ($fields !== null) {
-                return $fields;
+                return $this->requireFeedback($fields);
             }
             // Catat potongan jawaban gagal agar kegagalan berikutnya bisa
             // didiagnosis (pelajaran dari eksekusi US-01 #2).
@@ -270,7 +296,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
         if (! is_array($data) || ! is_bool($data['approved'] ?? null)) {
             $fields = $this->extractReviewFields($raw);
             if ($fields !== null) {
-                return $fields;
+                return $this->requireFeedback($fields);
             }
             \Illuminate\Support\Facades\Log::warning('Execution review failed validation', [
                 'execution_run_id' => $this->runId,
@@ -282,6 +308,6 @@ class ReviewExecutionTaskJob implements ShouldQueue
         }
         $feedback = is_string($data['feedback'] ?? null) ? trim($data['feedback']) : '';
 
-        return ['approved' => $data['approved'], 'feedback' => mb_substr($feedback, 0, 2000)];
+        return $this->requireFeedback(['approved' => $data['approved'], 'feedback' => mb_substr($feedback, 0, 2000)]);
     }
 }

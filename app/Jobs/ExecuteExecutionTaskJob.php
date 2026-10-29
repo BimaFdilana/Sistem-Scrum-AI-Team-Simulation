@@ -163,6 +163,8 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // RuntimeException tanpa payload tercatat, sehingga bentuk
             // jawaban agent tidak bisa didiagnosis. Catat selalu.
             \Illuminate\Support\Facades\Log::warning('Execution patch failed validation', [
+                'execution_run_id' => $this->runId,
+                'execution_task_id' => $this->taskId,
                 'raw_excerpt' => mb_substr($raw, 0, 2000),
                 'error' => 'Format patch agent tidak valid (tanpa kurung kurawal).',
             ]);
@@ -175,6 +177,8 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // dulu tidak bisa didiagnosis karena payload mentah tidak
             // tercatat di mana pun.
             \Illuminate\Support\Facades\Log::warning('Execution patch failed validation', [
+                'execution_run_id' => $this->runId,
+                'execution_task_id' => $this->taskId,
                 'raw_excerpt' => mb_substr($raw, 0, 2000),
                 'error' => $exception->getMessage(),
             ]);
@@ -182,6 +186,8 @@ class ExecuteExecutionTaskJob implements ShouldQueue
         }
         if (! is_array($data) || ! is_array($data['files'] ?? null) || ! is_string($data['summary'] ?? null)) {
             \Illuminate\Support\Facades\Log::warning('Execution patch failed validation', [
+                'execution_run_id' => $this->runId,
+                'execution_task_id' => $this->taskId,
                 'raw_excerpt' => mb_substr($raw, 0, 2000),
                 'error' => 'Format patch agent tidak valid (bentuk JSON salah).',
             ]);
