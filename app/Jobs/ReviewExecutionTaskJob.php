@@ -58,7 +58,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
             ]);
             // Review atas project PO: tanpa filter sensor (aturan PO).
             $raw = $agents->sendMessage('qa-engineer', $prompt, 'execution-'.$run->id.'-task-'.$task->id.'-qa'.$task->revision_count, false, true);
-            $review = $this->validatedReview($raw);
+            $review = $this->reviewWithOneRetry($agents, $run, $task, $prompt, $raw);
 
             if ($review['approved']) {
                 $task->forceFill(['status' => 'APPROVED', 'qa_feedback' => null])->save();
@@ -151,14 +151,97 @@ class ReviewExecutionTaskJob implements ShouldQueue
         return substr($text, $start, $end - $start + 1);
     }
 
+    /**
+     * Satu jawaban review yang malformed tidak boleh langsung membunuh
+     * seluruh eksekusi (pelajaran eksekusi US-01 #5, 14:42:39 UTC): QA
+     * mengembalikan field approved/feedback di dalam fence TAPI TANPA
+     * kurung kurawal pembungkus, validatedReview melempar, dan catch di
+     * handle() langsung menandai run FAILED/REVIEW_FAILED — melewati loop
+     * revisi sepenuhnya, padahal batasnya 2 revisi. Jadi: coba sekali lagi
+     * dengan instruksi yang lebih tegas; gagal kedua kali baru diteruskan
+     * ke catch (FAILED). Retry inline sekali saja, tanpa rekursi, jadi
+     * tidak ada risiko infinite loop.
+     *
+     * @return array{approved:bool,feedback:string}
+     */
+    private function reviewWithOneRetry(AgentProfileClient $agents, ExecutionRun $run, ExecutionTask $task, string $prompt, string $raw): array
+    {
+        try {
+            return $this->validatedReview($raw);
+        } catch (Throwable $firstError) {
+            \Illuminate\Support\Facades\Log::warning('Execution review retry', [
+                'execution_run_id' => $run->id,
+                'execution_task_id' => $task->id,
+                'error' => $firstError->getMessage(),
+            ]);
+        }
+
+        $retryPrompt = implode("\n\n", [
+            'Jawaban review kamu sebelumnya DITOLAK sistem karena bukan objek JSON yang valid.',
+            'Kembalikan HANYA objek JSON persis: {"approved":true,"feedback":"..."}. Diawali dengan { dan diakhiri dengan }, tanpa fence, tanpa kalimat lain di luar JSON.',
+            $prompt,
+        ]);
+        $rawRetry = $agents->sendMessage('qa-engineer', $retryPrompt, 'execution-'.$run->id.'-task-'.$task->id.'-qa-retry1', false, true);
+
+        return $this->validatedReview($rawRetry);
+    }
+
+    /**
+     * Ekstraksi field review dari jawaban TANPA kurung kurawal pembungkus
+     * (bentuk persis kegagalan eksekusi US-01 #5): fence berisi
+     * "approved":false,"feedback":"..." tanpa { }. Dicoba dulu membungkus
+     * seluruh isi dengan { }, lalu fallback regex per-field agar prosa
+     * sesudah field tidak ikut menggagalkan.
+     *
+     * @return array{approved:bool,feedback:string}|null
+     */
+    private function extractReviewFields(string $raw): ?array
+    {
+        $text = trim($raw);
+        if (preg_match('/```(?:json)?\s*(.*?)```/s', $text, $matches)) {
+            $text = trim($matches[1]);
+        }
+        if (! str_starts_with($text, '{')) {
+            try {
+                $data = json_decode('{'.rtrim($text, ",;").'}', true, 32, JSON_THROW_ON_ERROR);
+                if (is_array($data) && is_bool($data['approved'] ?? null)) {
+                    $feedback = is_string($data['feedback'] ?? null) ? trim($data['feedback']) : '';
+
+                    return ['approved' => $data['approved'], 'feedback' => mb_substr($feedback, 0, 2000)];
+                }
+            } catch (\JsonException) {
+                // Lanjut ke fallback regex di bawah.
+            }
+        }
+        if (! preg_match('/"approved"\s*:\s*(true|false)/i', $text, $approvedMatch)) {
+            return null;
+        }
+        $feedback = '';
+        if (preg_match('/"feedback"\s*:\s*"((?:\\\\.|[^"\\\\])*)"/s', $text, $feedbackMatch)) {
+            $decoded = json_decode('"'.$feedbackMatch[1].'"', true);
+            $feedback = is_string($decoded) ? $decoded : $feedbackMatch[1];
+        }
+
+        return ['approved' => strtolower($approvedMatch[1]) === 'true', 'feedback' => mb_substr(trim($feedback), 0, 2000)];
+    }
+
     /** @return array{approved:bool,feedback:string} */
     private function validatedReview(string $raw): array
     {
         $candidate = $this->extractJsonObject($raw);
         if ($candidate === null) {
-            // Sama seperti patch: catat selalu, agar kegagalan bentuk
-            // berikutnya bisa didiagnosis (pelajaran eksekusi US-01 #3).
+            // Bentuk kegagalan eksekusi US-01 #5: field tanpa kurung luar.
+            // Terima bila field-nya bisa diekstrak; bila tidak, catat
+            // selalu (dengan ID eksekusi/task — celah pencatatan #5: entri
+            // lama tidak membawa ID sehingga task yang gagal tidak bisa
+            // dibuktikan dari log saja).
+            $fields = $this->extractReviewFields($raw);
+            if ($fields !== null) {
+                return $fields;
+            }
             \Illuminate\Support\Facades\Log::warning('Execution review failed validation', [
+                'execution_run_id' => $this->runId,
+                'execution_task_id' => $this->taskId,
                 'raw_excerpt' => mb_substr($raw, 0, 2000),
                 'error' => 'Format review QA tidak valid (tanpa kurung kurawal).',
             ]);
@@ -167,16 +250,31 @@ class ReviewExecutionTaskJob implements ShouldQueue
         try {
             $data = json_decode($candidate, true, 32, JSON_THROW_ON_ERROR);
         } catch (\JsonException $exception) {
+            // Objek berkumpul tapi JSON-nya rusak: coba ekstraksi field
+            // sebelum menyerah, agar satu format nyaris-benar tidak
+            // langsung membunuh eksekusi.
+            $fields = $this->extractReviewFields($raw);
+            if ($fields !== null) {
+                return $fields;
+            }
             // Catat potongan jawaban gagal agar kegagalan berikutnya bisa
             // didiagnosis (pelajaran dari eksekusi US-01 #2).
             \Illuminate\Support\Facades\Log::warning('Execution review failed validation', [
+                'execution_run_id' => $this->runId,
+                'execution_task_id' => $this->taskId,
                 'raw_excerpt' => mb_substr($raw, 0, 2000),
                 'error' => $exception->getMessage(),
             ]);
             throw $exception;
         }
         if (! is_array($data) || ! is_bool($data['approved'] ?? null)) {
+            $fields = $this->extractReviewFields($raw);
+            if ($fields !== null) {
+                return $fields;
+            }
             \Illuminate\Support\Facades\Log::warning('Execution review failed validation', [
+                'execution_run_id' => $this->runId,
+                'execution_task_id' => $this->taskId,
                 'raw_excerpt' => mb_substr($raw, 0, 2000),
                 'error' => 'Format review QA tidak valid (bentuk JSON salah).',
             ]);

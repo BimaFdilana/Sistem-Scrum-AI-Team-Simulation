@@ -71,4 +71,32 @@ class ExecutionValidatorsTest extends TestCase
         $this->expectException(\Throwable::class);
         $this->callPrivate(new ReviewExecutionTaskJob(0, 0), 'validatedReview', 'Maaf, saya tidak dapat membantu.');
     }
+
+    public function test_braceless_fenced_review_is_accepted(): void
+    {
+        // Regresi eksekusi US-01 #5 (14:42:37 UTC): QA mengembalikan field
+        // approved/feedback di dalam fence TAPI TANPA kurung kurawal
+        // pembungkus, sehingga extractJsonObject mengembalikan null dan
+        // catch handle() langsung menandai run FAILED/REVIEW_FAILED.
+        $job = new ReviewExecutionTaskJob(0, 0);
+        $review = $this->callPrivate($job, 'validatedReview', "```json\n\"approved\":false, \"feedback\":\"Ada beberapa isu yang harus diperbaiki: tap-target landscape 44x44px.\"\n```");
+
+        $this->assertFalse($review['approved']);
+        $this->assertStringContainsString('tap-target landscape', $review['feedback']);
+    }
+
+    public function test_braceless_review_with_trailing_prose_is_accepted(): void
+    {
+        $job = new ReviewExecutionTaskJob(0, 0);
+        $review = $this->callPrivate($job, 'validatedReview', '"approved":true, "feedback":"Bagus." Terima kasih atas kerja samanya.');
+
+        $this->assertTrue($review['approved']);
+        $this->assertSame('Bagus.', $review['feedback']);
+    }
+
+    public function test_braceless_review_without_approved_field_still_fails(): void
+    {
+        $this->expectException(\Throwable::class);
+        $this->callPrivate(new ReviewExecutionTaskJob(0, 0), 'validatedReview', '"feedback":"Tidak ada field approved di sini."');
+    }
 }
