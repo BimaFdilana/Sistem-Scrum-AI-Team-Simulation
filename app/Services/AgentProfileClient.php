@@ -96,7 +96,7 @@ class AgentProfileClient
         if ($model !== null) {
             $result = $cliproxy->chatResilient($model, $systemPrompt, $message);
             if ($result['text'] === null) {
-                throw new \App\Exceptions\AiUnavailableException($result['error'] ?? 'UNKNOWN');
+                throw new \App\Exceptions\AiUnavailableException($result['error'] ?? 'UNKNOWN', '', $result['retry_after'] ?? null);
             }
 
             if ($applyDisclosureFilter && app(ChatDisclosurePolicy::class)->containsSensitiveDisclosure($result['text'])) {

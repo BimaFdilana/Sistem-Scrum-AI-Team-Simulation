@@ -25,7 +25,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 1;
+    public int $tries = 5;
 
     public int $timeout = 600;
 
@@ -54,6 +54,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             return;
         }
 
+        $originalStatus = $task->status;
         $task->forceFill(['status' => 'IN_PROGRESS'])->save();
 
         try {
@@ -124,6 +125,21 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             $run->forceFill(['status' => 'REVIEWING'])->save();
             ReviewExecutionTaskJob::dispatch($run->id, $task->id);
         } catch (Throwable $exception) {
+            // Seperti di ReviewExecutionTaskJob: kegagalan AI sementara
+            // dilepas kembali ke antrean (task dikembalikan ke status
+            // semula agar guard percobaan berikutnya lolos), bukan
+            // failRun. Worktree/cabang task dipertahankan untuk
+            // percobaan berikutnya (create() sudah aman untuk cabang
+            // yang ada sejak perbaikan #6).
+            if ($exception instanceof \App\Exceptions\AiUnavailableException
+                && \App\Services\AiGateway::isTransient($exception->errorCode)
+                && $this->attempts() < \App\Services\AiGateway::MAX_QUEUE_ATTEMPTS) {
+                $task->forceFill(['status' => $originalStatus])->save();
+                \App\Services\AiGateway::logFailure($this->runId, $this->taskId, 'ExecuteExecutionTaskJob', $exception, $this->attempts(), true);
+                $this->release(\App\Services\AiGateway::releaseDelay($this->attempts(), $exception->retryAfter));
+
+                return;
+            }
             $this->failRun($run, $task, 'EXECUTION_FAILED', $worktrees, $baseline, $exception->getMessage());
             throw $exception;
         }

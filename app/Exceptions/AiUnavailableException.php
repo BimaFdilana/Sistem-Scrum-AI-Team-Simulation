@@ -16,6 +16,7 @@ class AiUnavailableException extends RuntimeException
     public function __construct(
         public readonly string $errorCode,
         string $message = '',
+        public readonly ?int $retryAfter = null,
     ) {
         parent::__construct($message !== '' ? $message : 'AI unavailable: '.$errorCode);
     }

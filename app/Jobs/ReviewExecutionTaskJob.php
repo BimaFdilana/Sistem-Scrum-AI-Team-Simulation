@@ -25,7 +25,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
     /** Batas revisi QA per task (keputusan Bima). */
     public const MAX_REVISIONS = 2;
 
-    public int $tries = 1;
+    public int $tries = 5;
 
     public int $timeout = 300;
 
@@ -102,6 +102,24 @@ class ReviewExecutionTaskJob implements ShouldQueue
             $task->forceFill(['status' => 'REVISION'])->save();
             ExecuteExecutionTaskJob::dispatch($run->id, $task->id);
         } catch (Throwable $exception) {
+            // Kegagalan AI sementara (mis. RATE_LIMITED seperti eksekusi
+            // US-01 #8) TIDAK boleh membunuh run: lepas kembali job ke
+            // antrean dengan jeda, task tetap IN_REVIEW sehingga guard
+            // percobaan berikutnya lolos. Baru bila percobaan antrean
+            // habis, kegagalan dinyatakan permanen (FAILED).
+            if ($exception instanceof \App\Exceptions\AiUnavailableException
+                && \App\Services\AiGateway::isTransient($exception->errorCode)
+                && $this->attempts() < \App\Services\AiGateway::MAX_QUEUE_ATTEMPTS) {
+                \App\Services\AiGateway::logFailure($this->runId, $this->taskId, 'ReviewExecutionTaskJob', $exception, $this->attempts(), true);
+                $this->release(\App\Services\AiGateway::releaseDelay($this->attempts(), $exception->retryAfter));
+
+                return;
+            }
+            \Illuminate\Support\Facades\Log::error('Execution review failed', [
+                'execution_run_id' => $this->runId,
+                'execution_task_id' => $this->taskId,
+                'error' => $exception->getMessage(),
+            ]);
             $task->forceFill(['status' => 'FAILED'])->save();
             $run->forceFill(['status' => 'FAILED', 'error_code' => 'REVIEW_FAILED', 'completed_at' => now()])->save();
             throw $exception;

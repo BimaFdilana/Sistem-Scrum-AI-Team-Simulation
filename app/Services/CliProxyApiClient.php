@@ -504,18 +504,20 @@ class CliProxyApiClient
         $deadline = microtime(true) + (int) config('ai.cliproxy.chat_deadline', 240);
 
         $lastError = 'UNKNOWN';
+        $lastRetryAfter = null;
         foreach (array_slice($this->fallbackCandidates($model), 0, $maxFallbacks + 1) as $candidate) {
             for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
                 if (microtime(true) >= $deadline) {
-                    return ['text' => null, 'error' => $lastError === 'UNKNOWN' ? 'TIMEOUT' : $lastError, 'model' => null];
+                    return ['text' => null, 'error' => $lastError === 'UNKNOWN' ? 'TIMEOUT' : $lastError, 'model' => null, 'retry_after' => $lastRetryAfter];
                 }
                 $outcome = $this->attemptChat($candidate, $systemPrompt, $userMessage, $timeout, $image);
                 if ($outcome['status'] === 'ok') {
-                    return ['text' => $outcome['text'], 'error' => null, 'model' => $candidate];
+                    return ['text' => $outcome['text'], 'error' => null, 'model' => $candidate, 'retry_after' => null];
                 }
                 $lastError = $outcome['error'];
+                $lastRetryAfter = $outcome['retry_after'] ?? null;
                 if ($outcome['status'] === 'permanent') {
-                    return ['text' => null, 'error' => $lastError, 'model' => null];
+                    return ['text' => null, 'error' => $lastError, 'model' => null, 'retry_after' => $lastRetryAfter];
                 }
                 if ($outcome['status'] === 'not_found') {
                     break; // coba model cadangan berikutnya
@@ -526,16 +528,21 @@ class CliProxyApiClient
             }
         }
 
-        return ['text' => null, 'error' => $lastError, 'model' => null];
+        return ['text' => null, 'error' => $lastError, 'model' => null, 'retry_after' => $lastRetryAfter];
     }
 
-    /**
-     * Satu percobaan chat. Tidak pernah melempar exception.
+        /**
+     * Satu percobaan chat, opsional dengan tool calling terstruktur.
+     * Bila $tools diberikan, respons boleh tanpa teks selama ada
+     * tool_calls yang argumennya JSON valid (terbukti lewat probe
+     * gateway 2026-10-30: gemini-3.1-flash-lite mengembalikan tool_calls
+     * valid). Argumen tool yang bukan JSON valid dilaporkan sebagai
+     * 'malformed' — pemanggil yang memutuskan repair, bukan retry buta.
      *
-     * @param array{data: string, mime: string}|null $image
-     * @return array{status: 'ok'|'transient'|'permanent'|'not_found', text: ?string, error: string}
+     * @param  array<int,array{type:string,function:array{name:string,parameters:array}}>|null  $tools
+     * @return array{status: 'ok'|'transient'|'permanent'|'not_found'|'malformed', text: ?string, error: string, tool_calls: array, usage: array, retry_after: ?int}
      */
-    private function attemptChat(string $model, string $systemPrompt, string $userMessage, int $timeout, ?array $image): array
+    private function attemptChat(string $model, string $systemPrompt, string $userMessage, int $timeout, ?array $image, ?array $tools = null): array
     {
         $userContent = $image !== null
             ? [
@@ -543,29 +550,34 @@ class CliProxyApiClient
                 ['type' => 'image_url', 'image_url' => ['url' => 'data:'.$image['mime'].';base64,'.$image['data']]],
             ]
             : $userMessage;
+        $payload = [
+            'model' => $model,
+            'stream' => false,
+            'messages' => [
+                ['role' => 'system', 'content' => $systemPrompt],
+                ['role' => 'user', 'content' => $userContent],
+            ],
+        ];
+        if ($tools !== null) {
+            $payload['tools'] = $tools;
+            $payload['tool_choice'] = 'auto';
+        }
         try {
             $response = Http::baseUrl($this->baseUrl)->withToken($this->apiKey)
-                ->timeout($timeout)->acceptJson()->post('/v1/chat/completions', [
-                    'model' => $model,
-                    'stream' => false,
-                    'messages' => [
-                        ['role' => 'system', 'content' => $systemPrompt],
-                        ['role' => 'user', 'content' => $userContent],
-                    ],
-                ]);
+                ->timeout($timeout)->acceptJson()->post('/v1/chat/completions', $payload);
         } catch (Throwable $e) {
             // Timeout cURL (28) vs koneksi gagal dibedakan dari pesan exception.
             $error = str_contains(strtolower($e->getMessage()), 'timed out') ? 'TIMEOUT' : 'GATEWAY_UNREACHABLE';
 
-            return ['status' => 'transient', 'text' => null, 'error' => $error];
+            return ['status' => 'transient', 'text' => null, 'error' => $error, 'tool_calls' => [], 'usage' => [], 'retry_after' => null];
         }
 
         $status = $response->status();
         if ($status === 401) {
-            return ['status' => 'permanent', 'text' => null, 'error' => 'AUTH_FAILED'];
+            return ['status' => 'permanent', 'text' => null, 'error' => 'AUTH_FAILED', 'tool_calls' => [], 'usage' => [], 'retry_after' => null];
         }
         if ($status === 404) {
-            return ['status' => 'not_found', 'text' => null, 'error' => 'MODEL_NOT_FOUND'];
+            return ['status' => 'not_found', 'text' => null, 'error' => 'MODEL_NOT_FOUND', 'tool_calls' => [], 'usage' => [], 'retry_after' => null];
         }
         if ($status === 400) {
             // Jangan buang body error upstream: tanpa ini, 400 hanya tampil
@@ -575,26 +587,99 @@ class CliProxyApiClient
             Log::warning('CLIProxyAPI chat 400', ['model' => $model, 'error' => Str::limit($detail, 500)]);
             $lower = strtolower($detail);
             if (str_contains($lower, 'project_id') || str_contains($lower, 'auth missing')) {
-                return ['status' => 'permanent', 'text' => null, 'error' => 'PROVIDER_AUTH_INCOMPLETE'];
+                return ['status' => 'permanent', 'text' => null, 'error' => 'PROVIDER_AUTH_INCOMPLETE', 'tool_calls' => [], 'usage' => [], 'retry_after' => null];
             }
 
-            return ['status' => 'permanent', 'text' => null, 'error' => 'BAD_REQUEST'];
+            return ['status' => 'permanent', 'text' => null, 'error' => 'BAD_REQUEST', 'tool_calls' => [], 'usage' => [], 'retry_after' => null];
         }
         if ($status === 429) {
-            return ['status' => 'transient', 'text' => null, 'error' => 'RATE_LIMITED'];
+            $retryAfter = (int) ($response->header('Retry-After') ?? 0);
+
+            return ['status' => 'transient', 'text' => null, 'error' => 'RATE_LIMITED', 'tool_calls' => [], 'usage' => [], 'retry_after' => $retryAfter > 0 ? min($retryAfter, 300) : null];
         }
         if ($status >= 500) {
-            return ['status' => 'transient', 'text' => null, 'error' => 'UPSTREAM_OVERLOADED'];
+            return ['status' => 'transient', 'text' => null, 'error' => 'UPSTREAM_OVERLOADED', 'tool_calls' => [], 'usage' => [], 'retry_after' => null];
         }
         if (! $response->successful()) {
-            return ['status' => 'transient', 'text' => null, 'error' => 'UPSTREAM_OVERLOADED'];
+            return ['status' => 'transient', 'text' => null, 'error' => 'UPSTREAM_OVERLOADED', 'tool_calls' => [], 'usage' => [], 'retry_after' => null];
+        }
+        $usage = $response->json('usage');
+        $usage = is_array($usage) ? $usage : [];
+        if ($tools !== null) {
+            $rawCalls = $response->json('choices.0.message.tool_calls');
+            $toolCalls = [];
+            if (is_array($rawCalls)) {
+                foreach ($rawCalls as $call) {
+                    $args = $call['function']['arguments'] ?? null;
+                    $decoded = is_string($args) ? json_decode($args, true) : $args;
+                    if (! is_array($decoded)) {
+                        return ['status' => 'malformed', 'text' => null, 'error' => 'MALFORMED_TOOL_CALL', 'tool_calls' => [], 'usage' => $usage, 'retry_after' => null];
+                    }
+                    $toolCalls[] = [
+                        'id' => $call['id'] ?? null,
+                        'name' => $call['function']['name'] ?? null,
+                        'arguments' => $decoded,
+                    ];
+                }
+            }
+            if ($toolCalls !== []) {
+                $content = $response->json('choices.0.message.content');
+
+                return ['status' => 'ok', 'text' => is_string($content) ? trim($content) : null, 'error' => '', 'tool_calls' => $toolCalls, 'usage' => $usage, 'retry_after' => null];
+            }
         }
         $content = $response->json('choices.0.message.content');
         if (! is_string($content) || trim($content) === '') {
-            return ['status' => 'transient', 'text' => null, 'error' => 'EMPTY_RESPONSE'];
+            return ['status' => 'transient', 'text' => null, 'error' => 'EMPTY_RESPONSE', 'tool_calls' => [], 'usage' => $usage, 'retry_after' => null];
         }
 
-        return ['status' => 'ok', 'text' => trim($content), 'error' => ''];
+        return ['status' => 'ok', 'text' => trim($content), 'error' => '', 'tool_calls' => [], 'usage' => $usage, 'retry_after' => null];
+    }
+
+    /**
+     * Chat dengan tool calling terstruktur (satu putaran tool, tanpa
+     * eksekusi tool di sisi client — pemanggil yang mengeksekusi dan
+     * memutuskan langkah berikutnya). Retry hanya untuk kegagalan
+     * transient; jawaban malformed dikembalikan apa adanya agar
+     * pemanggil bisa repair dengan koreksi, bukan mengulang buta.
+     *
+     * @param  array<int,array{type:string,function:array{name:string,parameters:array}}>  $tools
+     * @return array{tool_calls: array, text: ?string, error: ?string, model: ?string, usage: array, retry_after: ?int}
+     */
+    public function chatWithTools(string $model, string $systemPrompt, string $userMessage, array $tools, int $timeout = 120): array
+    {
+        if (! $this->agentsEnabled() || ! $this->apiKey) {
+            return ['tool_calls' => [], 'text' => null, 'error' => 'DISABLED', 'model' => null, 'usage' => [], 'retry_after' => null];
+        }
+        $maxAttempts = max(1, (int) config('ai.cliproxy.chat_attempts', 3));
+        $maxFallbacks = max(0, (int) config('ai.cliproxy.chat_fallbacks', 2));
+        $deadline = microtime(true) + (int) config('ai.cliproxy.chat_deadline', 240);
+        $lastError = 'UNKNOWN';
+        $lastRetryAfter = null;
+        foreach (array_slice($this->fallbackCandidates($model), 0, $maxFallbacks + 1) as $candidate) {
+            for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+                if (microtime(true) >= $deadline) {
+                    return ['tool_calls' => [], 'text' => null, 'error' => $lastError === 'UNKNOWN' ? 'TIMEOUT' : $lastError, 'model' => null, 'usage' => [], 'retry_after' => $lastRetryAfter];
+                }
+                $outcome = $this->attemptChat($candidate, $systemPrompt, $userMessage, $timeout, null, $tools);
+                if ($outcome['status'] === 'ok') {
+                    return ['tool_calls' => $outcome['tool_calls'], 'text' => $outcome['text'], 'error' => null, 'model' => $candidate, 'usage' => $outcome['usage'], 'retry_after' => null];
+                }
+                $lastError = $outcome['error'];
+                $lastRetryAfter = $outcome['retry_after'];
+                if (in_array($outcome['status'], ['permanent', 'malformed'], true)) {
+                    return ['tool_calls' => [], 'text' => null, 'error' => $lastError, 'model' => null, 'usage' => $outcome['usage'], 'retry_after' => $lastRetryAfter];
+                }
+                if ($outcome['status'] === 'not_found') {
+                    break;
+                }
+                if ($attempt < $maxAttempts) {
+                    sleep((int) min(max($outcome['retry_after'] ?? 0, 2 ** ($attempt - 1)), 60));
+                }
+            }
+        }
+
+        return ['tool_calls' => [], 'text' => null, 'error' => $lastError, 'model' => null, 'usage' => [], 'retry_after' => $lastRetryAfter];
     }
 
     /**
