@@ -15,7 +15,7 @@
             } catch (e) {}
         })();
     </script>
-    <link rel="stylesheet" href="{{ asset('css/workspace.css') }}">
+    <link rel="stylesheet" href="{{ asset('css/workspace.css') }}?v=2">
 </head>
 <body class="login-body">
     <main class="login-layout">
@@ -54,11 +54,11 @@
                     @error('email')<small class="field-error">{{ $message }}</small>@enderror
 
                     <div class="password-label"><label for="password">Kata sandi</label><span>Login privat</span></div>
-                    <div class="password-field">
-                        <input id="password" name="password" type="password" autocomplete="current-password" required placeholder="Masukkan kata sandi">
-                        <button type="button" class="password-toggle" data-password-toggle aria-label="Tampilkan kata sandi" aria-pressed="false" title="Tampilkan kata sandi">
-                            <svg class="icon-eye" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.036 12.322a1.012 1.012 0 0 1 0-1.042C3.423 7.51 7.254 4.5 12 4.5c4.746 0 8.577 3.01 9.964 6.822a1.012 1.012 0 0 1 0 1.042C20.577 16.49 16.746 19.5 12 19.5c-4.746 0-8.577-3.01-9.964-6.822Z"/><circle cx="12" cy="12" r="3"/></svg>
-                            <svg class="icon-eye-off icon-hidden" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.036 12.322a1.012 1.012 0 0 1 0-1.042C3.423 7.51 7.254 4.5 12 4.5c4.746 0 8.577 3.01 9.964 6.822a1.012 1.012 0 0 1 0 1.042C20.577 16.49 16.746 19.5 12 19.5c-4.746 0-8.577-3.01-9.964-6.822Z"/><circle cx="12" cy="12" r="3"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
+                    <div class="password-field" style="position:relative">
+                        <input id="password" name="password" type="password" autocomplete="current-password" required placeholder="Masukkan kata sandi" style="padding-right:44px">
+                        <button type="button" class="password-toggle" data-password-toggle aria-label="Tampilkan kata sandi" aria-pressed="false" title="Tampilkan kata sandi" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);width:32px;height:32px;display:grid;place-items:center;padding:0;border:1px solid transparent;border-radius:7px;background:transparent;color:#9aa9ad;cursor:pointer">
+                            <svg class="icon-eye" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;display:block"><path d="M2.036 12.322a1.012 1.012 0 0 1 0-1.042C3.423 7.51 7.254 4.5 12 4.5c4.746 0 8.577 3.01 9.964 6.822a1.012 1.012 0 0 1 0 1.042C20.577 16.49 16.746 19.5 12 19.5c-4.746 0-8.577-3.01-9.964-6.822Z"/><circle cx="12" cy="12" r="3"/></svg>
+                            <svg class="icon-eye-off icon-hidden" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;display:none"><path d="M2.036 12.322a1.012 1.012 0 0 1 0-1.042C3.423 7.51 7.254 4.5 12 4.5c4.746 0 8.577 3.01 9.964 6.822a1.012 1.012 0 0 1 0 1.042C20.577 16.49 16.746 19.5 12 19.5c-4.746 0-8.577-3.01-9.964-6.822Z"/><circle cx="12" cy="12" r="3"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
                         </button>
                     </div>
                     @error('password')<small class="field-error">{{ $message }}</small>@enderror
@@ -84,6 +84,8 @@
                 btn.setAttribute('title', show ? 'Sembunyikan kata sandi' : 'Tampilkan kata sandi');
                 btn.querySelector('.icon-eye').classList.toggle('icon-hidden', show);
                 btn.querySelector('.icon-eye-off').classList.toggle('icon-hidden', !show);
+                btn.querySelector('.icon-eye').style.display = show ? 'none' : 'block';
+                btn.querySelector('.icon-eye-off').style.display = show ? 'block' : 'none';
                 input.focus();
             });
         })();
