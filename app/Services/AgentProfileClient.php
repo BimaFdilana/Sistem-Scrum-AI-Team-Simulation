@@ -42,7 +42,16 @@ class AgentProfileClient
         }
     }
 
-    public function sendMessage(string $slug, string $message, string $conversationId): string
+    /**
+     * Kirim pesan ke agent peran. $applyDisclosureFilter=false hanya untuk
+     * data terstruktur internal antar-agent (mis. vote estimasi): sensor
+     * chat dirancang untuk jawaban ke pengguna yang meminta detail server,
+     * dan bila diterapkan ke vote, satu kata sensitif di rationale (mis.
+     * "server") akan mengganti SELURUH jawaban menjadi kalimat penolakan
+     * sehingga vote gagal validasi — persis yang terjadi pada QA di
+     * estimasi US-01 (Run #5). Chat ke pengguna tetap memakai filter.
+     */
+    public function sendMessage(string $slug, string $message, string $conversationId, bool $applyDisclosureFilter = true): string
     {
         $agent = collect(config('agents.profiles'))->firstWhere('slug', $slug);
 
@@ -71,9 +80,11 @@ class AgentProfileClient
                 throw new \App\Exceptions\AiUnavailableException($result['error'] ?? 'UNKNOWN');
             }
 
-            return app(ChatDisclosurePolicy::class)->containsSensitiveDisclosure($result['text'])
-                ? ChatDisclosurePolicy::SAFE_RESPONSE
-                : $result['text'];
+            if ($applyDisclosureFilter && app(ChatDisclosurePolicy::class)->containsSensitiveDisclosure($result['text'])) {
+                return ChatDisclosurePolicy::SAFE_RESPONSE;
+            }
+
+            return $result['text'];
         }
 
         return app(AgentConsultationDispatcher::class)->send($slug, $message, $conversationId, $systemPrompt);
