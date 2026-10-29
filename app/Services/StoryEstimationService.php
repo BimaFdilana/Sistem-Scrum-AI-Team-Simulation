@@ -195,6 +195,9 @@ class StoryEstimationService
         Log::warning('Story estimation vote failed validation', [
             'run_id' => $run->id, 'profile_slug' => $slug, 'round' => $round,
             'error_code' => $this->failureCode($exception, $run),
+            // Kategori pola yang cocok dicatat (bukan teksnya) agar
+            // diagnosis berikutnya tepat tanpa membuka nilai secret.
+            'matched_categories' => $this->disclosure->matchedSecretCategories($excerpt),
             'raw_excerpt' => $this->disclosure->containsStructuredEvidenceSecret($excerpt)
                 ? '[redacted: possible secret]'
                 : $excerpt,

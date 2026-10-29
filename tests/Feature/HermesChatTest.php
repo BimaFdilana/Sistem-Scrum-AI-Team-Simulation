@@ -193,7 +193,7 @@ class HermesChatTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_chat_replaces_a_model_reply_that_contains_a_server_path(): void
+    public function test_chat_replaces_a_model_reply_that_contains_a_platform_path(): void
     {
         config([
             'services.hermes.base_url' => 'http://127.0.0.1:8643/v1',
@@ -201,9 +201,14 @@ class HermesChatTest extends TestCase
             'services.hermes.model' => 'scrumagent',
         ]);
 
+        // Aturan baru (PO 2026-10-29): yang diganti hanyalah NILAI
+        // kebocoran platform — path source platform — bukan path biasa
+        // atau kata "server". Path project PO justru boleh tampil.
+        $platformPath = app()->basePath().'/app/Services/ChatDisclosurePolicy.php';
+
         Http::fake([
             'http://127.0.0.1:8643/v1/chat/completions' => Http::response([
-                'choices' => [['message' => ['role' => 'assistant', 'content' => 'Project berada di /home/sipua/private/project.']]],
+                'choices' => [['message' => ['role' => 'assistant', 'content' => 'Project berada di '.$platformPath.'.']]],
             ]),
         ]);
 
@@ -211,7 +216,7 @@ class HermesChatTest extends TestCase
             ->postJson('/chat/messages', ['message' => 'Bantu saya merencanakan backlog.'])
             ->assertOk()
             ->assertJsonPath('assistant_message.content', 'Maaf, saya tidak dapat memberikan direktori, file, konfigurasi, kredensial, atau detail internal server. Saya bisa membantu kebutuhan produk dan workflow Scrum.')
-            ->assertDontSee('/home/sipua/private/project');
+            ->assertDontSee('ChatDisclosurePolicy.php');
     }
 
     public function test_chat_and_dashboard_use_ai_agent_branding_instead_of_runtime_branding(): void

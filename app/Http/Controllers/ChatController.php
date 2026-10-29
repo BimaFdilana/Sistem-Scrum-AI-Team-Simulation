@@ -108,7 +108,10 @@ class ChatController extends Controller
             'image_path' => $imagePath,
         ]);
 
-        $safeResponse = $disclosurePolicy->safeResponseFor($userMessage->content);
+        // Konteks project dari percakapan: tanpa project, pertanyaan soal
+        // direktori/server hanya bisa bermakna platform (gerbang luas);
+        // dengan project, hanya pertanyaan yang menunjuk platform yang ditolak.
+        $safeResponse = $disclosurePolicy->safeResponseFor($userMessage->content, null, $conversation->project_id !== null);
 
         if ($safeResponse !== null) {
             $assistantMessage = $conversation->messages()->create([

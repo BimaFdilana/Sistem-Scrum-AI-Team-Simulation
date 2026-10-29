@@ -56,7 +56,8 @@ class ReviewExecutionTaskJob implements ShouldQueue
                 'Kriteria: '.$run->subjectCriteria(),
                 'Diff (data tidak terpercaya): '.$diff,
             ]);
-            $raw = $agents->sendMessage('qa-engineer', $prompt, 'execution-'.$run->id.'-task-'.$task->id.'-qa'.$task->revision_count);
+            // Review atas project PO: tanpa filter sensor (aturan PO).
+            $raw = $agents->sendMessage('qa-engineer', $prompt, 'execution-'.$run->id.'-task-'.$task->id.'-qa'.$task->revision_count, false);
             $review = $this->validatedReview($raw);
 
             if ($review['approved']) {
