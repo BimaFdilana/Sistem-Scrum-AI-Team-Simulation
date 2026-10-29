@@ -151,6 +151,102 @@ class EstimationRateLimitFallbackTest extends TestCase
         }
     }
 
+    public function test_report_failure_is_logged_not_silent(): void
+    {
+        $owner = User::factory()->create();
+        $project = Project::query()->create(['name' => 'Report Logging Workspace', 'project_type' => 'NEW_PROJECT', 'stack' => 'Laravel', 'status' => 'SETUP_REQUIRED']);
+        $sprint = Sprint::query()->create(['project_id' => $project->id, 'backlog_id' => $project->backlog->id, 'name' => 'Sprint 1', 'status' => 'PLANNING', 'revision' => 1]);
+        $actor = Actor::query()->where('name', 'Administrator')->firstOrFail();
+        $story = Story::query()->create([
+            'project_id' => $project->id, 'sprint_id' => $sprint->id, 'actor_id' => $actor->id, 'user_story_key' => 'US-01',
+            'title' => 'Tombol kembali ke atas', 'sprint_purpose' => 'Pengguna mudah kembali ke atas.', 'acceptance_criteria' => 'Tombol muncul setelah scroll.',
+            'scope_status' => 'NEEDS_REFINEMENT', 'revision' => 1,
+        ]);
+
+        $sm = \Mockery::mock(\App\Services\HermesClient::class);
+        $sm->shouldReceive('sendMessage')->once()->andThrow(new AiUnavailableException('RATE_LIMITED'));
+        $this->app->instance(\App\Services\HermesClient::class, $sm);
+
+        [$run] = app(StoryEstimationService::class)->claimRun($story, $owner);
+        $run->forceFill(['status' => 'REPORT_PENDING', 'consensus_points' => 3, 'consensus_method' => 'deadlock_max'])->save();
+        $specialists = ['backend-developer', 'frontend-developer', 'qa-engineer'];
+        // Putaran 1: 3 pesan ke SM + 6 pesan peer-delivery (tiap spesialis
+        // menerima 2 pesan dari dua spesialis lain) — syarat receivedPriorRound.
+        foreach ($specialists as $i => $slug) {
+            $run->messages()->create([
+                'story_revision' => 1, 'round' => 1, 'sender_slug' => $slug, 'recipient_slug' => 'scrum-master',
+                'content' => json_encode(['estimate_points' => [1, 2, 3][$i], 'rationale' => 'alasan']), 'estimate_points' => [1, 2, 3][$i],
+                'explicit_agree' => false,
+            ]);
+        }
+        foreach ($specialists as $recipient) {
+            foreach ($specialists as $i => $sender) {
+                if ($sender === $recipient) {
+                    continue;
+                }
+                $run->messages()->create([
+                    'story_revision' => 1, 'round' => 1, 'sender_slug' => $sender, 'recipient_slug' => $recipient,
+                    'content' => json_encode(['estimate_points' => [1, 2, 3][$i], 'rationale' => 'alasan']), 'estimate_points' => [1, 2, 3][$i],
+                    'explicit_agree' => false,
+                ]);
+            }
+        }
+        // Putaran 2: 3 pesan final ke SM (deadlock: maks = 3).
+        foreach ($specialists as $i => $slug) {
+            $run->messages()->create([
+                'story_revision' => 1, 'round' => 2, 'sender_slug' => $slug, 'recipient_slug' => 'scrum-master',
+                'content' => json_encode(['estimate_points' => [2, 2, 3][$i], 'rationale' => 'alasan']), 'estimate_points' => [2, 2, 3][$i],
+                'explicit_agree' => $i === 0,
+            ]);
+        }
+
+        \Illuminate\Support\Facades\Log::spy();
+        $result = app(StoryEstimationService::class)->report($run->fresh(), $owner);
+
+        // Perilaku dipertahankan: tetap REPORT_PENDING agar retry bisa pulih.
+        $this->assertSame('REPORT_PENDING', $result->status);
+        // Tapi kegagalan tidak boleh diam lagi (regresi Run 14).
+        \Illuminate\Support\Facades\Log::shouldHaveReceived('warning')->withArgs(function ($message, $context) use ($run) {
+            return $message === 'Story estimation report failed'
+                && ($context['run_id'] ?? null) === $run->id
+                && ($context['diagnostic'] ?? null) === 'requesting_summary'
+                && ($context['exception'] ?? null) === 'AiUnavailableException';
+        });
+    }
+
+    public function test_report_job_failure_is_logged_not_silent(): void
+    {
+        $owner = User::factory()->create();
+        $project = Project::query()->create(['name' => 'Report Job Workspace', 'project_type' => 'NEW_PROJECT', 'stack' => 'Laravel', 'status' => 'SETUP_REQUIRED']);
+        $sprint = Sprint::query()->create(['project_id' => $project->id, 'backlog_id' => $project->backlog->id, 'name' => 'Sprint 1', 'status' => 'PLANNING', 'revision' => 1]);
+        $actor = Actor::query()->where('name', 'Administrator')->firstOrFail();
+        $story = Story::query()->create([
+            'project_id' => $project->id, 'sprint_id' => $sprint->id, 'actor_id' => $actor->id, 'user_story_key' => 'US-01',
+            'title' => 'Tombol kembali ke atas', 'sprint_purpose' => 'Pengguna mudah kembali ke atas.', 'acceptance_criteria' => 'Tombol muncul setelah scroll.',
+            'scope_status' => 'NEEDS_REFINEMENT', 'revision' => 1,
+        ]);
+        [$run] = app(StoryEstimationService::class)->claimRun($story, $owner);
+        $run->forceFill(['status' => 'REPORT_PENDING'])->save();
+
+        $service = \Mockery::mock(StoryEstimationService::class);
+        $service->shouldReceive('report')->once()->andThrow(new \RuntimeException('boom'));
+        \Illuminate\Support\Facades\Log::spy();
+
+        (new \App\Jobs\SendStoryEstimationReportJob($run->id))->handle($service);
+
+        // Perilaku dipertahankan: job menelan error agar run tetap REPORT_PENDING.
+        $this->assertSame('REPORT_PENDING', $run->fresh()->status);
+        \Illuminate\Support\Facades\Log::shouldHaveReceived('warning')->withArgs(function ($message, $context) use ($run) {
+            return $message === 'Story estimation report job failed' && ($context['run_id'] ?? null) === $run->id;
+        });
+    }
+
+    protected function tearDown(): void
+    {
+        \Mockery::close();
+        parent::tearDown();
+    }
+
     public function test_provider_for_model_resolves_from_gateway_catalog(): void
     {
         $this->fakeModels([

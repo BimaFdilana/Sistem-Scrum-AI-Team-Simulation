@@ -433,8 +433,12 @@ class StoryEstimationService
             return $this->finish($run, 'STALE');
         }
 
+        // Penanda diagnosis: di mana tepatnya laporan jatuh, karena catch
+        // di bawah menelan exception (kasus Run 14: job DONE tanpa jejak).
+        // Hanya panjang + alasan penolakan yang dicatat, bukan isi ringkasan.
+        $diagnostic = 'not_started';
         try {
-            DB::transaction(function () use ($run, $requester): void {
+            DB::transaction(function () use ($run, $requester, &$diagnostic): void {
                 $locked = StoryEstimationRun::query()->lockForUpdate()->findOrFail($run->id);
                 $story = Story::query()->lockForUpdate()->findOrFail($locked->story_id);
                 $sprint = $story->sprint_id === null ? null : $story->sprint()->lockForUpdate()->first();
@@ -481,10 +485,26 @@ class StoryEstimationService
                     ."\nCara hasil dicapai: ".$methodText
                     ."\nEstimasi final tiap spesialis: ".$finalVotes
                     ."\nTranskrip: ".json_encode($transcript, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                $diagnostic = 'requesting_summary';
                 $summary = trim($this->scrumMaster->sendMessage($prompt, $conversation->uuid));
+                $diagnostic = 'summary_received:'.mb_strlen($summary);
                 if ($summary === '' || mb_strlen($summary) > 6000
                     || $summary === ChatDisclosurePolicy::SAFE_RESPONSE
                     || $this->disclosure->containsSensitiveDisclosure($summary)) {
+                    $reasons = [];
+                    if ($summary === '') {
+                        $reasons[] = 'empty';
+                    }
+                    if (mb_strlen($summary) > 6000) {
+                        $reasons[] = 'too_long';
+                    }
+                    if ($summary === ChatDisclosurePolicy::SAFE_RESPONSE) {
+                        $reasons[] = 'safe_response';
+                    }
+                    if ($this->disclosure->containsSensitiveDisclosure($summary)) {
+                        $reasons[] = 'sensitive_disclosure';
+                    }
+                    $diagnostic = 'summary_rejected:'.implode(',', $reasons);
                     throw new RuntimeException('Invalid Scrum Master report.');
                 }
                 if (! $this->current($locked) || $sprint->fresh()?->status !== 'PLANNING') {
@@ -493,6 +513,7 @@ class StoryEstimationService
                 $methodLabel = $locked->consensus_method === 'deadlock_max'
                     ? 'Deadlock — Scrum Master menerapkan maksimum'
                     : 'Mufakat bulat tim';
+                $diagnostic = 'saving';
                 $conversation->messages()->create([
                     'role' => 'assistant',
                     'content' => 'Refinement Fibonacci — '.$snapshot['story_id'].' · revisi '.$snapshot['revision']
@@ -521,8 +542,16 @@ class StoryEstimationService
                     'report_sent_at' => now(), 'completed_at' => now(),
                 ])->save();
             });
-        } catch (Throwable) {
+        } catch (Throwable $exception) {
             // The consensus and all messages predate this transaction and survive rollback.
+            // Kegagalan TIDAK BOLEH diam: catat tahap + exception agar retry
+            // berikutnya bisa dibedakan dari kegagalan AI vs validasi vs simpan.
+            Log::warning('Story estimation report failed', [
+                'run_id' => $run->id, 'story_id' => $run->story_id,
+                'diagnostic' => $diagnostic,
+                'exception' => class_basename($exception),
+                'message' => Str::limit($exception->getMessage(), 500),
+            ]);
             if (! $this->current($run)) {
                 return $this->finish($run, 'STALE');
             }

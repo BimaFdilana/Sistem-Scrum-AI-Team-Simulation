@@ -9,6 +9,8 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Throwable;
 
 class SendStoryEstimationReportJob implements ShouldQueue
@@ -30,13 +32,26 @@ class SendStoryEstimationReportJob implements ShouldQueue
 
         try {
             $estimator->report($run, $run->requester);
-        } catch (Throwable) {
-            // Keep REPORT_PENDING so the existing report retry action can recover safely.
+        } catch (Throwable $exception) {
+            // Keep REPORT_PENDING so the existing report retry action can recover safely —
+            // tapi kegagalan TIDAK BOLEH diam lagi (kasus Run 14: job DONE
+            // tanpa jejak apa pun). Catat penyebabnya agar diagnosis berikutnya
+            // tidak menebak-nebak.
+            Log::warning('Story estimation report job failed', [
+                'run_id' => $this->runId,
+                'exception' => class_basename($exception),
+                'message' => Str::limit($exception->getMessage(), 500),
+            ]);
         }
     }
 
     public function failed(?Throwable $exception): void
     {
         // REPORT_PENDING is intentionally preserved for explicit report retry.
+        Log::error('Story estimation report job exhausted', [
+            'run_id' => $this->runId,
+            'exception' => $exception !== null ? class_basename($exception) : null,
+            'message' => $exception !== null ? Str::limit($exception->getMessage(), 500) : null,
+        ]);
     }
 }
