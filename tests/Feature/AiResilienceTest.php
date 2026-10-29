@@ -88,6 +88,26 @@ class AiResilienceTest extends TestCase
         $this->assertSame(1, $calls);
     }
 
+    public function test_antigravity_missing_project_id_is_reported_as_incomplete_provider_auth(): void
+    {
+        $this->fakeModels(['gemini-3.5-flash-lite']);
+        $calls = 0;
+        Http::fake(function (Request $request) use (&$calls) {
+            if (str_ends_with($request->url(), '/v1/models')) {
+                return Http::response(['data' => [['id' => 'gemini-3.5-flash-lite', 'owned_by' => 'antigravity']]]);
+            }
+            $calls++;
+
+            return Http::response(['error' => ['message' => 'antigravity auth missing project_id: no project_id in response', 'type' => 'invalid_request_error']], 400);
+        });
+
+        $result = app(CliProxyApiClient::class)->chatResilient('gemini-3.5-flash-lite', 'sys', 'halo');
+
+        $this->assertNull($result['text']);
+        $this->assertSame('PROVIDER_AUTH_INCOMPLETE', $result['error']);
+        $this->assertSame(1, $calls);
+    }
+
     public function test_falls_back_to_same_provider_model_on_404(): void
     {
         $this->fakeModels(['gpt-a', 'gpt-b']);

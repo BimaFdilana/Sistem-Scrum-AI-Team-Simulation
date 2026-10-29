@@ -8,7 +8,8 @@ use RuntimeException;
  * AI tidak dapat memenuhi permintaan setelah upaya terbaik (retry + fallback).
  * $errorCode membedakan penyebabnya agar pesan ke pengguna spesifik:
  * UPSTREAM_OVERLOADED | RATE_LIMITED | TIMEOUT | GATEWAY_UNREACHABLE |
- * AUTH_FAILED | MODEL_NOT_FOUND | BAD_REQUEST | EMPTY_RESPONSE | DISABLED
+ * AUTH_FAILED | MODEL_NOT_FOUND | BAD_REQUEST | EMPTY_RESPONSE | DISABLED |
+ * PROVIDER_AUTH_INCOMPLETE
  */
 class AiUnavailableException extends RuntimeException
 {

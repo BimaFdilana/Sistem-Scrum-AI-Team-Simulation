@@ -4,6 +4,8 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Throwable;
 
 /**
@@ -566,6 +568,16 @@ class CliProxyApiClient
             return ['status' => 'not_found', 'text' => null, 'error' => 'MODEL_NOT_FOUND'];
         }
         if ($status === 400) {
+            // Jangan buang body error upstream: tanpa ini, 400 hanya tampil
+            // sebagai "permintaan tidak valid" dan penyebab aslinya (mis.
+            // auth provider yang kehilangan project_id) tidak terlacak.
+            $detail = (string) ($response->json('error.message') ?? $response->body() ?? '');
+            Log::warning('CLIProxyAPI chat 400', ['model' => $model, 'error' => Str::limit($detail, 500)]);
+            $lower = strtolower($detail);
+            if (str_contains($lower, 'project_id') || str_contains($lower, 'auth missing')) {
+                return ['status' => 'permanent', 'text' => null, 'error' => 'PROVIDER_AUTH_INCOMPLETE'];
+            }
+
             return ['status' => 'permanent', 'text' => null, 'error' => 'BAD_REQUEST'];
         }
         if ($status === 429) {
