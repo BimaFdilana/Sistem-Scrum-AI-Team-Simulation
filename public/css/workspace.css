@@ -11,3 +11,10 @@
 .password-toggle:focus-visible{outline:2px solid rgba(var(--accent-rgb),.6);outline-offset:1px}
 .password-toggle svg{width:18px;height:18px;display:block}
 .password-toggle .icon-hidden{display:none}
+.form-panel{padding:23px;border:1px solid var(--line);border-radius:14px;background:rgba(var(--overlay),.018)}
+.form-field{display:grid;gap:7px;margin-bottom:17px}
+.form-field>label{color:var(--text);font-size:12px;font-weight:600}
+.form-field input,.form-field select,.form-field textarea{width:100%;padding:11px 12px;border:1px solid var(--line-strong);border-radius:8px;outline:none;background:var(--input-bg);color:var(--text);font:inherit;font-size:12px}
+.form-field input:focus,.form-field select:focus,.form-field textarea:focus{border-color:rgba(var(--accent-rgb),.55);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.08)}
+.form-field input[type=file]{padding:9px;color:var(--muted)}
+.form-hint{color:var(--muted);font-size:10px;line-height:1.6}

@@ -263,4 +263,14 @@ class ApiKeyManagementTest extends TestCase
         $response->assertSee('id="tab-panel-api-keys" class="tab-panel is-active"', false);
         $response->assertDontSee('id="tab-panel-providers" class="tab-panel is-active"');
     }
+
+    public function test_form_field_styles_exist_in_workspace_css(): void
+    {
+        $css = file_get_contents(public_path('css/workspace.css'));
+
+        $this->assertStringContainsString('.form-panel{', $css);
+        $this->assertStringContainsString('.form-field{', $css);
+        $this->assertStringContainsString('.form-field input,.form-field select,.form-field textarea{', $css);
+        $this->assertStringContainsString('.form-hint{', $css);
+    }
 }
