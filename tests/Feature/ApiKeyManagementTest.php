@@ -79,6 +79,29 @@ class ApiKeyManagementTest extends TestCase
         });
     }
 
+    public function test_store_account_sends_unescaped_slashes_to_gateway(): void
+    {
+        // Gateway menolak body JSON yang mengandung \/ dengan 400
+        // invalid_body (terbukti pada gateway 8.0.47 lokal) — jadi body PUT
+        // harus memakai slash mentah, bukan hasil json_encode default PHP.
+        $this->fakePage(['openai-compatibility' => []]);
+
+        $this->actingAs(User::factory()->create())
+            ->post('/ai-providers/api-keys', [
+                'provider' => 'openai-compatibility',
+                'group' => 'agg-1',
+                'api_key' => 'test-key-12345678',
+                'base_url' => 'https://example.com/v1',
+                'models_text' => "kimi-k3\n",
+            ]);
+
+        Http::assertSent(function ($request) {
+            return $request->method() === 'PUT'
+                && str_contains($request->body(), 'https://example.com/v1')
+                && ! str_contains($request->body(), 'https:\/\/');
+        });
+    }
+
     public function test_store_account_for_custom_provider_requires_base_url_and_model(): void
     {
         $this->fakePage([]);

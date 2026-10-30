@@ -943,7 +943,15 @@ class CliProxyApiClient
         }
 
         try {
-            $response = $this->managementV8()->put("/config/api-keys/{$provider}", array_values($groups));
+            // JANGAN kirim lewat ->put($url, $data): klien HTTP Laravel
+            // meng-encode array dengan json_encode default, yang meng-escape
+            // slash (\/) — dan gateway menolak body seperti itu dengan 400
+            // invalid_body (terbukti 2026-10-31 pada gateway 8.0.47 lokal:
+            // body yang sama lolos dengan slash mentah, ditolak begitu slash
+            // di-escape). Encode eksplisit dengan JSON_UNESCAPED_SLASHES.
+            $response = $this->managementV8()
+                ->withBody(self::encodeApiKeyGroups($groups), 'application/json')
+                ->put("/config/api-keys/{$provider}");
 
             if ($response->successful()) {
                 $this->forgetModelsCache();
@@ -1017,6 +1025,17 @@ class CliProxyApiClient
             ->withToken($this->managementKey)
             ->timeout($this->timeout)
             ->acceptJson();
+    }
+
+    /**
+     * Encode daftar grup api-keys untuk PUT management gateway.
+     * Harus JSON_UNESCAPED_SLASHES: gateway menolak body yang mengandung
+     * slash ter-escape (\/) dengan 400 invalid_body. Publik agar bisa
+     * diuji langsung tanpa HTTP.
+     */
+    public static function encodeApiKeyGroups(array $groups): string
+    {
+        return (string) json_encode(array_values($groups), JSON_UNESCAPED_SLASHES);
     }
 
     protected function management()
