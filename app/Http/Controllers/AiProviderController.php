@@ -261,6 +261,9 @@ class AiProviderController extends Controller
     /** Tambah satu akun (grup) API key baru untuk satu provider. */
     public function storeApiKeyAccount(Request $request, CliProxyApiClient $client): RedirectResponse
     {
+        // Setelah aksi ini, halaman kembali membuka tab API Key.
+        session()->flash('api_keys_tab', true);
+
         $validator = Validator::make($request->all(), [
             'provider' => ['required', 'string', Rule::in(array_keys(self::API_KEY_PROVIDERS))],
             'group' => ['required', 'string', 'max:64', 'regex:/^[a-z0-9][a-z0-9_-]*$/'],
@@ -329,6 +332,9 @@ class AiProviderController extends Controller
     {
         abort_unless(isset(self::API_KEY_PROVIDERS[$provider]), 404);
 
+        // Setelah aksi ini, halaman kembali membuka tab API Key.
+        session()->flash('api_keys_tab', true);
+
         $validator = Validator::make($request->all(), [
             'api_key' => ['required', 'string', 'min:8', 'max:500'],
         ]);
@@ -373,6 +379,9 @@ class AiProviderController extends Controller
     public function destroyApiKey(string $provider, string $group, int $index, CliProxyApiClient $client): RedirectResponse
     {
         abort_unless(isset(self::API_KEY_PROVIDERS[$provider]), 404);
+
+        // Setelah aksi ini, halaman kembali membuka tab API Key.
+        session()->flash('api_keys_tab', true);
 
         $groups = $client->apiKeyGroups();
 
@@ -419,6 +428,9 @@ class AiProviderController extends Controller
     public function destroyApiKeyAccount(string $provider, string $group, CliProxyApiClient $client): RedirectResponse
     {
         abort_unless(isset(self::API_KEY_PROVIDERS[$provider]), 404);
+
+        // Setelah aksi ini, halaman kembali membuka tab API Key.
+        session()->flash('api_keys_tab', true);
 
         $groups = $client->apiKeyGroups();
 

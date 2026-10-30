@@ -227,4 +227,40 @@ class ApiKeyManagementTest extends TestCase
             return $request->method() === 'PUT';
         });
     }
+
+    public function test_tabs_render_with_provider_tab_active_by_default(): void
+    {
+        $this->fakePage(['gemini' => []]);
+
+        $response = $this->actingAs(User::factory()->create())->get('/ai-providers');
+
+        $response->assertOk();
+        $response->assertSee('data-tab-target="providers"', false);
+        $response->assertSee('data-tab-target="api-keys"', false);
+        $response->assertSee('id="tab-panel-providers" class="tab-panel is-active"', false);
+        $response->assertDontSee('id="tab-panel-api-keys" class="tab-panel is-active"');
+    }
+
+    public function test_api_key_action_redirect_opens_api_key_tab(): void
+    {
+        $this->fakePage(['gemini' => []]);
+
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user)->post('/ai-providers/api-keys', [
+            'provider' => 'gemini',
+            'group' => 'gemini-utama',
+            'api_key' => 'test-key-12345678',
+        ]);
+
+        $response->assertSessionHas('api_keys_tab', true);
+
+        $response = $this->actingAs($user)
+            ->withSession(['api_keys_tab' => true])
+            ->get('/ai-providers');
+
+        $response->assertOk();
+        $response->assertSee('id="tab-panel-api-keys" class="tab-panel is-active"', false);
+        $response->assertDontSee('id="tab-panel-providers" class="tab-panel is-active"');
+    }
 }
