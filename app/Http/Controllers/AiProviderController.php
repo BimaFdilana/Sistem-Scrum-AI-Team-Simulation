@@ -19,9 +19,43 @@ class AiProviderController extends Controller
             'providers' => $status->providers(),
             'gatewayUp' => $gatewayUp,
             'managementUp' => $managementUp,
-            'usage' => \App\Services\AiUsageRecorder::summary(30),
+            'usage' => $this->usageByProviderCard(),
             'activePage' => 'ai-providers',
         ]);
+    }
+
+    /**
+     * Pemakaian token 30 hari terakhir, dikelompokkan per kartu provider
+     * (bukan panel terpisah): label pemakaian dari AiUsageRecorder
+     * dipetakan ke slug kartu OAuth. Label tanpa kartu (mis. provider
+     * API-key baru seperti Mimo, atau 'Lainnya') dikembalikan di 'other'
+     * agar tidak ada data yang hilang dari halaman.
+     *
+     * @return array{by_slug: array<string, array{total:int, calls:int, models: array<int, array{model:string, total:int, calls:int}>}>, other: array<int, array{provider:string, total:int, calls:int}>, grand_total:int}
+     */
+    private function usageByProviderCard(): array
+    {
+        $summary = \App\Services\AiUsageRecorder::summary(30);
+        $labelToSlug = ['Google' => 'antigravity', 'OpenAI' => 'codex', 'Anthropic' => 'anthropic'];
+        $bySlug = [];
+        $other = [];
+        foreach ($summary['providers'] as $row) {
+            $slug = $labelToSlug[$row['provider']] ?? null;
+            if ($slug !== null) {
+                $bySlug[$slug] = [
+                    'total' => $row['total'],
+                    'calls' => $row['calls'],
+                    'models' => array_values(array_filter(
+                        $summary['models'],
+                        fn ($model) => $model['provider'] === $row['provider']
+                    )),
+                ];
+            } else {
+                $other[] = $row;
+            }
+        }
+
+        return ['by_slug' => $bySlug, 'other' => $other, 'grand_total' => $summary['grand_total']];
     }
 
     public function connect(string $provider, CliProxyApiClient $client): View|RedirectResponse

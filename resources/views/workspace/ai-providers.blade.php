@@ -30,33 +30,15 @@
         </div>
     </section>
 
-    <section class="empty-panel">
-        <div class="panel-heading"><div><p class="section-kicker">PEMAKAIAN TOKEN</p><h2>Limit / kredit / token yang terpakai (30 hari terakhir)</h2></div><span class="soft-badge">{{ number_format($usage['grand_total']) }} token</span></div>
-        <p style="margin-top:0">Gateway tidak menyediakan angka limit resmi, jadi bar di bawah menunjukkan <strong>proporsi pemakaian antar provider</strong> dari pencatatan ScrumSpace sendiri (bukan persentase terhadap limit langgananmu). Angka token berasal dari laporan pemakaian tiap panggilan AI yang berhasil.</p>
-        @forelse ($usage['providers'] as $row)
-            @php $pct = $usage['grand_total'] > 0 ? round($row['total'] / $usage['grand_total'] * 100) : 0; @endphp
-            <div style="margin-bottom:.75rem">
-                <div style="display:flex;justify-content:space-between;gap:1rem"><strong>{{ $row['provider'] }}</strong><span>{{ number_format($row['total']) }} token · {{ $row['calls'] }} panggilan · {{ $pct }}%</span></div>
-                <div style="background:#e5e7eb;border-radius:999px;height:12px;overflow:hidden;margin-top:.25rem"><div style="background:#2563eb;height:12px;width:{{ $pct }}%"></div></div>
-            </div>
-        @empty
-            <p>Belum ada pemakaian tercatat. Setelah chat atau eksekusi AI berjalan, pemakaian token akan muncul di sini.</p>
-        @endforelse
-        @if ($usage['models'])
-            <table style="width:100%;margin-top:1rem">
-                <thead><tr><th style="text-align:left">Model</th><th style="text-align:left">Provider</th><th style="text-align:right">Token</th><th style="text-align:right">Panggilan</th></tr></thead>
-                <tbody>
-                    @foreach ($usage['models'] as $model)
-                        <tr><td>{{ $model['model'] }}</td><td>{{ $model['provider'] }}</td><td style="text-align:right">{{ number_format($model['total']) }}</td><td style="text-align:right">{{ $model['calls'] }}</td></tr>
-                    @endforeach
-                </tbody>
-            </table>
-        @endif
-    </section>
+    <p class="page-subtitle">Pemakaian token 30 hari terakhir: <strong>{{ number_format($usage['grand_total']) }} token</strong>. Bar di tiap kartu menunjukkan proporsi pemakaian antar provider dari pencatatan ScrumSpace sendiri (bukan persentase terhadap limit langgananmu), karena gateway tidak menyediakan angka limit resmi.</p>
 
     <section class="agent-directory-list">
         @foreach ($providers as $slug => $info)
-            @php($connected = $info['connected'])
+            @php
+                $connected = $info['connected'];
+                $cardUsage = $usage['by_slug'][$slug] ?? null;
+                $pct = $cardUsage && $usage['grand_total'] > 0 ? round($cardUsage['total'] / $usage['grand_total'] * 100) : 0;
+            @endphp
             <article class="directory-row">
                 <span class="agent-avatar avatar-{{ $slug === 'antigravity' ? 'mint' : ($slug === 'codex' ? 'violet' : 'amber') }}">{{ mb_strtoupper(mb_substr($info['label'], 0, 1)) }}</span>
                 <div class="directory-main">
@@ -64,6 +46,19 @@
                     <p>{{ $info['description'] }}</p>
                     @if ($connected && $info['email'])
                         <p><small>{{ $info['email'] }}</small></p>
+                    @endif
+                    @if ($cardUsage)
+                        <div style="margin-top:.75rem">
+                            <div style="display:flex;justify-content:space-between;gap:1rem"><strong>Pemakaian 30 hari: {{ number_format($cardUsage['total']) }} token · {{ $cardUsage['calls'] }} panggilan · {{ $pct }}%</strong></div>
+                            <div style="background:#e5e7eb;border-radius:999px;height:12px;overflow:hidden;margin-top:.25rem"><div style="background:#2563eb;height:12px;width:{{ $pct }}%"></div></div>
+                            <ul style="margin:.5rem 0 0;padding-left:1.1rem">
+                                @foreach ($cardUsage['models'] as $model)
+                                    <li><small>{{ $model['model'] }} — {{ number_format($model['total']) }} token · {{ $model['calls'] }} panggilan</small></li>
+                                @endforeach
+                            </ul>
+                        </div>
+                    @else
+                        <p><small>Belum ada pemakaian tercatat (30 hari terakhir).</small></p>
                     @endif
                 </div>
                 <div class="directory-role"><span>{{ implode(', ', $info['models']) }}</span></div>
@@ -81,4 +76,18 @@
             </article>
         @endforeach
     </section>
+
+    @if ($usage['other'])
+        <section class="empty-panel">
+            <div class="panel-heading"><div><p class="section-kicker">PEMAKAIAN LAIN</p><h2>Pemakaian provider tanpa kartu di atas</h2></div></div>
+            <p style="margin-top:0">Pemakaian dari provider API-key atau label yang belum punya kartu OAuth tetap ditampilkan di sini agar tidak hilang.</p>
+            @foreach ($usage['other'] as $row)
+                @php $pct = $usage['grand_total'] > 0 ? round($row['total'] / $usage['grand_total'] * 100) : 0; @endphp
+                <div style="margin-bottom:.75rem">
+                    <div style="display:flex;justify-content:space-between;gap:1rem"><strong>{{ $row['provider'] }}</strong><span>{{ number_format($row['total']) }} token · {{ $row['calls'] }} panggilan · {{ $pct }}%</span></div>
+                    <div style="background:#e5e7eb;border-radius:999px;height:12px;overflow:hidden;margin-top:.25rem"><div style="background:#2563eb;height:12px;width:{{ $pct }}%"></div></div>
+                </div>
+            @endforeach
+        </section>
+    @endif
 @endsection

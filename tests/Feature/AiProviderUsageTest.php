@@ -64,15 +64,27 @@ class AiProviderUsageTest extends TestCase
         $this->assertSame('gemini-a', $summary['models'][0]['model']);
     }
 
-    public function test_ai_providers_page_shows_usage_section(): void
+    public function test_ai_providers_page_shows_usage_inside_provider_card(): void
     {
         $user = User::factory()->create();
         AiUsageRecord::query()->create(['provider' => 'Google', 'model' => 'gemini-a', 'prompt_tokens' => 10, 'completion_tokens' => 5, 'total_tokens' => 15]);
 
         $this->actingAs($user)->get('/ai-providers')
             ->assertOk()
-            ->assertSee('PEMAKAIAN TOKEN')
+            ->assertSee('Pemakaian 30 hari')
             ->assertSee('Google')
-            ->assertSee('15');
+            ->assertSee('15')
+            ->assertDontSee('PEMAKAIAN TOKEN');
+    }
+
+    public function test_ai_providers_page_shows_other_provider_usage_separately(): void
+    {
+        $user = User::factory()->create();
+        AiUsageRecord::query()->create(['provider' => 'Mimo', 'model' => 'mimo-7b', 'prompt_tokens' => 10, 'completion_tokens' => 5, 'total_tokens' => 15]);
+
+        $this->actingAs($user)->get('/ai-providers')
+            ->assertOk()
+            ->assertSee('Pemakaian provider tanpa kartu di atas')
+            ->assertSee('Mimo');
     }
 }
