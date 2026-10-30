@@ -140,6 +140,14 @@
                                     </div>
                                     <button class="button button-primary" type="submit">Tambah key</button>
                                 </form>
+                                <form method="POST" action="{{ route('ai-providers.api-keys.models.update', ['provider' => $provider, 'group' => $group['name']]) }}" style="margin-top:.75rem">
+                                    @csrf
+                                    <div class="form-field" style="margin:0">
+                                        <label for="models-{{ $provider }}-{{ $group['name'] }}">Ubah daftar model</label>
+                                        <textarea id="models-{{ $provider }}-{{ $group['name'] }}" name="models_text" rows="4" spellcheck="false">{{ implode("\n", array_map(fn ($m) => $m['name'].(isset($m['alias']) ? '|'.$m['alias'] : ''), $group['models_raw'] ?? [])) }}</textarea>
+                                    </div>
+                                    <button class="button" type="submit" style="margin-top:.5rem">Simpan daftar model</button>
+                                </form>
                             </div>
                             <div class="directory-actions">
                                 <form method="POST" action="{{ route('ai-providers.api-keys.destroy', ['provider' => $provider, 'group' => $group['name']]) }}">
@@ -177,14 +185,9 @@
                         <p class="form-hint">Wajib untuk OpenAI-compatible (custom). Untuk provider native, isi hanya bila memakai endpoint lain (mis. Vertex-compatible).</p>
                     </div>
                     <div class="form-field">
-                        <label for="model_name">Nama model (upstream)</label>
-                        <input type="text" id="model_name" name="model_name" value="{{ old('model_name') }}" maxlength="200" spellcheck="false">
-                        <p class="form-hint">Wajib untuk OpenAI-compatible (custom) — model yang dilayani endpoint itu.</p>
-                    </div>
-                    <div class="form-field">
-                        <label for="model_alias">Alias model (opsional)</label>
-                        <input type="text" id="model_alias" name="model_alias" value="{{ old('model_alias') }}" maxlength="200" spellcheck="false">
-                        <p class="form-hint">Nama yang dilihat aplikasi/gateway. Kosongkan untuk memakai nama model apa adanya.</p>
+                        <label for="models_text">Daftar model</label>
+                        <textarea id="models_text" name="models_text" rows="6" spellcheck="false" placeholder="mimo-v2.6-pro&#10;kimi-k3&#10;deepseek-v4-pro">{{ old('models_text') }}</textarea>
+                        <p class="form-hint">Satu model per baris. Wajib untuk OpenAI-compatible (custom); opsional untuk provider native. Tambah <code>|alias</code> di akhir baris untuk nama tampil, mis. <code>kimi-k3|Kimi K3</code>. Daftar ini yang diteruskan gateway ke endpoint akun — satu key bisa melayani banyak model.</p>
                     </div>
                     <div class="form-actions">
                         <button class="button button-primary" type="submit">Tambah akun</button>

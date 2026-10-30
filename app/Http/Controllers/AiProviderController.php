@@ -240,6 +240,15 @@ class AiProviderController extends Controller
                     'base_url' => $group['base-url'] ?? null,
                     'keys' => $keys,
                     'models' => array_values(array_filter($models)),
+                    'models_raw' => array_values(array_filter(
+                        array_map(
+                            fn ($model) => is_array($model)
+                                ? array_filter(['name' => $model['name'] ?? null, 'alias' => $model['alias'] ?? null])
+                                : ['name' => (string) $model],
+                            $group['models'] ?? []
+                        ),
+                        fn ($model) => ! empty($model['name'])
+                    )),
                 ];
             }
         }
@@ -269,21 +278,38 @@ class AiProviderController extends Controller
             'group' => ['required', 'string', 'max:64', 'regex:/^[a-z0-9][a-z0-9_-]*$/'],
             'api_key' => ['required', 'string', 'min:8', 'max:500'],
             'base_url' => ['nullable', 'url', 'max:500'],
+            'models_text' => ['nullable', 'string', 'max:5000'],
             'model_name' => ['nullable', 'string', 'max:200'],
             'model_alias' => ['nullable', 'string', 'max:200'],
         ], [
             'group.regex' => 'Nama akun hanya boleh huruf kecil, angka, dash, dan underscore, diawali huruf/angka.',
         ]);
 
-        // Provider custom wajib membawa endpoint + modelnya sendiri.
+        // Provider custom wajib membawa endpoint + minimal satu model.
         $validator->sometimes('base_url', 'required', fn ($input) => $input->provider === 'openai-compatibility');
-        $validator->sometimes('model_name', 'required', fn ($input) => $input->provider === 'openai-compatibility');
+
+        // Validasi daftar model ikut di validator agar error-nya muncul
+        // bersama error field lain (mis. base_url) dalam satu respons.
+        $validator->after(function ($validator) use ($request) {
+            $parsed = self::parseModelLines($request->input('models_text'), $request->input('model_name'), $request->input('model_alias'));
+
+            if ($parsed['invalid'] !== null) {
+                $validator->errors()->add('models_text', 'Baris model tidak valid: "'.$parsed['invalid'].'". Pakai huruf, angka, titik, dash, underscore, slash, atau titik dua, diawali huruf/angka; alias ditulis setelah "|".');
+            } elseif ($request->input('provider') === 'openai-compatibility' && $parsed['models'] === []) {
+                $validator->errors()->add('models_text', 'Provider custom wajib membawa minimal satu model.');
+            }
+        });
 
         if ($validator->fails()) {
             return back()->withErrors($validator)->withInput($request->except('api_key'));
         }
 
         $data = $validator->validated();
+
+        // Daftar model: textarea (satu per baris, opsional "|alias") diutamakan;
+        // field model tunggal lama tetap didukung bila textarea kosong.
+        // (Validitasnya sudah dijamin lolos validator di atas.)
+        $parsed = self::parseModelLines($data['models_text'] ?? null, $data['model_name'] ?? null, $data['model_alias'] ?? null);
         $groups = $client->apiKeyGroups();
 
         if ($groups === null) {
@@ -306,14 +332,8 @@ class AiProviderController extends Controller
             $new['base-url'] = $data['base_url'];
         }
 
-        if (! empty($data['model_name'])) {
-            $model = ['name' => $data['model_name']];
-
-            if (! empty($data['model_alias'])) {
-                $model['alias'] = $data['model_alias'];
-            }
-
-            $new['models'] = [$model];
+        if ($parsed['models'] !== []) {
+            $new['models'] = $parsed['models'];
         }
 
         $list[] = $new;
@@ -453,5 +473,126 @@ class AiProviderController extends Controller
 
         return redirect()->route('ai-providers.index')
             ->with('success', 'Akun "'.$group.'" beserta seluruh key-nya dihapus dari gateway.');
+    }
+
+    /**
+     * Parse daftar model dari textarea (satu per baris, opsional "|alias")
+     * atau dari field model tunggal lama. Kembalikan ['models' => [...],
+     * 'invalid' => ?string] — 'invalid' berisi baris yang ditolak.
+     */
+    private static function parseModelLines(?string $text, ?string $singleName, ?string $singleAlias): array
+    {
+        $models = [];
+        $seen = [];
+
+        foreach (preg_split('/\r\n|\r|\n/', (string) $text) ?: [] as $line) {
+            $line = trim($line);
+
+            if ($line === '') {
+                continue;
+            }
+
+            [$name, $alias] = array_pad(explode('|', $line, 2), 2, null);
+            $name = trim((string) $name);
+            $alias = $alias !== null ? trim($alias) : null;
+
+            if ($name === '' || strlen($name) > 200
+                || ! preg_match('/^[A-Za-z0-9][A-Za-z0-9._\/:-]*$/', $name)
+                || ($alias !== null && ($alias === '' || strlen($alias) > 200))) {
+                return ['models' => [], 'invalid' => $line];
+            }
+
+            if (isset($seen[$name])) {
+                continue;
+            }
+
+            $seen[$name] = true;
+            $model = ['name' => $name];
+
+            if ($alias !== null) {
+                $model['alias'] = $alias;
+            }
+
+            $models[] = $model;
+        }
+
+        if ($models === [] && ! empty($singleName)) {
+            $singleName = trim($singleName);
+
+            if (strlen($singleName) > 200 || ! preg_match('/^[A-Za-z0-9][A-Za-z0-9._\/:-]*$/', $singleName)) {
+                return ['models' => [], 'invalid' => $singleName];
+            }
+
+            $model = ['name' => $singleName];
+
+            if (! empty($singleAlias)) {
+                $model['alias'] = trim($singleAlias);
+            }
+
+            $models[] = $model;
+        }
+
+        if (count($models) > 200) {
+            return ['models' => [], 'invalid' => 'terlalu banyak model (maks 200)'];
+        }
+
+        return ['models' => $models, 'invalid' => null];
+    }
+
+    /** Ubah daftar model satu akun (grup) yang sudah ada. */
+    public function updateApiKeyModels(Request $request, string $provider, string $group, CliProxyApiClient $client): RedirectResponse
+    {
+        abort_unless(isset(self::API_KEY_PROVIDERS[$provider]), 404);
+
+        // Setelah aksi ini, halaman kembali membuka tab API Key.
+        session()->flash('api_keys_tab', true);
+
+        $validator = Validator::make($request->all(), [
+            'models_text' => ['required', 'string', 'max:5000'],
+        ]);
+
+        if ($validator->fails()) {
+            return back()->withErrors($validator);
+        }
+
+        $parsed = self::parseModelLines($validator->validated()['models_text'], null, null);
+
+        if ($parsed['invalid'] !== null) {
+            return back()->withErrors(['models_text' => 'Baris model tidak valid: "'.$parsed['invalid'].'". Pakai huruf, angka, titik, dash, underscore, slash, atau titik dua, diawali huruf/angka; alias ditulis setelah "|".']);
+        }
+
+        if ($parsed['models'] === []) {
+            return back()->withErrors(['models_text' => 'Daftar model tidak boleh kosong.']);
+        }
+
+        $groups = $client->apiKeyGroups();
+
+        if ($groups === null) {
+            return back()->with('error', 'Gateway tidak dapat dihubungi. Daftar model belum diubah.');
+        }
+
+        $list = $groups[$provider] ?? [];
+        $found = false;
+
+        foreach ($list as &$existing) {
+            if (($existing['name'] ?? null) === $group) {
+                $existing['models'] = $parsed['models'];
+                $found = true;
+                break;
+            }
+        }
+
+        unset($existing);
+
+        if (! $found) {
+            return redirect()->route('ai-providers.index')->with('error', 'Akun tidak ditemukan di gateway.');
+        }
+
+        if (! $client->putApiKeyGroups($provider, $list)) {
+            return back()->with('error', 'Gateway menolak perubahan ini. Daftar model belum diubah.');
+        }
+
+        return redirect()->route('ai-providers.index')
+            ->with('success', 'Daftar model akun "'.$group.'" diperbarui ('.count($parsed['models']).' model).');
     }
 }

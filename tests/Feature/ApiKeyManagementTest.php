@@ -90,11 +90,161 @@ class ApiKeyManagementTest extends TestCase
                 'api_key' => 'test-key-12345678',
             ]);
 
-        $response->assertSessionHasErrors(['base_url', 'model_name']);
+        $response->assertSessionHasErrors(['base_url', 'models_text']);
         $this->assertArrayNotHasKey('api_key', session('_old_input', []));
         Http::assertNotSent(function ($request) {
             return $request->method() === 'PUT';
         });
+    }
+
+    public function test_store_account_puts_many_models_from_textarea(): void
+    {
+        $this->fakePage(['openai-compatibility' => []]);
+
+        $response = $this->actingAs(User::factory()->create())
+            ->post('/ai-providers/api-keys', [
+                'provider' => 'openai-compatibility',
+                'group' => 'agg-1',
+                'api_key' => 'test-key-12345678',
+                'base_url' => 'https://example.com/v1',
+                'models_text' => "kimi-k3\ndeepseek-v4-pro\nmimo-v2.6-pro\n",
+            ]);
+
+        $response->assertRedirect(route('ai-providers.index'));
+        $response->assertSessionHas('success');
+
+        Http::assertSent(function ($request) {
+            return $request->method() === 'PUT'
+                && $request->url() === $this->v8('/config/api-keys/openai-compatibility')
+                && $request->data()[0]['base-url'] === 'https://example.com/v1'
+                && $request->data()[0]['models'] === [
+                    ['name' => 'kimi-k3'],
+                    ['name' => 'deepseek-v4-pro'],
+                    ['name' => 'mimo-v2.6-pro'],
+                ];
+        });
+    }
+
+    public function test_store_account_supports_alias_syntax_in_models_textarea(): void
+    {
+        $this->fakePage(['openai-compatibility' => []]);
+
+        $this->actingAs(User::factory()->create())
+            ->post('/ai-providers/api-keys', [
+                'provider' => 'openai-compatibility',
+                'group' => 'agg-1',
+                'api_key' => 'test-key-12345678',
+                'base_url' => 'https://example.com/v1',
+                'models_text' => "kimi-k3|Kimi K3\ndeepseek-v4-pro",
+            ]);
+
+        Http::assertSent(function ($request) {
+            return $request->method() === 'PUT'
+                && $request->data()[0]['models'] === [
+                    ['name' => 'kimi-k3', 'alias' => 'Kimi K3'],
+                    ['name' => 'deepseek-v4-pro'],
+                ];
+        });
+    }
+
+    public function test_store_account_rejects_invalid_model_line_without_writing(): void
+    {
+        $this->fakePage(['openai-compatibility' => []]);
+
+        $response = $this->actingAs(User::factory()->create())
+            ->post('/ai-providers/api-keys', [
+                'provider' => 'openai-compatibility',
+                'group' => 'agg-1',
+                'api_key' => 'test-key-12345678',
+                'base_url' => 'https://example.com/v1',
+                'models_text' => "kimi-k3\nbad model!",
+            ]);
+
+        $response->assertSessionHasErrors(['models_text']);
+        Http::assertNotSent(function ($request) {
+            return $request->method() === 'PUT';
+        });
+    }
+
+    public function test_update_models_replaces_group_models_and_preserves_keys(): void
+    {
+        $this->fakePage([
+            'openai-compatibility' => [
+                [
+                    'name' => 'agg-1',
+                    'keys' => [['api-key' => 'k1', 'weight' => 1]],
+                    'base-url' => 'https://example.com/v1',
+                    'models' => [['name' => 'mimo-v2.5-pro']],
+                ],
+            ],
+        ]);
+
+        $response = $this->actingAs(User::factory()->create())
+            ->post('/ai-providers/api-keys/openai-compatibility/agg-1/models', [
+                'models_text' => "kimi-k3\nmimo-v2.6-pro",
+            ]);
+
+        $response->assertRedirect(route('ai-providers.index'));
+        $response->assertSessionHas('success');
+
+        Http::assertSent(function ($request) {
+            return $request->method() === 'PUT'
+                && $request->url() === $this->v8('/config/api-keys/openai-compatibility')
+                && $request->data()[0]['name'] === 'agg-1'
+                && $request->data()[0]['keys'][0]['api-key'] === 'k1'
+                && $request->data()[0]['base-url'] === 'https://example.com/v1'
+                && $request->data()[0]['models'] === [
+                    ['name' => 'kimi-k3'],
+                    ['name' => 'mimo-v2.6-pro'],
+                ];
+        });
+    }
+
+    public function test_update_models_rejects_invalid_line_without_writing(): void
+    {
+        $this->fakePage([
+            'openai-compatibility' => [
+                ['name' => 'agg-1', 'keys' => [['api-key' => 'k1', 'weight' => 1]]],
+            ],
+        ]);
+
+        $response = $this->actingAs(User::factory()->create())
+            ->post('/ai-providers/api-keys/openai-compatibility/agg-1/models', [
+                'models_text' => "kimi-k3\nbad model!",
+            ]);
+
+        $response->assertSessionHasErrors(['models_text']);
+        Http::assertNotSent(function ($request) {
+            return $request->method() === 'PUT';
+        });
+    }
+
+    public function test_edit_models_textarea_prefills_existing_models_with_alias(): void
+    {
+        $this->fakePage([
+            'openai-compatibility' => [
+                [
+                    'name' => 'agg-1',
+                    'keys' => [['api-key' => 'test-key-12345678', 'weight' => 1]],
+                    'base-url' => 'https://example.com/v1',
+                    'models' => [['name' => 'kimi-k3', 'alias' => 'Kimi K3'], ['name' => 'deepseek-v4-pro']],
+                ],
+            ],
+        ]);
+
+        $response = $this->actingAs(User::factory()->create())->get('/ai-providers');
+
+        $response->assertOk();
+        $response->assertSee('kimi-k3|Kimi K3', false);
+    }
+
+    public function test_registry_recognises_deepseek_glm_and_kimi_families(): void
+    {
+        $providers = config('ai.model_providers');
+
+        $this->assertSame(['deepseek'], $providers['deepseek']['id']);
+        $this->assertSame(['glm'], $providers['glm']['id']);
+        $this->assertSame(['kimi'], $providers['kimi']['id']);
     }
 
     public function test_store_account_rejects_duplicate_group_name(): void

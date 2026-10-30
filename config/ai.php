@@ -75,5 +75,8 @@ return [
         'codex' => ['label' => 'OpenAI', 'id' => ['gpt', 'codex'], 'owned_by' => ['openai']],
         'anthropic' => ['label' => 'Anthropic', 'id' => ['claude'], 'owned_by' => ['anthropic']],
         'mimo' => ['label' => 'Mimo', 'id' => ['mimo'], 'owned_by' => ['mimo']],
+        'deepseek' => ['label' => 'DeepSeek', 'id' => ['deepseek'], 'owned_by' => ['deepseek']],
+        'glm' => ['label' => 'GLM', 'id' => ['glm'], 'owned_by' => ['glm', 'zhipu']],
+        'kimi' => ['label' => 'Kimi', 'id' => ['kimi'], 'owned_by' => ['kimi', 'moonshot']],
     ],
 ];
