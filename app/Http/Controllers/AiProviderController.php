@@ -301,6 +301,10 @@ class AiProviderController extends Controller
         // Validasi daftar model ikut di validator agar error-nya muncul
         // bersama error field lain (mis. base_url) dalam satu respons.
         $validator->after(function ($validator) use ($request) {
+            if (self::keyHasGatewayRejectedChars($request->input('api_key', ''))) {
+                $validator->errors()->add('api_key', 'API key mengandung karakter yang ditolak gateway (karakter emoji/tak terlihat). Salin ulang key langsung dari dashboard provider dan pastikan tidak ada karakter aneh yang ikut.');
+            }
+
             $parsed = self::parseModelLines($request->input('models_text'), $request->input('model_name'), $request->input('model_alias'));
 
             if ($parsed['invalid'] !== null) {
@@ -362,6 +366,13 @@ class AiProviderController extends Controller
     public function storeApiKey(Request $request, string $provider, string $group, CliProxyApiClient $client): RedirectResponse
     {
         abort_unless(isset(self::API_KEY_PROVIDERS[$provider]), 404);
+
+        // Form inline tidak menampilkan $errors (hanya flash session('error')),
+        // jadi karakter key yang ditolak gateway ditolak di sini dengan flash,
+        // bukan lewat validator — pesannya tetap terlihat di atas halaman.
+        if (self::keyHasGatewayRejectedChars($request->input('api_key', ''))) {
+            return back()->with('error', 'API key mengandung karakter yang ditolak gateway (karakter emoji/tak terlihat). Salin ulang key langsung dari dashboard provider dan pastikan tidak ada karakter aneh yang ikut.');
+        }
 
         $validator = Validator::make($request->all(), [
             'api_key' => ['required', 'string', 'min:8', 'max:500'],
@@ -560,6 +571,19 @@ class AiProviderController extends Controller
         }
 
         return response()->json($result);
+    }
+
+    /**
+     * Gateway menolak key yang mengandung karakter astral (di atas U+FFFF —
+     * terkirim sebagai surrogate pair oleh json_encode) atau byte DEL 0x7F:
+     * keduanya gagal di lapisan YAML gateway dengan 400 invalid_body.
+     * Karakter non-ASCII BMP (é, CJK, dsb) lolos, jadi jangan tolak semua
+     * non-ASCII — hanya dua pola ini yang terbukti ditolak (diuji 2026-10-31
+     * pada gateway 8.0.47 lokal melawan body persis dari log VPS).
+     */
+    private static function keyHasGatewayRejectedChars(string $key): bool
+    {
+        return preg_match('/[\x{10000}-\x{10FFFF}\x7F]/u', $key) === 1;
     }
 
     /**

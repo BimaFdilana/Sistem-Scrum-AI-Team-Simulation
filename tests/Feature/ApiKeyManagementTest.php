@@ -166,6 +166,77 @@ class ApiKeyManagementTest extends TestCase
         });
     }
 
+    public function test_store_account_rejects_key_with_astral_character_without_writing(): void
+    {
+        $this->fakePage(['gemini' => []]);
+
+        $response = $this->actingAs(User::factory()->create())
+            ->post('/ai-providers/api-keys', [
+                'provider' => 'gemini',
+                'group' => 'gemini-utama',
+                'api_key' => 'key-12345678-🔑',
+            ]);
+
+        $response->assertSessionHasErrors(['api_key']);
+        Http::assertNotSent(function ($request) {
+            return $request->method() === 'PUT';
+        });
+    }
+
+    public function test_store_account_rejects_key_with_del_character_without_writing(): void
+    {
+        $this->fakePage(['gemini' => []]);
+
+        $response = $this->actingAs(User::factory()->create())
+            ->post('/ai-providers/api-keys', [
+                'provider' => 'gemini',
+                'group' => 'gemini-utama',
+                'api_key' => "ke\177y12345678",
+            ]);
+
+        $response->assertSessionHasErrors(['api_key']);
+        Http::assertNotSent(function ($request) {
+            return $request->method() === 'PUT';
+        });
+    }
+
+    public function test_store_account_accepts_bmp_unicode_key(): void
+    {
+        $this->fakePage(['gemini' => []]);
+
+        $response = $this->actingAs(User::factory()->create())
+            ->post('/ai-providers/api-keys', [
+                'provider' => 'gemini',
+                'group' => 'gemini-utama',
+                'api_key' => 'kéy-12345678',
+            ]);
+
+        $response->assertRedirect(route('ai-providers.index'));
+        $response->assertSessionHas('success');
+
+        Http::assertSent(function ($request) {
+            return $request->method() === 'PUT'
+                && $request->data()[0]['keys'][0]['api-key'] === 'kéy-12345678';
+        });
+    }
+
+    public function test_store_key_rejects_key_with_astral_character_without_writing(): void
+    {
+        $this->fakePage(['gemini' => [
+            ['name' => 'gemini-utama', 'keys' => [['api-key' => 'old-key-12345678', 'weight' => 1]]],
+        ]]);
+
+        $response = $this->actingAs(User::factory()->create())
+            ->post('/ai-providers/api-keys/gemini/gemini-utama/keys', [
+                'api_key' => 'key-12345678-🔑',
+            ]);
+
+        $response->assertSessionHas('error');
+        Http::assertNotSent(function ($request) {
+            return $request->method() === 'PUT';
+        });
+    }
+
     public function test_update_models_replaces_group_models_and_preserves_keys(): void
     {
         $this->fakePage([

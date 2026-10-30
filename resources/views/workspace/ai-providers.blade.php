@@ -240,7 +240,7 @@
                 <div class="form-field">
                     <label for="api_key">API key</label>
                     <input type="password" id="api_key" name="api_key" autocomplete="off" spellcheck="false" required minlength="8" maxlength="500">
-                    <p class="form-hint">Key dikirim ke gateway dan disimpan di konfigurasinya. Tidak pernah ditampilkan lagi setelah disimpan.</p>
+                    <p class="form-hint">Key dikirim ke gateway dan disimpan di konfigurasinya. Tidak pernah ditampilkan lagi setelah disimpan. Karakter emoji/tak terlihat ditolak gateway — bila ragu, salin ulang key dari dashboard provider.</p>
                 </div>
                 <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem">
                     <button class="button" type="button" id="check-api-key-connection">Check connection</button>
