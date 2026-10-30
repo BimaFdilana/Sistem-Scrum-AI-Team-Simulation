@@ -978,10 +978,29 @@ class CliProxyApiClient
 
             $this->lastGatewayError = $message;
 
+            // Catat juga body yang ditolak (key disensor) — tanpa ini,
+            // penolakan seperti invalid_body tidak bisa ditelusuri ke
+            // field penyebabnya karena gateway tidak menyebutkannya.
+            $sanitized = array_map(function ($group) {
+                if (! is_array($group)) {
+                    return $group;
+                }
+                $group['keys'] = array_map(function ($entry) {
+                    if (is_array($entry) && isset($entry['api-key'])) {
+                        $entry['api-key'] = '***';
+                    }
+
+                    return $entry;
+                }, $group['keys'] ?? []);
+
+                return $group;
+            }, $groups);
+
             Log::warning('Gateway menolak PUT api-keys', [
                 'provider' => $provider,
                 'status' => $response->status(),
                 'error' => $message,
+                'body' => Str::limit((string) json_encode($sanitized), 3000),
             ]);
 
             return false;

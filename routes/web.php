@@ -42,6 +42,7 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/ai-providers/{provider}/callback', [AiProviderController::class, 'callback'])->middleware('throttle:20,1')->name('ai-providers.callback');
     Route::post('/ai-providers/{provider}/disconnect', [AiProviderController::class, 'disconnect'])->name('ai-providers.disconnect');
     Route::post('/ai-providers/api-keys', [AiProviderController::class, 'storeApiKeyAccount'])->middleware('throttle:20,1')->name('ai-providers.api-keys.store');
+    Route::post('/ai-providers/api-keys/check', [AiProviderController::class, 'checkApiKeyConnection'])->middleware('throttle:20,1')->name('ai-providers.api-keys.check');
     Route::post('/ai-providers/api-keys/{provider}/{group}/keys', [AiProviderController::class, 'storeApiKey'])->middleware('throttle:20,1')->name('ai-providers.api-keys.keys.store');
     Route::delete('/ai-providers/api-keys/{provider}/{group}/keys/{index}', [AiProviderController::class, 'destroyApiKey'])->name('ai-providers.api-keys.keys.destroy');
     Route::delete('/ai-providers/api-keys/{provider}/{group}', [AiProviderController::class, 'destroyApiKeyAccount'])->name('ai-providers.api-keys.destroy');

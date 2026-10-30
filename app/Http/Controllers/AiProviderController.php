@@ -4,12 +4,15 @@ namespace App\Http\Controllers;
 
 use App\Services\AiStatusService;
 use App\Services\CliProxyApiClient;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
+use Throwable;
 
 class AiProviderController extends Controller
 {
@@ -480,6 +483,83 @@ class AiProviderController extends Controller
         $reason = $client->lastGatewayError();
 
         return $reason !== null && $reason !== '' ? ' Alasan gateway: '.Str::limit($reason, 200) : '';
+    }
+
+    /**
+     * Uji endpoint + key ke upstream tanpa menyimpan apa pun. Key dipakai
+     * sekali untuk panggilan ini saja, tidak dicatat dan tidak dikembalikan.
+     * Hanya skema http/https yang diizinkan (cegah URL non-HTTP).
+     */
+    public function checkApiKeyConnection(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'provider' => ['required', 'string', Rule::in(array_keys(self::API_KEY_PROVIDERS))],
+            'api_key' => ['required', 'string', 'min:8', 'max:500'],
+            'base_url' => ['nullable', 'url', 'max:500'],
+            'models_text' => ['nullable', 'string', 'max:5000'],
+        ]);
+
+        $baseUrl = rtrim((string) ($data['base_url'] ?? ''), '/');
+
+        if ($baseUrl === '' || ! in_array((string) parse_url($baseUrl, PHP_URL_SCHEME), ['http', 'https'], true)) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Isi Endpoint (base URL) http/https dulu untuk memakai Check connection.',
+            ]);
+        }
+
+        try {
+            $response = Http::timeout(15)
+                ->withToken($data['api_key'])
+                ->acceptJson()
+                ->get($baseUrl.'/models');
+
+            $status = $response->status();
+        } catch (Throwable) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Endpoint tidak dapat dihubungi (timeout / jaringan). Periksa kembali endpoint-nya.',
+            ]);
+        }
+
+        if ($status === 401 || $status === 403) {
+            return response()->json([
+                'ok' => false,
+                'message' => "Upstream menjawab {$status} — endpoint terjangkau, tapi key ditolak. Periksa kembali key-nya.",
+            ]);
+        }
+
+        if (! $response->successful()) {
+            return response()->json([
+                'ok' => false,
+                'message' => "Upstream menjawab {$status}. Periksa kembali endpoint dan key-nya.",
+            ]);
+        }
+
+        $upstreamModels = [];
+        $decoded = $response->json();
+        if (is_array($decoded['data'] ?? null)) {
+            foreach ($decoded['data'] as $model) {
+                if (isset($model['id'])) {
+                    $upstreamModels[] = (string) $model['id'];
+                }
+            }
+        }
+
+        $result = [
+            'ok' => true,
+            'message' => 'Endpoint terjangkau dan key diterima.',
+            'upstream_models' => count($upstreamModels),
+        ];
+
+        $parsed = self::parseModelLines($data['models_text'] ?? null, null, null);
+        if ($parsed['models'] !== []) {
+            $wanted = array_column($parsed['models'], 'name');
+            $result['matched'] = array_values(array_intersect($wanted, $upstreamModels));
+            $result['missing'] = array_values(array_diff($wanted, $upstreamModels));
+        }
+
+        return response()->json($result);
     }
 
     /**

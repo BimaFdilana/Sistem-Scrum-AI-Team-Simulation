@@ -415,6 +415,75 @@ class ApiKeyManagementTest extends TestCase
         $response->assertSee('id="api-key-dialog" open', false);
     }
 
+    public function test_check_connection_reports_matched_and_missing_models(): void
+    {
+        Http::fake([
+            'https://example.com/v1/models' => Http::response(['data' => [['id' => 'kimi-k3'], ['id' => 'other-model']]]),
+        ]);
+
+        $response = $this->actingAs(User::factory()->create())
+            ->postJson('/ai-providers/api-keys/check', [
+                'provider' => 'openai-compatibility',
+                'api_key' => 'test-key-12345678',
+                'base_url' => 'https://example.com/v1',
+                'models_text' => "kimi-k3\nmimo-v2.6-pro",
+            ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('ok', true);
+        $response->assertJsonPath('matched', ['kimi-k3']);
+        $response->assertJsonPath('missing', ['mimo-v2.6-pro']);
+        $this->assertStringNotContainsString('test-key-12345678', $response->getContent());
+    }
+
+    public function test_check_connection_reports_rejected_key(): void
+    {
+        Http::fake([
+            'https://example.com/v1/models' => Http::response(['error' => 'unauthorized'], 401),
+        ]);
+
+        $response = $this->actingAs(User::factory()->create())
+            ->postJson('/ai-providers/api-keys/check', [
+                'provider' => 'openai-compatibility',
+                'api_key' => 'test-key-12345678',
+                'base_url' => 'https://example.com/v1',
+            ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('ok', false);
+        $this->assertStringContainsString('key ditolak', $response->getContent());
+    }
+
+    public function test_check_connection_requires_base_url(): void
+    {
+        $response = $this->actingAs(User::factory()->create())
+            ->postJson('/ai-providers/api-keys/check', [
+                'provider' => 'openai-compatibility',
+                'api_key' => 'test-key-12345678',
+            ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('ok', false);
+    }
+
+    public function test_check_connection_reports_unreachable_endpoint(): void
+    {
+        Http::fake([
+            'https://example.com/v1/models' => Http::failedConnection(),
+        ]);
+
+        $response = $this->actingAs(User::factory()->create())
+            ->postJson('/ai-providers/api-keys/check', [
+                'provider' => 'openai-compatibility',
+                'api_key' => 'test-key-12345678',
+                'base_url' => 'https://example.com/v1',
+            ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('ok', false);
+        $this->assertStringContainsString('tidak dapat dihubungi', $response->getContent());
+    }
+
     public function test_gateway_rejection_surfaces_reason_and_redacts_key(): void
     {
         Http::fake([

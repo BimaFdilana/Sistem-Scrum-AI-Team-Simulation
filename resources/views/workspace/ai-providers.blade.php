@@ -242,6 +242,10 @@
                     <input type="password" id="api_key" name="api_key" autocomplete="off" spellcheck="false" required minlength="8" maxlength="500">
                     <p class="form-hint">Key dikirim ke gateway dan disimpan di konfigurasinya. Tidak pernah ditampilkan lagi setelah disimpan.</p>
                 </div>
+                <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem">
+                    <button class="button" type="button" id="check-api-key-connection">Check connection</button>
+                    <span id="check-api-key-result" style="font-size:12px"></span>
+                </div>
                 <div class="form-field">
                     <label for="base_url">Endpoint (base URL)</label>
                     <input type="url" id="base_url" name="base_url" value="{{ old('base_url') }}" maxlength="500" spellcheck="false" placeholder="kosongkan untuk endpoint bawaan provider">
@@ -278,6 +282,43 @@
             dialog.addEventListener('click', function (e) {
                 if (e.target === dialog) dialog.close();
             });
+            var checkBtn = document.getElementById('check-api-key-connection');
+            var checkResult = document.getElementById('check-api-key-result');
+            if (checkBtn && checkResult) {
+                checkBtn.addEventListener('click', function () {
+                    var form = checkBtn.closest('form');
+                    var token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+                    checkBtn.disabled = true;
+                    checkResult.textContent = 'Memeriksa…';
+                    fetch('{{ route('ai-providers.api-keys.check') }}', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': token},
+                        body: JSON.stringify({
+                            provider: form.querySelector('[name=provider]').value,
+                            api_key: form.querySelector('[name=api_key]').value,
+                            base_url: form.querySelector('[name=base_url]').value,
+                            models_text: form.querySelector('[name=models_text]').value,
+                        }),
+                    }).then(function (r) {
+                        return r.json().then(function (d) { return {status: r.status, body: d}; });
+                    }).then(function (res) {
+                        var d = res.body;
+                        if (d.ok) {
+                            var msg = '✓ ' + d.message;
+                            if (d.upstream_models !== undefined) msg += ' (' + d.upstream_models + ' model di upstream)';
+                            if (d.missing && d.missing.length) msg += ' — tidak ditemukan di upstream: ' + d.missing.join(', ');
+                            else if (d.matched && d.matched.length) msg += ' — semua model yang ditulis ditemukan di upstream.';
+                            checkResult.textContent = msg;
+                        } else {
+                            checkResult.textContent = '✗ ' + (d.message || 'Pemeriksaan gagal.');
+                        }
+                    }).catch(function () {
+                        checkResult.textContent = '✗ Pemeriksaan gagal (jaringan).';
+                    }).finally(function () {
+                        checkBtn.disabled = false;
+                    });
+                });
+            }
         })();
     </script>
 @endsection
