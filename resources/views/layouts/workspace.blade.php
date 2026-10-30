@@ -16,7 +16,7 @@
             } catch (e) {}
         })();
     </script>
-    <link rel="stylesheet" href="{{ asset('css/workspace.css') }}?v=2">
+    <link rel="stylesheet" href="{{ asset('css/workspace.css') }}?v={{ filemtime(public_path('css/workspace.css')) }}">
     <link rel="stylesheet" href="{{ asset('css/dialog.css') }}">
     @if (in_array(($activePage ?? ''), ['agents', 'agent-activity', 'ai-providers'], true))
         <link rel="stylesheet" href="/css/agents.css">
