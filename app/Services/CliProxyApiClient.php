@@ -26,6 +26,9 @@ class CliProxyApiClient
     /** Memoize hasil accounts() selama satu request (hindari N+1 HTTP ke gateway). */
     protected ?array $accountsCache = null;
 
+    /** Pesan error terakhir dari gateway untuk PUT api-keys (key sudah disensor), atau null. */
+    protected ?string $lastGatewayError = null;
+
     public function __construct()
     {
         $this->baseUrl = rtrim((string) config('ai.cliproxy.base_url'), '/');
@@ -926,6 +929,12 @@ class CliProxyApiClient
         }
     }
 
+    /** Pesan error terakhir dari gateway untuk PUT api-keys (tanpa key), atau null bila PUT terakhir sukses. */
+    public function lastGatewayError(): ?string
+    {
+        return $this->lastGatewayError;
+    }
+
     /** Ganti utuh daftar grup satu provider. Sukses → katalog model di-refresh. */
     public function putApiKeyGroups(string $provider, array $groups): bool
     {
@@ -938,12 +947,47 @@ class CliProxyApiClient
 
             if ($response->successful()) {
                 $this->forgetModelsCache();
+                $this->lastGatewayError = null;
 
                 return true;
             }
 
+            // Tangkap alasan gateway apa adanya (status + body) agar form bisa
+            // menampilkannya — tapi sensor dulu nilai key yang ikut terkirim,
+            // karena gateway kadang menggemakan potongan request di error-nya.
+            $body = (string) $response->body();
+            $keys = [];
+
+            foreach ($groups as $group) {
+                foreach ($group['keys'] ?? [] as $entry) {
+                    if (isset($entry['api-key']) && strlen((string) $entry['api-key']) >= 8) {
+                        $keys[] = (string) $entry['api-key'];
+                    }
+                }
+            }
+
+            if ($keys !== []) {
+                $body = str_replace($keys, '***', $body);
+            }
+
+            $decoded = json_decode($body, true);
+            $message = is_array($decoded)
+                ? (string) ($decoded['error'] ?? $decoded['message'] ?? $decoded['detail'] ?? $body)
+                : $body;
+            $message = trim($message) === '' ? 'HTTP '.$response->status() : Str::limit(trim($message), 500);
+
+            $this->lastGatewayError = $message;
+
+            Log::warning('Gateway menolak PUT api-keys', [
+                'provider' => $provider,
+                'status' => $response->status(),
+                'error' => $message,
+            ]);
+
             return false;
         } catch (Throwable) {
+            $this->lastGatewayError = 'gateway tidak dapat dihubungi';
+
             return false;
         }
     }

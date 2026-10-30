@@ -7,6 +7,7 @@ use App\Services\CliProxyApiClient;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
@@ -35,7 +36,7 @@ class AiProviderController extends Controller
             'providers' => $status->providers(),
             'gatewayUp' => $gatewayUp,
             'managementUp' => $managementUp,
-            'usage' => $this->usageByProviderCard(),
+            'usage' => $this->usageByProviderCard($status),
             'apiKeyProviders' => self::API_KEY_PROVIDERS,
             'apiKeys' => $this->maskedApiKeyGroups($client),
             'v8Up' => $client->isV8ManagementAvailable(),
@@ -48,19 +49,28 @@ class AiProviderController extends Controller
      * (bukan panel terpisah): label pemakaian dari AiUsageRecorder
      * dipetakan ke slug kartu OAuth. Label tanpa kartu (mis. provider
      * API-key baru seperti Mimo, atau 'Lainnya') dikembalikan di 'other'
-     * agar tidak ada data yang hilang dari halaman.
+     * agar tidak ada data yang hilang dari halaman. Sejak halaman hanya
+     * menampilkan kartu provider yang aktif, pemakaian untuk kartu yang
+     * sedang tidak terhubung ikut dipindah ke 'other' — kalau tidak,
+     * pemakaian lama itu lenyap dari halaman saat providernya diputus.
      *
      * @return array{by_slug: array<string, array{total:int, calls:int, models: array<int, array{model:string, total:int, calls:int}>}>, other: array<int, array{provider:string, total:int, calls:int}>, grand_total:int}
      */
-    private function usageByProviderCard(): array
+    private function usageByProviderCard(AiStatusService $status): array
     {
         $summary = \App\Services\AiUsageRecorder::summary(30);
         $labelToSlug = ['Google' => 'antigravity', 'OpenAI' => 'codex', 'Anthropic' => 'anthropic'];
+        $connected = [];
+        foreach ($status->providers() as $slug => $info) {
+            if ($info['connected']) {
+                $connected[$slug] = true;
+            }
+        }
         $bySlug = [];
         $other = [];
         foreach ($summary['providers'] as $row) {
             $slug = $labelToSlug[$row['provider']] ?? null;
-            if ($slug !== null) {
+            if ($slug !== null && isset($connected[$slug])) {
                 $bySlug[$slug] = [
                     'total' => $row['total'],
                     'calls' => $row['calls'],
@@ -270,9 +280,6 @@ class AiProviderController extends Controller
     /** Tambah satu akun (grup) API key baru untuk satu provider. */
     public function storeApiKeyAccount(Request $request, CliProxyApiClient $client): RedirectResponse
     {
-        // Setelah aksi ini, halaman kembali membuka tab API Key.
-        session()->flash('api_keys_tab', true);
-
         $validator = Validator::make($request->all(), [
             'provider' => ['required', 'string', Rule::in(array_keys(self::API_KEY_PROVIDERS))],
             'group' => ['required', 'string', 'max:64', 'regex:/^[a-z0-9][a-z0-9_-]*$/'],
@@ -301,7 +308,7 @@ class AiProviderController extends Controller
         });
 
         if ($validator->fails()) {
-            return back()->withErrors($validator)->withInput($request->except('api_key'));
+            return back()->withErrors($validator)->withInput($request->except('api_key'))->with('api_key_dialog', true);
         }
 
         $data = $validator->validated();
@@ -339,8 +346,9 @@ class AiProviderController extends Controller
         $list[] = $new;
 
         if (! $client->putApiKeyGroups($data['provider'], $list)) {
-            return back()->with('error', 'Gateway menolak konfigurasi ini. Periksa kembali provider, endpoint, dan modelnya.')
-                ->withInput($request->except('api_key'));
+            return back()->with('error', 'Gateway menolak konfigurasi ini. Periksa kembali provider, endpoint, dan modelnya.'.$this->gatewayErrorSuffix($client))
+                ->withInput($request->except('api_key'))
+                ->with('api_key_dialog', true);
         }
 
         return redirect()->route('ai-providers.index')
@@ -351,9 +359,6 @@ class AiProviderController extends Controller
     public function storeApiKey(Request $request, string $provider, string $group, CliProxyApiClient $client): RedirectResponse
     {
         abort_unless(isset(self::API_KEY_PROVIDERS[$provider]), 404);
-
-        // Setelah aksi ini, halaman kembali membuka tab API Key.
-        session()->flash('api_keys_tab', true);
 
         $validator = Validator::make($request->all(), [
             'api_key' => ['required', 'string', 'min:8', 'max:500'],
@@ -388,7 +393,7 @@ class AiProviderController extends Controller
         }
 
         if (! $client->putApiKeyGroups($provider, $list)) {
-            return back()->with('error', 'Gateway menolak konfigurasi ini.')->withInput($request->except('api_key'));
+            return back()->with('error', 'Gateway menolak konfigurasi ini.'.$this->gatewayErrorSuffix($client))->withInput($request->except('api_key'));
         }
 
         return redirect()->route('ai-providers.index')
@@ -399,9 +404,6 @@ class AiProviderController extends Controller
     public function destroyApiKey(string $provider, string $group, int $index, CliProxyApiClient $client): RedirectResponse
     {
         abort_unless(isset(self::API_KEY_PROVIDERS[$provider]), 404);
-
-        // Setelah aksi ini, halaman kembali membuka tab API Key.
-        session()->flash('api_keys_tab', true);
 
         $groups = $client->apiKeyGroups();
 
@@ -435,7 +437,7 @@ class AiProviderController extends Controller
             }
 
             if (! $client->putApiKeyGroups($provider, $list)) {
-                return redirect()->route('ai-providers.index')->with('error', 'Gateway menolak perubahan ini. Key belum dihapus.');
+                return redirect()->route('ai-providers.index')->with('error', 'Gateway menolak perubahan ini. Key belum dihapus.'.$this->gatewayErrorSuffix($client));
             }
 
             return redirect()->route('ai-providers.index')->with('success', $message);
@@ -448,9 +450,6 @@ class AiProviderController extends Controller
     public function destroyApiKeyAccount(string $provider, string $group, CliProxyApiClient $client): RedirectResponse
     {
         abort_unless(isset(self::API_KEY_PROVIDERS[$provider]), 404);
-
-        // Setelah aksi ini, halaman kembali membuka tab API Key.
-        session()->flash('api_keys_tab', true);
 
         $groups = $client->apiKeyGroups();
 
@@ -468,11 +467,19 @@ class AiProviderController extends Controller
         }
 
         if (! $client->putApiKeyGroups($provider, $list)) {
-            return redirect()->route('ai-providers.index')->with('error', 'Gateway menolak perubahan ini. Akun belum dihapus.');
+            return redirect()->route('ai-providers.index')->with('error', 'Gateway menolak perubahan ini. Akun belum dihapus.'.$this->gatewayErrorSuffix($client));
         }
 
         return redirect()->route('ai-providers.index')
             ->with('success', 'Akun "'.$group.'" beserta seluruh key-nya dihapus dari gateway.');
+    }
+
+    /** Akhiran pesan error dengan alasan gateway (bila ada), sudah disensor dari key. */
+    private function gatewayErrorSuffix(CliProxyApiClient $client): string
+    {
+        $reason = $client->lastGatewayError();
+
+        return $reason !== null && $reason !== '' ? ' Alasan gateway: '.Str::limit($reason, 200) : '';
     }
 
     /**
@@ -544,9 +551,6 @@ class AiProviderController extends Controller
     {
         abort_unless(isset(self::API_KEY_PROVIDERS[$provider]), 404);
 
-        // Setelah aksi ini, halaman kembali membuka tab API Key.
-        session()->flash('api_keys_tab', true);
-
         $validator = Validator::make($request->all(), [
             'models_text' => ['required', 'string', 'max:5000'],
         ]);
@@ -589,7 +593,7 @@ class AiProviderController extends Controller
         }
 
         if (! $client->putApiKeyGroups($provider, $list)) {
-            return back()->with('error', 'Gateway menolak perubahan ini. Daftar model belum diubah.');
+            return back()->with('error', 'Gateway menolak perubahan ini. Daftar model belum diubah.'.$this->gatewayErrorSuffix($client));
         }
 
         return redirect()->route('ai-providers.index')

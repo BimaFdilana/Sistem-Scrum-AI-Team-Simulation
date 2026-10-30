@@ -378,40 +378,69 @@ class ApiKeyManagementTest extends TestCase
         });
     }
 
-    public function test_tabs_render_with_provider_tab_active_by_default(): void
+    public function test_sections_render_active_and_connect_without_tabs(): void
     {
         $this->fakePage(['gemini' => []]);
 
         $response = $this->actingAs(User::factory()->create())->get('/ai-providers');
 
         $response->assertOk();
-        $response->assertSee('data-tab-target="providers"', false);
-        $response->assertSee('data-tab-target="api-keys"', false);
-        $response->assertSee('id="tab-panel-providers" class="tab-panel is-active"', false);
-        $response->assertDontSee('id="tab-panel-api-keys" class="tab-panel is-active"');
+        $response->assertSee('Provider aktif');
+        $response->assertSee('Hubungkan Provider');
+        $response->assertSee('Google Gemini');
+        $response->assertSee('api-key-dialog');
+        $response->assertDontSee('tab-panel');
+        $response->assertDontSee('data-tab-target');
     }
 
-    public function test_api_key_action_redirect_opens_api_key_tab(): void
+    public function test_failed_create_reopens_dialog(): void
     {
         $this->fakePage(['gemini' => []]);
 
         $user = User::factory()->create();
 
         $response = $this->actingAs($user)->post('/ai-providers/api-keys', [
-            'provider' => 'gemini',
-            'group' => 'gemini-utama',
+            'provider' => 'openai-compatibility',
+            'group' => 'agg-1',
             'api_key' => 'test-key-12345678',
         ]);
 
-        $response->assertSessionHas('api_keys_tab', true);
+        $response->assertSessionHas('api_key_dialog', true);
 
         $response = $this->actingAs($user)
-            ->withSession(['api_keys_tab' => true])
+            ->withSession(['api_key_dialog' => true])
             ->get('/ai-providers');
 
         $response->assertOk();
-        $response->assertSee('id="tab-panel-api-keys" class="tab-panel is-active"', false);
-        $response->assertDontSee('id="tab-panel-providers" class="tab-panel is-active"');
+        $response->assertSee('id="api-key-dialog" open', false);
+    }
+
+    public function test_gateway_rejection_surfaces_reason_and_redacts_key(): void
+    {
+        Http::fake([
+            $this->v0('/auth-files') => Http::response(['files' => []]),
+            'http://127.0.0.1:8317/v1/models' => Http::response(['data' => []]),
+            $this->v8('/config') => Http::response([]),
+            $this->v8('/config/api-keys') => Http::response(['openai-compatibility' => []]),
+            $this->v8('/config/api-keys/openai-compatibility') => Http::response(['error' => 'key test-key-12345678 ditolak gateway'], 400),
+        ]);
+
+        $response = $this->actingAs(User::factory()->create())
+            ->post('/ai-providers/api-keys', [
+                'provider' => 'openai-compatibility',
+                'group' => 'agg-1',
+                'api_key' => 'test-key-12345678',
+                'base_url' => 'https://example.com/v1',
+                'models_text' => "kimi-k3\nmimo-v2.6-pro",
+            ]);
+
+        $response->assertSessionHas('error');
+        $response->assertSessionHas('api_key_dialog', true);
+        $response->assertSessionHasInput('models_text', "kimi-k3\nmimo-v2.6-pro");
+
+        $error = (string) session('error');
+        $this->assertStringContainsString('ditolak gateway', $error);
+        $this->assertStringNotContainsString('test-key-12345678', $error);
     }
 
     public function test_form_field_styles_exist_in_workspace_css(): void

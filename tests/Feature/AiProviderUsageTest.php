@@ -69,12 +69,40 @@ class AiProviderUsageTest extends TestCase
         $user = User::factory()->create();
         AiUsageRecord::query()->create(['provider' => 'Google', 'model' => 'gemini-a', 'prompt_tokens' => 10, 'completion_tokens' => 5, 'total_tokens' => 15]);
 
+        Http::fake([
+            'http://127.0.0.1:8317/v0/management/auth-files' => Http::response(['files' => [
+                ['provider' => 'antigravity', 'email' => 'test@example.com'],
+            ]]),
+            'http://127.0.0.1:8317/v1/models' => Http::response(['data' => []]),
+            'http://127.0.0.1:8317/v8/management/config' => Http::response([]),
+            'http://127.0.0.1:8317/v8/management/config/api-keys' => Http::response([]),
+        ]);
+
         $this->actingAs($user)->get('/ai-providers')
             ->assertOk()
             ->assertSee('Pemakaian 30 hari')
             ->assertSee('Google')
             ->assertSee('15')
             ->assertDontSee('PEMAKAIAN TOKEN');
+    }
+
+    public function test_ai_providers_page_moves_disconnected_provider_usage_to_other_panel(): void
+    {
+        $user = User::factory()->create();
+        AiUsageRecord::query()->create(['provider' => 'Google', 'model' => 'gemini-a', 'prompt_tokens' => 10, 'completion_tokens' => 5, 'total_tokens' => 15]);
+
+        Http::fake([
+            'http://127.0.0.1:8317/v0/management/auth-files' => Http::response(['files' => []]),
+            'http://127.0.0.1:8317/v1/models' => Http::response(['data' => []]),
+            'http://127.0.0.1:8317/v8/management/config' => Http::response([]),
+            'http://127.0.0.1:8317/v8/management/config/api-keys' => Http::response([]),
+        ]);
+
+        $this->actingAs($user)->get('/ai-providers')
+            ->assertOk()
+            ->assertSee('Pemakaian provider tanpa kartu di atas')
+            ->assertSee('Google')
+            ->assertDontSee('Pemakaian 30 hari');
     }
 
     public function test_ai_providers_page_shows_other_provider_usage_separately(): void
