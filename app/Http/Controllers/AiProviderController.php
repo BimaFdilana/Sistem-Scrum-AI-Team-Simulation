@@ -6,10 +6,26 @@ use App\Services\AiStatusService;
 use App\Services\CliProxyApiClient;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
 class AiProviderController extends Controller
 {
+    /**
+     * Provider yang bisa diisi API key lewat menu. Key = nama grup di
+     * konfigurasi api-keys gateway (bukan slug kartu OAuth).
+     */
+    public const API_KEY_PROVIDERS = [
+        'gemini' => 'Gemini (Google AI Studio)',
+        'vertex' => 'Vertex AI',
+        'claude' => 'Claude (Anthropic)',
+        'codex' => 'Codex (OpenAI)',
+        'xai' => 'xAI (Grok)',
+        'meta' => 'Meta (Muse)',
+        'openai-compatibility' => 'OpenAI-compatible (custom)',
+    ];
+
     public function index(CliProxyApiClient $client, AiStatusService $status): View
     {
         $gatewayUp = $client->isAvailable();
@@ -20,6 +36,9 @@ class AiProviderController extends Controller
             'gatewayUp' => $gatewayUp,
             'managementUp' => $managementUp,
             'usage' => $this->usageByProviderCard(),
+            'apiKeyProviders' => self::API_KEY_PROVIDERS,
+            'apiKeys' => $this->maskedApiKeyGroups($client),
+            'v8Up' => $client->isV8ManagementAvailable(),
             'activePage' => 'ai-providers',
         ]);
     }
@@ -168,5 +187,259 @@ class AiProviderController extends Controller
 
         return redirect()->route('ai-providers.index')
             ->with('error', 'Gagal memutus akun. Coba lagi.');
+    }
+
+    // ------------------------------------------------------------------
+    // API key (multi key & multi akun) — via Management API v8 gateway.
+    // Key disimpan di konfigurasi gateway, BUKAN di database website.
+    // Ke halaman HANYA dikirim versi termasking; nilai penuh tidak pernah
+    // dirender, tidak pernah di-log, dan tidak pernah dikembalikan
+    // sebagai old input saat validasi gagal.
+    // ------------------------------------------------------------------
+
+    /**
+     * Grup api-keys dari gateway dengan key termasking untuk view.
+     * Null = gateway tidak dapat dihubungi (bedakan dari daftar kosong).
+     */
+    private function maskedApiKeyGroups(CliProxyApiClient $client): ?array
+    {
+        $groups = $client->apiKeyGroups();
+
+        if ($groups === null) {
+            return null;
+        }
+
+        $masked = [];
+
+        foreach ($groups as $provider => $list) {
+            if (! is_array($list)) {
+                continue;
+            }
+
+            foreach ($list as $group) {
+                if (! is_array($group) || ! isset($group['name'])) {
+                    continue;
+                }
+
+                $keys = [];
+
+                foreach ($group['keys'] ?? [] as $entry) {
+                    $keys[] = self::maskKey((string) ($entry['api-key'] ?? ''));
+                }
+
+                $models = [];
+
+                foreach ($group['models'] ?? [] as $model) {
+                    $models[] = is_array($model)
+                        ? ($model['alias'] ?? $model['name'] ?? '')
+                        : (string) $model;
+                }
+
+                $masked[$provider][] = [
+                    'name' => $group['name'],
+                    'base_url' => $group['base-url'] ?? null,
+                    'keys' => $keys,
+                    'models' => array_values(array_filter($models)),
+                ];
+            }
+        }
+
+        return $masked;
+    }
+
+    private static function maskKey(string $key): string
+    {
+        $len = mb_strlen($key);
+
+        if ($len <= 8) {
+            return mb_substr($key, 0, 2).'…'.mb_substr($key, -2);
+        }
+
+        return mb_substr($key, 0, 4).'…'.mb_substr($key, -4);
+    }
+
+    /** Tambah satu akun (grup) API key baru untuk satu provider. */
+    public function storeApiKeyAccount(Request $request, CliProxyApiClient $client): RedirectResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'provider' => ['required', 'string', Rule::in(array_keys(self::API_KEY_PROVIDERS))],
+            'group' => ['required', 'string', 'max:64', 'regex:/^[a-z0-9][a-z0-9_-]*$/'],
+            'api_key' => ['required', 'string', 'min:8', 'max:500'],
+            'base_url' => ['nullable', 'url', 'max:500'],
+            'model_name' => ['nullable', 'string', 'max:200'],
+            'model_alias' => ['nullable', 'string', 'max:200'],
+        ], [
+            'group.regex' => 'Nama akun hanya boleh huruf kecil, angka, dash, dan underscore, diawali huruf/angka.',
+        ]);
+
+        // Provider custom wajib membawa endpoint + modelnya sendiri.
+        $validator->sometimes('base_url', 'required', fn ($input) => $input->provider === 'openai-compatibility');
+        $validator->sometimes('model_name', 'required', fn ($input) => $input->provider === 'openai-compatibility');
+
+        if ($validator->fails()) {
+            return back()->withErrors($validator)->withInput($request->except('api_key'));
+        }
+
+        $data = $validator->validated();
+        $groups = $client->apiKeyGroups();
+
+        if ($groups === null) {
+            return back()->with('error', 'Gateway tidak dapat dihubungi. Key belum disimpan — coba lagi setelah gateway pulih.')
+                ->withInput($request->except('api_key'));
+        }
+
+        $list = $groups[$data['provider']] ?? [];
+
+        foreach ($list as $group) {
+            if (($group['name'] ?? null) === $data['group']) {
+                return back()->with('error', 'Nama akun sudah dipakai untuk provider ini. Pakai nama lain atau tambah key ke akun yang sudah ada.')
+                    ->withInput($request->except('api_key'));
+            }
+        }
+
+        $new = ['name' => $data['group'], 'keys' => [['api-key' => $data['api_key'], 'weight' => 1]]];
+
+        if (! empty($data['base_url'])) {
+            $new['base-url'] = $data['base_url'];
+        }
+
+        if (! empty($data['model_name'])) {
+            $model = ['name' => $data['model_name']];
+
+            if (! empty($data['model_alias'])) {
+                $model['alias'] = $data['model_alias'];
+            }
+
+            $new['models'] = [$model];
+        }
+
+        $list[] = $new;
+
+        if (! $client->putApiKeyGroups($data['provider'], $list)) {
+            return back()->with('error', 'Gateway menolak konfigurasi ini. Periksa kembali provider, endpoint, dan modelnya.')
+                ->withInput($request->except('api_key'));
+        }
+
+        return redirect()->route('ai-providers.index')
+            ->with('success', 'Akun API key "'.$data['group'].'" ('.self::API_KEY_PROVIDERS[$data['provider']].') ditambahkan ke gateway.');
+    }
+
+    /** Tambah satu key lagi ke akun (grup) yang sudah ada. */
+    public function storeApiKey(Request $request, string $provider, string $group, CliProxyApiClient $client): RedirectResponse
+    {
+        abort_unless(isset(self::API_KEY_PROVIDERS[$provider]), 404);
+
+        $validator = Validator::make($request->all(), [
+            'api_key' => ['required', 'string', 'min:8', 'max:500'],
+        ]);
+
+        if ($validator->fails()) {
+            return back()->withErrors($validator)->withInput($request->except('api_key'));
+        }
+
+        $groups = $client->apiKeyGroups();
+
+        if ($groups === null) {
+            return back()->with('error', 'Gateway tidak dapat dihubungi. Key belum disimpan — coba lagi setelah gateway pulih.')
+                ->withInput($request->except('api_key'));
+        }
+
+        $list = $groups[$provider] ?? [];
+        $found = false;
+
+        foreach ($list as &$existing) {
+            if (($existing['name'] ?? null) === $group) {
+                $existing['keys'][] = ['api-key' => $validator->validated()['api_key'], 'weight' => 1];
+                $found = true;
+                break;
+            }
+        }
+
+        unset($existing);
+
+        if (! $found) {
+            return redirect()->route('ai-providers.index')->with('error', 'Akun tidak ditemukan di gateway.');
+        }
+
+        if (! $client->putApiKeyGroups($provider, $list)) {
+            return back()->with('error', 'Gateway menolak konfigurasi ini.')->withInput($request->except('api_key'));
+        }
+
+        return redirect()->route('ai-providers.index')
+            ->with('success', 'Key baru ditambahkan ke akun "'.$group.'". Gateway akan merotasinya bersama key lain di akun itu.');
+    }
+
+    /** Hapus satu key dari akun. Key terakhir yang dihapus ikut menghapus akunnya. */
+    public function destroyApiKey(string $provider, string $group, int $index, CliProxyApiClient $client): RedirectResponse
+    {
+        abort_unless(isset(self::API_KEY_PROVIDERS[$provider]), 404);
+
+        $groups = $client->apiKeyGroups();
+
+        if ($groups === null) {
+            return redirect()->route('ai-providers.index')->with('error', 'Gateway tidak dapat dihubungi. Key belum dihapus.');
+        }
+
+        $list = $groups[$provider] ?? [];
+
+        foreach ($list as $i => $existing) {
+            if (($existing['name'] ?? null) !== $group) {
+                continue;
+            }
+
+            $keys = $existing['keys'] ?? [];
+
+            if (! isset($keys[$index])) {
+                return redirect()->route('ai-providers.index')->with('error', 'Key tidak ditemukan.');
+            }
+
+            unset($keys[$index]);
+            $keys = array_values($keys);
+
+            if ($keys === []) {
+                unset($list[$i]);
+                $list = array_values($list);
+                $message = 'Key terakhir dihapus, akun "'.$group.'" ikut dihapus dari gateway.';
+            } else {
+                $list[$i]['keys'] = $keys;
+                $message = 'Key dihapus dari akun "'.$group.'".';
+            }
+
+            if (! $client->putApiKeyGroups($provider, $list)) {
+                return redirect()->route('ai-providers.index')->with('error', 'Gateway menolak perubahan ini. Key belum dihapus.');
+            }
+
+            return redirect()->route('ai-providers.index')->with('success', $message);
+        }
+
+        return redirect()->route('ai-providers.index')->with('error', 'Akun tidak ditemukan di gateway.');
+    }
+
+    /** Hapus satu akun (grup) beserta seluruh key-nya. */
+    public function destroyApiKeyAccount(string $provider, string $group, CliProxyApiClient $client): RedirectResponse
+    {
+        abort_unless(isset(self::API_KEY_PROVIDERS[$provider]), 404);
+
+        $groups = $client->apiKeyGroups();
+
+        if ($groups === null) {
+            return redirect()->route('ai-providers.index')->with('error', 'Gateway tidak dapat dihubungi. Akun belum dihapus.');
+        }
+
+        $list = array_values(array_filter(
+            $groups[$provider] ?? [],
+            fn ($existing) => ($existing['name'] ?? null) !== $group
+        ));
+
+        if (count($list) === count($groups[$provider] ?? [])) {
+            return redirect()->route('ai-providers.index')->with('error', 'Akun tidak ditemukan di gateway.');
+        }
+
+        if (! $client->putApiKeyGroups($provider, $list)) {
+            return redirect()->route('ai-providers.index')->with('error', 'Gateway menolak perubahan ini. Akun belum dihapus.');
+        }
+
+        return redirect()->route('ai-providers.index')
+            ->with('success', 'Akun "'.$group.'" beserta seluruh key-nya dihapus dari gateway.');
     }
 }

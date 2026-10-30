@@ -870,6 +870,92 @@ class CliProxyApiClient
         return $pool[0];
     }
 
+    /**
+     * Management API v8 (CLIProxyAPI 8.x): konfigurasi api-keys.
+     *
+     * Berbeda dengan /v0/management (near-deprecated, dipakai alur OAuth
+     * lama): v8 menulis node konfigurasi dan hot-reload gateway. Catatan
+     * vendor: rute credentials TIDAK mengedit grup api-keys; grup
+     * api-keys hanya lewat rute konfigurasi. Daftar grup per provider
+     * diganti utuh (path tidak bisa memilih indeks array), jadi
+     * tambah/hapus key = baca → ubah → PUT ulang daftarnya.
+     */
+    public function isV8ManagementAvailable(): bool
+    {
+        if (! $this->managementKey) {
+            return false;
+        }
+
+        try {
+            return $this->managementV8()->get('/config')->successful();
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * Daftar grup api-keys per provider, atau null bila gateway tidak
+     * dapat dihubungi / menjawab error non-404. Node yang belum ada
+     * (gateway tanpa api-keys) dibaca sebagai daftar kosong.
+     *
+     * @return array<string, array<int, array<string, mixed>>>|null
+     */
+    public function apiKeyGroups(): ?array
+    {
+        if (! $this->managementKey) {
+            return null;
+        }
+
+        try {
+            $response = $this->managementV8()->get('/config/api-keys');
+
+            if ($response->successful()) {
+                $data = $response->json();
+
+                return is_array($data) ? $data : [];
+            }
+
+            // Node belum ada = belum ada api-keys sama sekali.
+            if ($response->status() === 404) {
+                return [];
+            }
+
+            return null;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /** Ganti utuh daftar grup satu provider. Sukses → katalog model di-refresh. */
+    public function putApiKeyGroups(string $provider, array $groups): bool
+    {
+        if (! $this->managementKey) {
+            return false;
+        }
+
+        try {
+            $response = $this->managementV8()->put("/config/api-keys/{$provider}", array_values($groups));
+
+            if ($response->successful()) {
+                $this->forgetModelsCache();
+
+                return true;
+            }
+
+            return false;
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    protected function managementV8()
+    {
+        return Http::baseUrl($this->baseUrl.'/v8/management')
+            ->withToken($this->managementKey)
+            ->timeout($this->timeout)
+            ->acceptJson();
+    }
+
     protected function management()
     {
         return Http::baseUrl($this->baseUrl.'/v0/management')

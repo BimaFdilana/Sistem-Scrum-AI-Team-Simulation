@@ -5,7 +5,7 @@
         <div>
             <p class="eyebrow"><span class="eyebrow-line"></span>AI PROVIDERS</p>
             <h1>Provider AI</h1>
-            <p class="page-subtitle">Hubungkan akun langganan AI kamu (Google, ChatGPT, Claude) lewat login OAuth. Website memakai kuota langgananmu melalui gateway lokal CLIProxyAPI — tanpa API key.</p>
+            <p class="page-subtitle">Hubungkan akun langganan AI kamu (Google, ChatGPT, Claude) lewat login OAuth. Kamu juga bisa menambahkan API key (multi key &amp; multi akun) di bawah — key disimpan di konfigurasi gateway CLIProxyAPI, bukan di database website.</p>
         </div>
         <span class="count-pill">{{ count($providers) }} providers</span>
     </section>
@@ -75,6 +75,94 @@
                 </div>
             </article>
         @endforeach
+    </section>
+
+    <section class="form-panel" style="margin-top: 1.5rem;">
+        <div class="panel-heading"><div><p class="section-kicker">API KEY</p><h2>Akun API key (multi key &amp; multi akun)</h2></div></div>
+        <p class="page-subtitle" style="margin-top:0">Satu provider bisa punya beberapa akun (grup), dan satu akun bisa punya beberapa key. Gateway merotasi key di dalam satu akun dan berpindah akun saat satu akun kena limit. Key tidak pernah ditampilkan utuh di sini — hanya 4 karakter awal dan akhir.</p>
+        @if ($errors->any())
+            <div class="form-alert"><ul style="margin:0;padding-left:1.1rem">@foreach ($errors->all() as $message)<li>{{ $message }}</li>@endforeach</ul></div>
+        @endif
+        @if ($apiKeys === null || ! $v8Up)
+            <p class="form-alert">Management API v8 gateway tidak aktif / tidak dapat dihubungi — pastikan gateway versi 8.x berjalan dan <code>CLIPROXY_MANAGEMENT_KEY</code> terisi di <code>.env</code>. Setelah aktif, API key bisa dikelola dari sini.</p>
+        @else
+            @forelse ($apiKeys as $provider => $groups)
+                <h3 style="margin-top:1.25rem">{{ $apiKeyProviders[$provider] ?? $provider }}</h3>
+                @foreach ($groups as $group)
+                    <article class="directory-row">
+                        <div class="directory-main">
+                            <h2>{{ $group['name'] }}</h2>
+                            @if ($group['base_url'])<p><small>Endpoint: {{ $group['base_url'] }}</small></p>@endif
+                            @if ($group['models'])<p><small>Model: {{ implode(', ', $group['models']) }}</small></p>@endif
+                            <ul style="margin:.5rem 0 0;padding-left:1.1rem">
+                                @foreach ($group['keys'] as $index => $masked)
+                                    <li><small><code>{{ $masked }}</code></small>
+                                        <form method="POST" action="{{ route('ai-providers.api-keys.keys.destroy', ['provider' => $provider, 'group' => $group['name'], 'index' => $index]) }}" style="display:inline">
+                                            @csrf @method('DELETE')
+                                            <button class="button" type="submit" onclick="return handleConfirm(event, {title: 'Hapus key?', message: 'Hapus key {{ $masked }} dari akun {{ $group['name'] }}?{{ count($group['keys']) === 1 ? ' Ini key terakhir — akunnya ikut terhapus.' : '' }}', confirmLabel: 'Ya, hapus', danger: true})">Hapus key</button>
+                                        </form>
+                                    </li>
+                                @endforeach
+                            </ul>
+                            <form method="POST" action="{{ route('ai-providers.api-keys.keys.store', ['provider' => $provider, 'group' => $group['name']]) }}" style="margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:end">
+                                @csrf
+                                <div class="form-field" style="margin:0">
+                                    <label for="key-{{ $provider }}-{{ $group['name'] }}">Tambah key ke akun ini</label>
+                                    <input type="password" id="key-{{ $provider }}-{{ $group['name'] }}" name="api_key" autocomplete="off" spellcheck="false" required minlength="8" maxlength="500">
+                                </div>
+                                <button class="button button-primary" type="submit">Tambah key</button>
+                            </form>
+                        </div>
+                        <div class="directory-actions">
+                            <form method="POST" action="{{ route('ai-providers.api-keys.destroy', ['provider' => $provider, 'group' => $group['name']]) }}">
+                                @csrf @method('DELETE')
+                                <button class="button" type="submit" onclick="return handleConfirm(event, {title: 'Hapus akun?', message: 'Hapus akun {{ $group['name'] }} beserta seluruh key-nya dari gateway?', confirmLabel: 'Ya, hapus', danger: true})">Hapus akun</button>
+                            </form>
+                        </div>
+                    </article>
+                @endforeach
+            @empty
+                <p><small>Belum ada akun API key.</small></p>
+            @endforelse
+            <h3 style="margin-top:1.5rem">Tambah akun API key</h3>
+            <form method="POST" action="{{ route('ai-providers.api-keys.store') }}">
+                @csrf
+                <div class="form-field">
+                    <label for="provider">Provider</label>
+                    <select id="provider" name="provider" required>
+                        @foreach ($apiKeyProviders as $slug => $label)<option value="{{ $slug }}" @selected(old('provider') === $slug)>{{ $label }}</option>@endforeach
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label for="group">Nama akun</label>
+                    <input type="text" id="group" name="group" value="{{ old('group') }}" required maxlength="64" spellcheck="false" placeholder="mis. gemini-utama">
+                    <p class="form-hint">Huruf kecil, angka, dash, underscore. Harus unik per provider.</p>
+                </div>
+                <div class="form-field">
+                    <label for="api_key">API key</label>
+                    <input type="password" id="api_key" name="api_key" autocomplete="off" spellcheck="false" required minlength="8" maxlength="500">
+                    <p class="form-hint">Key dikirim ke gateway dan disimpan di konfigurasinya. Tidak pernah ditampilkan lagi setelah disimpan.</p>
+                </div>
+                <div class="form-field">
+                    <label for="base_url">Endpoint (base URL)</label>
+                    <input type="url" id="base_url" name="base_url" value="{{ old('base_url') }}" maxlength="500" spellcheck="false" placeholder="kosongkan untuk endpoint bawaan provider">
+                    <p class="form-hint">Wajib untuk OpenAI-compatible (custom). Untuk provider native, isi hanya bila memakai endpoint lain (mis. Vertex-compatible).</p>
+                </div>
+                <div class="form-field">
+                    <label for="model_name">Nama model (upstream)</label>
+                    <input type="text" id="model_name" name="model_name" value="{{ old('model_name') }}" maxlength="200" spellcheck="false">
+                    <p class="form-hint">Wajib untuk OpenAI-compatible (custom) — model yang dilayani endpoint itu.</p>
+                </div>
+                <div class="form-field">
+                    <label for="model_alias">Alias model (opsional)</label>
+                    <input type="text" id="model_alias" name="model_alias" value="{{ old('model_alias') }}" maxlength="200" spellcheck="false">
+                    <p class="form-hint">Nama yang dilihat aplikasi/gateway. Kosongkan untuk memakai nama model apa adanya.</p>
+                </div>
+                <div class="form-actions">
+                    <button class="button button-primary" type="submit">Tambah akun</button>
+                </div>
+            </form>
+        @endif
     </section>
 
     @if ($usage['other'])
