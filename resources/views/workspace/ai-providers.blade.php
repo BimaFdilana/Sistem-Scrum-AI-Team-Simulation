@@ -104,6 +104,16 @@
                             <h2>{{ $group['name'] }}</h2>
                             @if ($group['base_url'])<p><small>Endpoint: {{ $group['base_url'] }}</small></p>@endif
                             @if ($group['models'])<p><small>Model: {{ implode(', ', $group['models']) }}</small></p>@endif
+                            @if (! empty($group['quota']))
+                                @php $q = $group['quota']; $qpct = isset($q['usagePercent']) ? min(100, max(0, $q['usagePercent'])) : null; @endphp
+                                <div style="margin-top:.75rem;padding:.75rem 1rem;border:1px solid var(--line);border-radius:12px">
+                                    <div style="display:flex;justify-content:space-between;gap:1rem"><strong>Kuota{{ isset($q['name']) ? ': '.$q['name'] : '' }}</strong>@if (isset($q['status']))<span><small>{{ $q['status'] }}</small></span>@endif</div>
+                                    @if ($qpct !== null)
+                                        <div style="background:#e5e7eb;border-radius:999px;height:12px;overflow:hidden;margin-top:.5rem"><div style="background:#2563eb;height:12px;width:{{ $qpct }}%"></div></div>
+                                    @endif
+                                    <p style="margin:.5rem 0 0"><small>@if (isset($q['usedTokens'], $q['maxTokens']))Terpakai {{ number_format($q['usedTokens']) }} dari {{ number_format($q['maxTokens']) }} token{{ $qpct !== null ? ' ('.$qpct.'%)' : '' }} · sisa {{ number_format($q['remainingTokens'] ?? 0) }} token.@endif @if (isset($q['usage'])) Pemakaian: {{ $q['usage'] }}.@endif @if (isset($q['expiresAt'])) Berlaku sampai {{ $q['expiresAt'] }}.@endif @if (count($group['keys']) > 1) Kuota key pertama.@endif</small></p>
+                                </div>
+                            @endif
                             <ul style="margin:.5rem 0 0;padding-left:1.1rem">
                                 @foreach ($group['keys'] as $index => $masked)
                                     <li><small><code>{{ $masked }}</code></small>

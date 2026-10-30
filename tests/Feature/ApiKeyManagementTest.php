@@ -56,6 +56,69 @@ class ApiKeyManagementTest extends TestCase
         $response->assertDontSee('AIzaSy-SECRETKEY-1234');
     }
 
+    private function fakePageWithQuota(array $apiKeys, mixed $quota, int $quotaStatus = 200): void
+    {
+        Http::fake([
+            $this->v0('/auth-files') => Http::response(['files' => []]),
+            'http://127.0.0.1:8317/v1/models' => Http::response(['data' => []]),
+            $this->v8('/config') => Http::response([]),
+            $this->v8('/config/api-keys') => Http::response($apiKeys),
+            $this->v8('/config/api-keys/*') => Http::response(['status' => 'ok']),
+            'https://example.com/v1/quota' => Http::response($quota, $quotaStatus),
+        ]);
+    }
+
+    public function test_index_shows_aggregator_quota_on_account_card(): void
+    {
+        $this->fakePageWithQuota(['openai-compatibility' => [
+            ['name' => 'agg-1', 'base-url' => 'https://example.com/v1', 'keys' => [['api-key' => 'test-key-12345678', 'weight' => 1]], 'models' => [['name' => 'kimi-k3']]],
+        ]], [
+            'id' => 'q-1', 'name' => 'Paket Pro', 'status' => 'active',
+            'maxTokens' => 1000000, 'usedTokens' => 250000, 'remainingTokens' => 750000,
+            'usagePercent' => 25, 'usage' => '250k/1M', 'expiresAt' => '2026-12-31 23:59:59',
+        ]);
+
+        $response = $this->actingAs(User::factory()->create())->get('/ai-providers');
+
+        $response->assertOk();
+        $response->assertSee('Kuota: Paket Pro');
+        $response->assertSee('active');
+        $response->assertSee('250,000');
+        $response->assertSee('1,000,000');
+        $response->assertSee('750,000');
+        $response->assertSee('25%');
+        $response->assertSee('31 Dec 2026, 23:59');
+        $response->assertDontSee('test-key-12345678');
+    }
+
+    public function test_index_hides_quota_when_endpoint_fails(): void
+    {
+        $this->fakePageWithQuota(['openai-compatibility' => [
+            ['name' => 'agg-fail', 'base-url' => 'https://example.com/v1', 'keys' => [['api-key' => 'test-key-12345678', 'weight' => 1]], 'models' => []],
+        ]], ['error' => 'boom'], 500);
+
+        $response = $this->actingAs(User::factory()->create())->get('/ai-providers');
+
+        $response->assertOk();
+        $response->assertDontSee('Terpakai');
+    }
+
+    public function test_index_handles_quota_list_response(): void
+    {
+        $this->fakePageWithQuota(['openai-compatibility' => [
+            ['name' => 'agg-list', 'base-url' => 'https://example.com/v1', 'keys' => [['api-key' => 'test-key-12345678', 'weight' => 1]], 'models' => []],
+        ]], [
+            ['name' => 'Paket Pro', 'status' => 'active', 'maxTokens' => 1000, 'usedTokens' => 100],
+            ['name' => 'Paket Lain', 'status' => 'active', 'maxTokens' => 2000, 'usedTokens' => 200],
+        ]);
+
+        $response = $this->actingAs(User::factory()->create())->get('/ai-providers');
+
+        $response->assertOk();
+        $response->assertSee('Kuota: Paket Pro');
+        $response->assertDontSee('Paket Lain');
+    }
+
     public function test_store_account_puts_new_group_to_v8(): void
     {
         $this->fakePage(['gemini' => []]);

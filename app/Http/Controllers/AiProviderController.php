@@ -7,6 +7,7 @@ use App\Services\CliProxyApiClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -252,6 +253,7 @@ class AiProviderController extends Controller
                     'name' => $group['name'],
                     'base_url' => $group['base-url'] ?? null,
                     'keys' => $keys,
+                    'quota' => $this->fetchGroupQuota($provider, $group),
                     'models' => array_values(array_filter($models)),
                     'models_raw' => array_values(array_filter(
                         array_map(
@@ -267,6 +269,133 @@ class AiProviderController extends Controller
         }
 
         return $masked;
+    }
+
+    /**
+     * Ambil kuota agregator untuk satu akun (grup) API key.
+     * GET {base-url}/quota dengan key pertama akun, server-side saja:
+     * key penuh tidak pernah dirender, dilog, atau dikembalikan ke browser
+     * (view hanya menerima hasil normalisasi). Hasil sukses di-cache 60
+     * detik per provider+akun agar pemuatan halaman tidak menelepon
+     * upstream setiap kali; kegagalan ditandai 30 detik agar endpoint yang
+     * mati tidak menghambat setiap pemuatan. Gagal apa pun → null, kartu
+     * tetap tampil tanpa blok kuota.
+     */
+    private function fetchGroupQuota(string $provider, array $group): ?array
+    {
+        $baseUrl = $group['base-url'] ?? null;
+        $key = $group['keys'][0]['api-key'] ?? null;
+
+        if (! is_string($baseUrl) || $baseUrl === '' || ! is_string($key) || $key === '') {
+            return null;
+        }
+
+        $cacheKey = 'api-quota:'.$provider.':'.$group['name'];
+        $cached = Cache::get($cacheKey);
+
+        if (is_array($cached)) {
+            return isset($cached['_unavailable']) ? null : $cached;
+        }
+
+        try {
+            $response = Http::timeout(5)->withToken($key)
+                ->acceptJson()->get(rtrim($baseUrl, '/').'/quota');
+
+            if (! $response->successful()) {
+                Cache::put($cacheKey, ['_unavailable' => true], 30);
+
+                return null;
+            }
+
+            $quota = self::normalizeQuota($response->json());
+
+            if ($quota === null) {
+                Cache::put($cacheKey, ['_unavailable' => true], 30);
+
+                return null;
+            }
+
+            Cache::put($cacheKey, $quota, 60);
+
+            return $quota;
+        } catch (Throwable) {
+            Cache::put($cacheKey, ['_unavailable' => true], 30);
+
+            return null;
+        }
+    }
+
+    /**
+     * Normalisasi respons kuota agregator ke bentuk kartu: id, name,
+     * status, maxTokens, usedTokens, remainingTokens, usagePercent, usage
+     * (skalar saja), expiresAt (diformat bila bisa diparse). Menerima
+     * objek langsung, {data: objek}, atau list (dipakai item pertama).
+     * Bentuk tak dikenal (mis. {error: ...}) → null.
+     */
+    private static function normalizeQuota(mixed $json): ?array
+    {
+        if (is_array($json) && array_is_list($json)) {
+            $json = $json[0] ?? null;
+        }
+
+        if (is_array($json) && isset($json['data'])) {
+            return self::normalizeQuota($json['data']);
+        }
+
+        if (! is_array($json)) {
+            return null;
+        }
+
+        $known = array_intersect_key($json, array_flip([
+            'id', 'name', 'status', 'maxTokens', 'usedTokens',
+            'remainingTokens', 'usagePercent', 'usage', 'expiresAt',
+        ]));
+
+        if ($known === []) {
+            return null;
+        }
+
+        $quota = [];
+
+        foreach (['id', 'name', 'status'] as $field) {
+            if (isset($known[$field]) && is_scalar($known[$field])) {
+                $quota[$field] = (string) $known[$field];
+            }
+        }
+
+        foreach (['maxTokens', 'usedTokens', 'remainingTokens'] as $field) {
+            if (isset($known[$field]) && is_numeric($known[$field])) {
+                $quota[$field] = (int) $known[$field];
+            }
+        }
+
+        if (isset($known['usagePercent']) && is_numeric($known['usagePercent'])) {
+            $quota['usagePercent'] = round((float) $known['usagePercent'], 1);
+        }
+
+        if (isset($known['usage']) && is_scalar($known['usage'])) {
+            $quota['usage'] = (string) $known['usage'];
+        }
+
+        if (! isset($quota['remainingTokens']) && isset($quota['maxTokens'], $quota['usedTokens'])) {
+            $quota['remainingTokens'] = max(0, $quota['maxTokens'] - $quota['usedTokens']);
+        }
+
+        if (! isset($quota['usagePercent']) && isset($quota['maxTokens'], $quota['usedTokens']) && $quota['maxTokens'] > 0) {
+            $quota['usagePercent'] = round($quota['usedTokens'] / $quota['maxTokens'] * 100, 1);
+        }
+
+        if (isset($known['expiresAt']) && is_scalar($known['expiresAt'])) {
+            $raw = (string) $known['expiresAt'];
+
+            try {
+                $quota['expiresAt'] = \Carbon\Carbon::parse($raw)->format('d M Y, H:i');
+            } catch (Throwable) {
+                $quota['expiresAt'] = $raw;
+            }
+        }
+
+        return $quota;
     }
 
     private static function maskKey(string $key): string
