@@ -926,8 +926,15 @@ class StoryEstimationService
         // sementara pesannya ("AI unavailable: RATE_LIMITED") tidak memuat
         // "RATE LIMIT" (spasi) maupun "429" — tanpa cabang ini, rate limit
         // jatuh ke PROVIDER_REQUEST_FAILED generik (kasus Run 9–12).
+        // Aturan tanpa-default: role belum memilih / model bermasalah
+        // adalah kategori kegagalan sendiri — bukan PROVIDER_REQUEST_FAILED
+        // generik, supaya PO melihat peringatan penggantian/pemilihan.
+        if ($exception instanceof \App\Exceptions\ModelNotChosenException) {
+            return 'MODEL_NOT_CHOSEN';
+        }
         if ($exception instanceof \App\Exceptions\AiUnavailableException) {
             return match ($exception->errorCode) {
+                'MODEL_PROBLEMATIC' => 'MODEL_PROBLEMATIC',
                 'RATE_LIMITED' => 'PROVIDER_RATE_LIMITED',
                 'UPSTREAM_OVERLOADED' => 'PROVIDER_OVERLOADED',
                 'TIMEOUT' => 'PROVIDER_TIMEOUT',

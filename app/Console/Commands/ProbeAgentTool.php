@@ -36,7 +36,7 @@ class ProbeAgentTool extends Command
             $model = $agents->toolModel($role) ?? '';
         }
         if ($model === '') {
-            $this->error('Tidak ada model untuk peran '.$role.' (dan --model tidak diisi).');
+            $this->error('Tidak ada model untuk peran '.$role.'. Pilih model peran ini di halaman Konfigurasi Agent, atau isi --model secara eksplisit.');
 
             return self::FAILURE;
         }

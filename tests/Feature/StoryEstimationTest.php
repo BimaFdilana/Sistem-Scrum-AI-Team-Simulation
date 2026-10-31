@@ -22,15 +22,23 @@ class StoryEstimationTest extends TestCase
     {
         $this->configureEstimationProfiles();
         Http::fake(function (Request $request) {
-            if (str_contains($request->url(), 'scrum-master.test')) {
+            if (str_ends_with($request->url(), '/v1/models')) {
+                return Http::response(['data' => [
+                    ['id' => 'be-model', 'owned_by' => 'openai'],
+                    ['id' => 'fe-model', 'owned_by' => 'openai'],
+                    ['id' => 'qa-model', 'owned_by' => 'openai'],
+                    ['id' => 'sm-model', 'owned_by' => 'openai'],
+                ]]);
+            }
+            if ($request['model'] === 'sm-model') {
                 return Http::response(['choices' => [['message' => ['content' => 'Scrum Master: ketiganya setuju 5 poin.']]]]);
             }
             $content = $request['messages'][1]['content'] ?? '';
             $finalConfirmation = str_contains($content, 'KONFIRMASI FINAL PUTARAN 2');
             $secondRound = str_contains($content, 'PUTARAN 2');
-            $point = ($secondRound || $finalConfirmation) ? 5 : match (true) {
-                str_contains($request->url(), 'backend.test') => 3,
-                str_contains($request->url(), 'frontend.test') => 5,
+            $point = ($secondRound || $finalConfirmation) ? 5 : match ($request['model']) {
+                'be-model' => 3,
+                'fe-model' => 5,
                 default => 8,
             };
             if ($finalConfirmation) {
@@ -56,7 +64,9 @@ class StoryEstimationTest extends TestCase
         $this->assertDatabaseCount('story_estimation_agent_runs', 6);
         $this->assertDatabaseCount('story_estimation_messages', 18);
         $this->assertStringContainsString('ketiganya setuju 5 poin', ChatMessage::query()->where('role', 'assistant')->value('content'));
-        Http::assertSentCount(8);
+        // 8 chat completions = 6 vote + 1 ringkasan SM + 1 laporan SM
+        // (1 request katalog model tidak dihitung).
+        $this->assertCount(8, Http::recorded(fn ($request) => str_ends_with($request->url(), '/v1/chat/completions')));
         $this->get('/agents/backend-developer/activity')->assertOk()->assertSee('REFINEMENT FIBONACCI');
     }
 
@@ -64,7 +74,15 @@ class StoryEstimationTest extends TestCase
     {
         $this->configureEstimationProfiles();
         Http::fake(function (Request $request) {
-            if (str_contains($request->url(), 'scrum-master.test')) {
+            if (str_ends_with($request->url(), '/v1/models')) {
+                return Http::response(['data' => [
+                    ['id' => 'be-model', 'owned_by' => 'openai'],
+                    ['id' => 'fe-model', 'owned_by' => 'openai'],
+                    ['id' => 'qa-model', 'owned_by' => 'openai'],
+                    ['id' => 'sm-model', 'owned_by' => 'openai'],
+                ]]);
+            }
+            if ($request['model'] === 'sm-model') {
                 return Http::response(['choices' => [['message' => ['content' => 'Scrum Master: ketiganya setuju 5 poin.']]]]);
             }
             $content = $request['messages'][1]['content'] ?? '';
@@ -77,7 +95,7 @@ class StoryEstimationTest extends TestCase
             $body = json_encode($response);
             // QA membungkus JSON dengan prosa + pagar kode (gaya jawaban yang
             // sebelumnya ditolak INVALID_JSON_SCHEMA); BE/FE mengembalikan murni.
-            if (str_contains($request->url(), 'qa.test') && ! $isFinal) {
+            if ($request['model'] === 'qa-model' && ! $isFinal) {
                 $body = "Berikut estimasi saya:\n```json\n".$body."\n```\nSemoga membantu.";
             }
 
@@ -97,12 +115,20 @@ class StoryEstimationTest extends TestCase
     {
         $this->configureEstimationProfiles();
         Http::fake(function (Request $request) {
-            if (str_contains($request->url(), 'scrum-master.test')) {
+            if (str_ends_with($request->url(), '/v1/models')) {
+                return Http::response(['data' => [
+                    ['id' => 'be-model', 'owned_by' => 'openai'],
+                    ['id' => 'fe-model', 'owned_by' => 'openai'],
+                    ['id' => 'qa-model', 'owned_by' => 'openai'],
+                    ['id' => 'sm-model', 'owned_by' => 'openai'],
+                ]]);
+            }
+            if ($request['model'] === 'sm-model') {
                 return Http::response([], 500);
             }
-            $point = match (true) {
-                str_contains($request->url(), 'backend.test') => 3,
-                str_contains($request->url(), 'frontend.test') => 5,
+            $point = match ($request['model']) {
+                'be-model' => 3,
+                'fe-model' => 5,
                 default => 8,
             };
             $content = $request['messages'][1]['content'] ?? '';
@@ -128,7 +154,9 @@ class StoryEstimationTest extends TestCase
         $this->assertDatabaseCount('story_estimation_messages', 18);
         $this->assertNull($story->fresh()->estimate_points);
         $this->assertDatabaseCount('chat_messages', 0);
-        Http::assertSentCount(7);
+        // 9 chat completions = 6 vote + 3 percobaan laporan SM (500
+        // di-retry pada model yang sama, bukan diganti model lain).
+        $this->assertCount(9, Http::recorded(fn ($request) => str_ends_with($request->url(), '/v1/chat/completions')));
     }
 
     public function test_backlog_shows_read_only_discussion_and_hides_manual_point_selection(): void
@@ -146,20 +174,21 @@ class StoryEstimationTest extends TestCase
 
     private function configureEstimationProfiles(): void
     {
+        // Estimasi kini lewat gateway CLIProxyAPI dengan model per role
+        // dari menu (aturan tanpa-default) — bukan lagi endpoint
+        // per-role legacy. Model per role dibedakan agar fake gateway
+        // bisa menjawab per peran.
         config([
-            'services.hermes.base_url' => 'http://scrum-master.test/v1',
-            'services.hermes.api_key' => 'sm-test-key',
-            'services.hermes.model' => 'scrum-master',
-            'services.agent_profiles.backend-developer.base_url' => 'http://backend.test/v1',
-            'services.agent_profiles.backend-developer.api_key' => 'backend-test-key',
-            'services.agent_profiles.backend-developer.model' => 'backend-developer',
-            'services.agent_profiles.frontend-developer.base_url' => 'http://frontend.test/v1',
-            'services.agent_profiles.frontend-developer.api_key' => 'frontend-test-key',
-            'services.agent_profiles.frontend-developer.model' => 'frontend-developer',
-            'services.agent_profiles.qa-engineer.base_url' => 'http://qa.test/v1',
-            'services.agent_profiles.qa-engineer.api_key' => 'qa-test-key',
-            'services.agent_profiles.qa-engineer.model' => 'qa-engineer',
+            'ai.cliproxy.agents_enabled' => true,
+            'ai.cliproxy.api_key' => 'test-key',
+            'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
         ]);
+        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('current')->with('backend-developer')->andReturn(['status' => 'verified', 'model' => 'be-model']);
+            $mock->shouldReceive('current')->with('frontend-developer')->andReturn(['status' => 'verified', 'model' => 'fe-model']);
+            $mock->shouldReceive('current')->with('qa-engineer')->andReturn(['status' => 'verified', 'model' => 'qa-model']);
+            $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'sm-model']);
+        });
     }
 
     private function makeStory(): array

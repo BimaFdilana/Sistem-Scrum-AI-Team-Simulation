@@ -50,8 +50,15 @@ class SprintsTest extends TestCase
 
     public function test_sprint_goal_is_generated_from_its_user_stories_by_scrum_master_ai(): void
     {
-        Http::fake(['*/chat/completions' => Http::response(['choices' => [['message' => ['content' => 'Mengelola data penganggaran secara konsisten dan tervalidasi.']]]])]);
-        config(['services.hermes.base_url' => 'https://hermes.test/v1', 'services.hermes.api_key' => 'test-key', 'services.hermes.model' => 'test-model']);
+        Http::fake([
+            '*/chat/completions' => Http::response(['choices' => [['message' => ['content' => 'Mengelola data penganggaran secara konsisten dan tervalidasi.']]]]),
+            'http://127.0.0.1:8317/v1/models' => Http::response(['data' => [['id' => 'sm-model', 'owned_by' => 'openai']]]),
+        ]);
+        // Sprint goal SM kini ketat: perlu pilihan SM di menu.
+        config(['ai.cliproxy.agents_enabled' => true, 'ai.cliproxy.api_key' => 'test-key', 'ai.cliproxy.base_url' => 'http://127.0.0.1:8317']);
+        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'sm-model']);
+        });
         $owner = User::factory()->create();
         $project = $this->createProject();
         $sprint = $this->createSprint($project);
@@ -68,14 +75,21 @@ class SprintsTest extends TestCase
 
         $this->assertSame('Mengelola data penganggaran secara konsisten dan tervalidasi.', $sprint->fresh()->goal);
         $this->assertSame('AI_DRAFT', $sprint->fresh()->goal_source);
-        Http::assertSent(fn ($request): bool => str_contains((string) $request['messages'][1]['content'], 'US-01')
+        Http::assertSent(fn ($request): bool => isset($request['messages'][1]['content'])
+            && str_contains((string) $request['messages'][1]['content'], 'US-01')
             && str_contains((string) $request['messages'][1]['content'], 'Acceptance Criteria'));
     }
 
     public function test_scrum_master_goal_generation_fails_safely_when_ai_is_unavailable(): void
     {
-        Http::fake(['*/chat/completions' => Http::response([], 503)]);
-        config(['services.hermes.base_url' => 'https://hermes.test/v1', 'services.hermes.api_key' => 'test-key', 'services.hermes.model' => 'test-model']);
+        Http::fake([
+            '*/chat/completions' => Http::response([], 503),
+            'http://127.0.0.1:8317/v1/models' => Http::response(['data' => [['id' => 'sm-model', 'owned_by' => 'openai']]]),
+        ]);
+        config(['ai.cliproxy.agents_enabled' => true, 'ai.cliproxy.api_key' => 'test-key', 'ai.cliproxy.base_url' => 'http://127.0.0.1:8317']);
+        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'sm-model']);
+        });
         $owner = User::factory()->create();
         $project = $this->createProject();
         $sprint = $this->createSprint($project);
@@ -89,8 +103,14 @@ class SprintsTest extends TestCase
 
     public function test_po_must_approve_the_generated_sprint_goal_and_complete_story_scope_before_starting(): void
     {
-        Http::fake(['*/chat/completions' => Http::response(['choices' => [['message' => ['content' => 'Menyelesaikan akses aman untuk pengguna.']]]])]);
-        config(['services.hermes.base_url' => 'https://hermes.test/v1', 'services.hermes.api_key' => 'test-key', 'services.hermes.model' => 'test-model']);
+        Http::fake([
+            '*/chat/completions' => Http::response(['choices' => [['message' => ['content' => 'Menyelesaikan akses aman untuk pengguna.']]]]),
+            'http://127.0.0.1:8317/v1/models' => Http::response(['data' => [['id' => 'sm-model', 'owned_by' => 'openai']]]),
+        ]);
+        config(['ai.cliproxy.agents_enabled' => true, 'ai.cliproxy.api_key' => 'test-key', 'ai.cliproxy.base_url' => 'http://127.0.0.1:8317']);
+        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'sm-model']);
+        });
         $owner = User::factory()->create();
         $project = $this->createProject();
         $sprint = $this->createSprint($project);

@@ -16,6 +16,11 @@ class AgentToolRunnerTest extends TestCase
         parent::setUp();
         config(['ai.cliproxy.agents_enabled' => true, 'ai.cliproxy.api_key' => 'test-key']);
         Cache::forget('cliproxy:models');
+        // run() kini ketat: perlu snapshot menu terverifikasi untuk
+        // peran yang diuji (model sama dengan katalog fake di bawah).
+        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('current')->andReturn(['status' => 'verified', 'model' => 'gemini-3.1-flash-lite']);
+        });
         $this->worktree = storage_path('framework/testing/tool-runner-'.uniqid());
         mkdir($this->worktree, 0700, true);
         file_put_contents($this->worktree.'/hello.txt', 'hello');

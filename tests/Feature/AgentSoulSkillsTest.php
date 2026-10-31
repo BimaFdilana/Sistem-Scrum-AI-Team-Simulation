@@ -70,16 +70,24 @@ class AgentSoulSkillsTest extends TestCase
         $this->configureEstimationProfiles();
         $prompts = [];
         Http::fake(function (Request $request) use (&$prompts) {
+            if (str_ends_with($request->url(), '/v1/models')) {
+                return Http::response(['data' => [
+                    ['id' => 'be-model', 'owned_by' => 'openai'],
+                    ['id' => 'fe-model', 'owned_by' => 'openai'],
+                    ['id' => 'qa-model', 'owned_by' => 'openai'],
+                    ['id' => 'sm-model', 'owned_by' => 'openai'],
+                ]]);
+            }
             $content = $request['messages'][1]['content'] ?? '';
             // Simpan hanya prompt PUTARAN 1 (round 2 menimpa dengan prompt konfirmasi).
             if (str_contains($content, 'PUTARAN 1')) {
-                foreach (['backend' => 'be', 'frontend' => 'fe', 'qa' => 'qa'] as $needle => $key) {
-                    if (str_contains($request->url(), $needle.'.test')) {
+                foreach (['be-model' => 'be', 'fe-model' => 'fe', 'qa-model' => 'qa'] as $model => $key) {
+                    if ($request['model'] === $model) {
                         $prompts[$key] = $content;
                     }
                 }
             }
-            if (str_contains($request->url(), 'scrum-master.test')) {
+            if ($request['model'] === 'sm-model') {
                 return Http::response(['choices' => [['message' => ['content' => 'Ringkasan.']]]]);
             }
             $isRound1 = str_contains($content, 'PUTARAN 1');
@@ -119,11 +127,19 @@ class AgentSoulSkillsTest extends TestCase
         $this->configureEstimationProfiles();
         $prompts = [];
         Http::fake(function (Request $request) use (&$prompts) {
+            if (str_ends_with($request->url(), '/v1/models')) {
+                return Http::response(['data' => [
+                    ['id' => 'be-model', 'owned_by' => 'openai'],
+                    ['id' => 'fe-model', 'owned_by' => 'openai'],
+                    ['id' => 'qa-model', 'owned_by' => 'openai'],
+                    ['id' => 'sm-model', 'owned_by' => 'openai'],
+                ]]);
+            }
             $content = $request['messages'][1]['content'] ?? '';
-            if (str_contains($content, 'PUTARAN 1') && str_contains($request->url(), 'backend.test')) {
+            if (str_contains($content, 'PUTARAN 1') && $request['model'] === 'be-model') {
                 $prompts['be'] = $content;
             }
-            if (str_contains($request->url(), 'scrum-master.test')) {
+            if ($request['model'] === 'sm-model') {
                 return Http::response(['choices' => [['message' => ['content' => 'Ringkasan.']]]]);
             }
             $isRound1 = str_contains($content, 'PUTARAN 1');
@@ -150,20 +166,20 @@ class AgentSoulSkillsTest extends TestCase
 
     private function configureEstimationProfiles(): void
     {
+        // Estimasi kini lewat gateway CLIProxyAPI dengan model per role
+        // dari menu (aturan tanpa-default) — bukan lagi endpoint
+        // per-role legacy.
         config([
-            'services.hermes.base_url' => 'http://scrum-master.test/v1',
-            'services.hermes.api_key' => 'sm-test-key',
-            'services.hermes.model' => 'scrum-master',
-            'services.agent_profiles.backend-developer.base_url' => 'http://backend.test/v1',
-            'services.agent_profiles.backend-developer.api_key' => 'backend-test-key',
-            'services.agent_profiles.backend-developer.model' => 'backend-developer',
-            'services.agent_profiles.frontend-developer.base_url' => 'http://frontend.test/v1',
-            'services.agent_profiles.frontend-developer.api_key' => 'frontend-test-key',
-            'services.agent_profiles.frontend-developer.model' => 'frontend-developer',
-            'services.agent_profiles.qa-engineer.base_url' => 'http://qa.test/v1',
-            'services.agent_profiles.qa-engineer.api_key' => 'qa-test-key',
-            'services.agent_profiles.qa-engineer.model' => 'qa-engineer',
+            'ai.cliproxy.agents_enabled' => true,
+            'ai.cliproxy.api_key' => 'test-key',
+            'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
         ]);
+        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('current')->with('backend-developer')->andReturn(['status' => 'verified', 'model' => 'be-model']);
+            $mock->shouldReceive('current')->with('frontend-developer')->andReturn(['status' => 'verified', 'model' => 'fe-model']);
+            $mock->shouldReceive('current')->with('qa-engineer')->andReturn(['status' => 'verified', 'model' => 'qa-model']);
+            $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'sm-model']);
+        });
     }
 
     /** @return array{User, Project, Story} */

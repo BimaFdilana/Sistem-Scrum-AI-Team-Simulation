@@ -18,12 +18,11 @@ return [
         // Jalur agen (FE/BE/QA/SM) lewat akun OAuth CLIProxyAPI. Dimatikan
         // saat testing (phpunit.xml) agar tidak bocor ke gateway asli.
         'agents_enabled' => env('CLIPROXY_AGENTS_ENABLED', true),
-        // Ketahanan chat: berapa kali mencoba per model (backoff 1s,2s,4s…)
-        // dan berapa model cadangan yang dicoba bila model utama
-        // tak ditemukan/terus gagal. Default 3 cadangan agar fallback
-        // lintas provider bisa menjangkau provider ke-4 (multi-API).
+        // Ketahanan chat: berapa kali mencoba MODEL YANG SAMA (backoff
+        // 1s,2s,4s…). Aturan tanpa-default: tidak ada model cadangan
+        // yang dicoba — bila model bermasalah, alur berhenti dengan
+        // pesan MODEL_PROBLEMATIC dan PO yang memilih penggantinya.
         'chat_attempts' => (int) env('CLIPROXY_CHAT_ATTEMPTS', 3),
-        'chat_fallbacks' => (int) env('CLIPROXY_CHAT_FALLBACKS', 3),
         // Budget waktu absolut (detik) untuk seluruh loop retry chatResilient.
         // Mencegah fatal error PHP bila upstream hang (harus < set_time_limit controller).
         'chat_deadline' => (int) env('CLIPROXY_CHAT_DEADLINE', 240),
@@ -45,8 +44,12 @@ return [
         // /home/sidik/.local/bin/hermes lewat env ini (PATH worker tidak
         // mencakup bin user sidik).
         'binary' => env('HERMES_BINARY', 'hermes'),
-        // Model eksekusi pilot (terbukti di tugas nyata 2026-10-31).
-        'model' => env('HERMES_MODEL', 'glm-5.3'),
+        // Legacy, TIDAK lagi dikonsultasikan sebagai cadangan model
+        // (aturan tanpa-default: model hanya dari pilihan PO di menu
+        // Konfigurasi Agent, lewat StrictModelResolver). Kunci
+        // dipertahankan agar env lama tidak error, tapi nilainya
+        // tidak pernah dipakai untuk memilih model.
+        'model' => env('HERMES_MODEL'),
         'provider' => env('HERMES_PROVIDER', 'custom'),
         'base_url' => env('HERMES_BASE_URL', 'http://127.0.0.1:8317/v1'),
         'max_turns' => (int) env('HERMES_MAX_TURNS', 50),
@@ -84,16 +87,16 @@ return [
     |--------------------------------------------------------------------------
     | Pemetaan model gateway -> provider (multi-API, multi-akun)
     |--------------------------------------------------------------------------
-    | Registry ini yang dipakai modelForRole(), fallback lintas provider,
-    | modelsByProvider(), dan pencatatan pemakaian token untuk mengenali
-    | provider dari sebuah model gateway. Provider BARU (API key maupun
-    | OAuth) cukup ditambahkan di sini — tanpa mengubah logika routing —
-    | asalkan gateway mendaftarkan modelnya: pola id/owned_by di bawah
-    | yang menentukan grupnya. Urutan = prioritas fallback lintas
-    | provider (Google pertama: akun yang terverifikasi sehat saat
-    | insiden cooldown 2026-10-30). Akun ganda per provider (multi-akun)
-    | TIDAK diatur di sini: itu urusan gateway (rotasi + failover antar
-    | kandidat auth untuk model yang sama), bukan aplikasi.
+    | Registry ini yang dipakai modelsByProvider() dan pencatatan
+    | pemakaian token untuk mengenali provider dari sebuah model
+    | gateway — BUKAN untuk memilih model (aturan tanpa-default:
+    | tidak ada pemetaan otomatis ke model per provider). Provider
+    | BARU (API key maupun OAuth) cukup ditambahkan di sini — tanpa
+    | mengubah logika routing — asalkan gateway mendaftarkan
+    | modelnya: pola id/owned_by di bawah yang menentukan grupnya.
+    | Akun ganda per provider (multi-akun) TIDAK diatur di sini: itu
+    | urusan gateway (rotasi + failover antar kandidat auth untuk
+    | model yang sama), bukan aplikasi.
     | Key = slug grup; 'label' = label pemakaian token.
     */
     'model_providers' => [

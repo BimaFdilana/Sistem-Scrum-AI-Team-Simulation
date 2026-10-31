@@ -32,7 +32,6 @@ class MultiProviderRegistryTest extends TestCase
             'ai.cliproxy.api_key' => 'test-key',
             'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
             'ai.cliproxy.chat_attempts' => 1,
-            'ai.cliproxy.chat_fallbacks' => 3,
         ]);
     }
 
@@ -73,8 +72,10 @@ class MultiProviderRegistryTest extends TestCase
         $this->assertNull(app(CliProxyApiClient::class)->providerForModel('model-tidak-ada'));
     }
 
-    public function test_new_provider_is_reached_by_cross_provider_fallback(): void
+    public function test_rate_limited_model_is_not_silently_replaced(): void
     {
+        // Aturan tanpa-default: 429 pada model yang diminta TIDAK
+        // lagi diselamatkan diam-diam oleh model provider lain.
         $this->fakeGateway(function (Request $request) {
             return match ($request['model']) {
                 'mimo-7b-flash' => Http::response('rate limited', 429),
@@ -84,11 +85,12 @@ class MultiProviderRegistryTest extends TestCase
 
         $result = app(CliProxyApiClient::class)->chatResilient('mimo-7b-flash', 'sys', 'halo');
 
-        $this->assertSame('dari Google', $result['text']);
-        $this->assertSame('gemini-2.5-flash', $result['model']);
+        $this->assertNull($result['text']);
+        $this->assertSame('RATE_LIMITED', $result['error']);
+        $this->assertNull($result['model']); // tidak ada model yang melayani
     }
 
-    public function test_fourth_provider_is_reached_when_others_are_rate_limited(): void
+    public function test_requested_model_is_used_even_when_others_exist(): void
     {
         $this->fakeGateway(function (Request $request) {
             return $request['model'] === 'mimo-7b-flash'
@@ -98,8 +100,9 @@ class MultiProviderRegistryTest extends TestCase
 
         $result = app(CliProxyApiClient::class)->chatResilient('gpt-oss-120b', 'sys', 'halo');
 
-        $this->assertSame('dari Mimo', $result['text']);
-        $this->assertSame('mimo-7b-flash', $result['model']);
+        $this->assertNull($result['text']);
+        $this->assertSame('RATE_LIMITED', $result['error']);
+        $this->assertNull($result['model']); // tidak ada model yang melayani
     }
 
     public function test_usage_labels_cover_new_provider_and_preserve_old_ones(): void

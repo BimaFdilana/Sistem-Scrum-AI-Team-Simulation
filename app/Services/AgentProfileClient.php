@@ -2,44 +2,21 @@
 
 namespace App\Services;
 
+use App\Exceptions\ModelProblemException;
 use App\Support\Agents\AgentSoul;
-use Illuminate\Support\Facades\Http;
 use RuntimeException;
-use Throwable;
 
 class AgentProfileClient
 {
+    /**
+     * Agent tersedia ⟺ role itu punya model yang dipilih PO di menu
+     * Konfigurasi Agent dan modelnya tersedia di gateway (aturan
+     * tanpa-default). Tidak ada lagi "tersedia karena ada pemetaan
+     * otomatis" atau karena endpoint legacy merespons.
+     */
     public function isAvailable(string $slug): bool
     {
-        // Jalur OAuth CLIProxyAPI (diuji Bima 2026-10-13): model per peran.
-        if (app(CliProxyApiClient::class)->modelForRole($slug) !== null) {
-            return true;
-        }
-
-        app(AgentConfiguration::class)->role($slug);
-        $snapshot = app(AgentConfiguration::class)->current($slug);
-        if ($snapshot) {
-            return $snapshot['status'] === 'verified' && app(AgentModelCatalog::class)->contains(
-                app(AgentModelCatalog::class)->fetch($slug), $snapshot['provider'], $snapshot['model'],
-            );
-        }
-
-        $settings = $this->settings($slug);
-
-        if (! $this->isConfigured($settings)) {
-            return false;
-        }
-
-        try {
-            return Http::acceptJson()
-                ->withToken($settings['api_key'])
-                ->connectTimeout(1)
-                ->timeout(3)
-                ->get($this->endpoint($settings, '/models'))
-                ->successful();
-        } catch (Throwable) {
-            return false;
-        }
+        return app(StrictModelResolver::class)->resolve($slug) !== null;
     }
 
     /**
@@ -80,33 +57,39 @@ class AgentProfileClient
             $systemPrompt .= "\n\n".$soulLine;
         }
 
-        // Jalur OAuth CLIProxyAPI: hormati model tersimpan bila masih tersedia,
-        // selain itu pakai pemetaan otomatis per peran.
+        // Aturan tanpa-default (Bima 2026-10-31): HANYA model yang
+        // dipilih PO di halaman Konfigurasi Agent yang boleh dipakai.
+        // Bila role belum memilih, require() melempar peringatan dan
+        // tidak ada panggilan model sama sekali — tidak ada fallback ke
+        // jalur konsultasi legacy maupun ke model lain.
+        $resolver = app(StrictModelResolver::class);
         $cliproxy = app(CliProxyApiClient::class);
-        $model = $cliproxy->resolveModel($slug);
-        if ($model !== null) {
-            $result = $cliproxy->chatResilient($model, $systemPrompt, $message);
-            if ($result['text'] === null) {
-                throw new \App\Exceptions\AiUnavailableException($result['error'] ?? 'UNKNOWN', '', $result['retry_after'] ?? null, $model);
+        $model = $resolver->require($slug);
+        $result = $cliproxy->chatResilient($model, $systemPrompt, $message);
+        if ($result['text'] === null) {
+            if (($result['error'] ?? null) === 'MODEL_PROBLEMATIC') {
+                throw new ModelProblemException($model, $resolver->modelProblemMessage($model));
             }
-
-            if ($applyDisclosureFilter && app(ChatDisclosurePolicy::class)->containsSensitiveDisclosure($result['text'])) {
-                return ChatDisclosurePolicy::SAFE_RESPONSE;
-            }
-
-            return $result['text'];
+            throw new \App\Exceptions\AiUnavailableException($result['error'] ?? 'UNKNOWN', '', $result['retry_after'] ?? null, $model);
         }
 
-        return app(AgentConsultationDispatcher::class)->send($slug, $message, $conversationId, $systemPrompt);
+        if ($applyDisclosureFilter && app(ChatDisclosurePolicy::class)->containsSensitiveDisclosure($result['text'])) {
+            return ChatDisclosurePolicy::SAFE_RESPONSE;
+        }
+
+        return $result['text'];
     }
 
     /**
-     * Model CLIProxyAPI untuk peran, atau null bila jalur tool calling
-     * tidak tersedia (fallback ke jalur chat teks lama).
+     * Model CLIProxyAPI untuk peran menurut aturan tanpa-default:
+     * model yang dipilih PO di menu, atau null bila belum dipilih /
+     * belum terverifikasi / tidak tersedia. Null berarti pemanggil
+     * TIDAK BOLEH memakai model lain — bukan sinyal untuk fallback
+     * ke jalur teks lama dengan model berbeda.
      */
     public function toolModel(string $slug): ?string
     {
-        return app(CliProxyApiClient::class)->resolveModel($slug);
+        return app(StrictModelResolver::class)->resolve($slug);
     }
 
     /**
@@ -157,22 +140,5 @@ class AgentProfileClient
         );
 
         return $systemPrompt;
-    }
-
-    private function isConfigured(array $settings): bool
-    {
-        return filled($settings['base_url'] ?? null)
-            && filled($settings['api_key'] ?? null)
-            && filled($settings['model'] ?? null);
-    }
-
-    private function settings(string $slug): array
-    {
-        return (array) config('services.agent_profiles.'.$slug, []);
-    }
-
-    private function endpoint(array $settings, string $path): string
-    {
-        return rtrim((string) $settings['base_url'], '/').$path;
     }
 }

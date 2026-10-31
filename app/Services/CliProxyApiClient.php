@@ -378,52 +378,6 @@ class CliProxyApiClient
     }
 
     /**
-     * Pick the best CLIProxyAPI model for an agent role, honoring the role's
-     * preferred_provider from config/agents.php (disetujui Bima 2026-10-13):
-     * QA=anthropic, BE=codex, FE=google, SM=model terpintar yang tersedia.
-     * Returns null when nothing suitable is available.
-     */
-    public function modelForRole(string $role): ?string
-    {
-        if (! $this->agentsEnabled()) {
-            return null;
-        }
-        $models = $this->models();
-        if ($models === []) {
-            return null;
-        }
-        $profile = collect(config('agents.profiles'))->firstWhere('slug', $role);
-        $preferred = strtolower((string) ($profile['preferred_provider'] ?? 'any'));
-
-        $byProvider = fn (string $provider) => array_values(array_filter(
-            $models,
-            fn ($m) => self::modelMatchesProvider($m['id'], $m['owned_by'], $provider)
-        ));
-
-        $candidates = $byProvider($preferred);
-        if ($candidates === [] && $preferred !== 'any') {
-            // Fallback: provider mana pun yang tersedia.
-            $candidates = $models;
-        }
-        if ($candidates === []) {
-            return null;
-        }
-
-        return self::pickBest($candidates);
-    }
-
-    /** Model terpintar yang tersedia (untuk Scrum Master). */
-    public function smartestModel(): ?string
-    {
-        if (! $this->agentsEnabled()) {
-            return null;
-        }
-        $models = $this->models();
-
-        return $models === [] ? null : self::pickBest($models);
-    }
-
-    /**
      * Model IDs dikelompokkan per provider OAuth: anthropic/codex/google.
      *
      * @return array<string, list<string>>
@@ -447,33 +401,10 @@ class CliProxyApiClient
     }
 
     /**
-     * Model final untuk sebuah peran: hormati pilihan tersimpan (snapshot
-     * terverifikasi dari halaman Konfigurasi Agent) bila modelnya masih
-     * tersedia saat ini; selain itu pakai pemetaan otomatis modelForRole().
-     */
-    public function resolveModel(string $role): ?string
-    {
-        if (! $this->agentsEnabled()) {
-            return null;
-        }
-        $models = $this->models();
-        if ($models === []) {
-            return null;
-        }
-        $snapshot = app(AgentConfiguration::class)->current($role);
-        $saved = is_array($snapshot) ? ($snapshot['model'] ?? null) : null;
-        if (($snapshot['status'] ?? null) === 'verified' && is_string($saved)
-            && in_array($saved, array_column($models, 'id'), true)) {
-            return $saved;
-        }
-
-        return $this->modelForRole($role);
-    }
-
-    /**
      * OpenAI-compatible chat completion via CLIProxyAPI.
      * Returns the assistant text, or null on failure.
-     * Punya ketahanan: retry + fallback model (lihat chatResilient).
+     * Punya ketahanan: retry pada model yang sama (lihat chatResilient);
+     * tidak ada fallback ke model lain.
      *
      * @param array{data: string, mime: string}|null $image lampiran gambar (base64); diteruskan lalu dibuang.
      */
@@ -483,15 +414,19 @@ class CliProxyApiClient
     }
 
     /**
-     * Chat dengan ketahanan terhadap gangguan upstream:
-     * - Coba ulang (backoff) untuk kegagalan transient: 429/502/503, timeout,
-     *   gateway tak terjangkau, respons kosong.
-     * - Pindah ke model cadangan dari provider yang sama bila model utama
-     *   tidak ditemukan atau terus gagal (model image dikecualikan).
+     * Chat dengan ketahanan terhadap gangguan upstream — TANPA substitusi
+     * model (aturan tanpa-default Bima 2026-10-31):
+     * - Coba ulang (backoff) HANYA pada model yang diminta, untuk
+     *   kegagalan transient: 429/502/503, timeout, gateway tak
+     *   terjangkau, respons kosong.
      * - Berhenti langsung untuk kegagalan permanen: 401 (auth), 400.
+     * - Model bermasalah (404, 400/403 bertanda model) TIDAK diganti
+     *   diam-diam ke model lain: kembalikan MODEL_PROBLEMATIC beserta
+     *   daftar model available, supaya pemanggil bisa menampilkan
+     *   prompt penggantian ke PO.
      *
      * @param array{data: string, mime: string}|null $image
-     * @return array{text: ?string, error: ?string, model: ?string}
+     * @return array{text: ?string, error: ?string, model: ?string, available_models?: string[]}
      */
     public function chatResilient(string $model, string $systemPrompt, string $userMessage, int $timeout = 120, ?array $image = null): array
     {
@@ -499,7 +434,6 @@ class CliProxyApiClient
             return ['text' => null, 'error' => 'DISABLED', 'model' => null];
         }
         $maxAttempts = max(1, (int) config('ai.cliproxy.chat_attempts', 3));
-        $maxFallbacks = max(0, (int) config('ai.cliproxy.chat_fallbacks', 2));
 
         // Budget waktu absolut: seluruh loop retry tidak boleh melebihi ini,
         // agar tidak menabrak set_time_limit() di controller (fatal error
@@ -508,27 +442,26 @@ class CliProxyApiClient
 
         $lastError = 'UNKNOWN';
         $lastRetryAfter = null;
-        foreach (array_slice($this->fallbackCandidates($model), 0, $maxFallbacks + 1) as $candidate) {
-            for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
-                if (microtime(true) >= $deadline) {
-                    return ['text' => null, 'error' => $lastError === 'UNKNOWN' ? 'TIMEOUT' : $lastError, 'model' => null, 'retry_after' => $lastRetryAfter];
-                }
-                $outcome = $this->attemptChat($candidate, $systemPrompt, $userMessage, $timeout, $image);
-                if ($outcome['status'] === 'ok') {
-                    AiUsageRecorder::record($candidate, $outcome['usage'] ?? []);
-                    return ['text' => $outcome['text'], 'error' => null, 'model' => $candidate, 'retry_after' => null, 'usage' => $outcome['usage'] ?? []];
-                }
-                $lastError = $outcome['error'];
-                $lastRetryAfter = $outcome['retry_after'] ?? null;
-                if ($outcome['status'] === 'permanent') {
-                    return ['text' => null, 'error' => $lastError, 'model' => null, 'retry_after' => $lastRetryAfter];
-                }
-                if ($outcome['status'] === 'not_found') {
-                    break; // coba model cadangan berikutnya
-                }
-                if ($attempt < $maxAttempts) {
-                    sleep((int) min(2 ** ($attempt - 1), 8)); // 1s, 2s, 4s, maks 8s
-                }
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            if (microtime(true) >= $deadline) {
+                return ['text' => null, 'error' => $lastError === 'UNKNOWN' ? 'TIMEOUT' : $lastError, 'model' => null, 'retry_after' => $lastRetryAfter];
+            }
+            $outcome = $this->attemptChat($model, $systemPrompt, $userMessage, $timeout, $image);
+            if ($outcome['status'] === 'ok') {
+                AiUsageRecorder::record($model, $outcome['usage'] ?? []);
+
+                return ['text' => $outcome['text'], 'error' => null, 'model' => $model, 'retry_after' => null, 'usage' => $outcome['usage'] ?? []];
+            }
+            $lastError = $outcome['error'];
+            $lastRetryAfter = $outcome['retry_after'] ?? null;
+            if ($outcome['status'] === 'model_problem') {
+                return ['text' => null, 'error' => 'MODEL_PROBLEMATIC', 'model' => $model, 'available_models' => array_column($this->models(), 'id'), 'retry_after' => null];
+            }
+            if ($outcome['status'] === 'permanent') {
+                return ['text' => null, 'error' => $lastError, 'model' => null, 'retry_after' => $lastRetryAfter];
+            }
+            if ($attempt < $maxAttempts) {
+                sleep((int) min(2 ** ($attempt - 1), 8)); // 1s, 2s, 4s, maks 8s
             }
         }
 
@@ -536,6 +469,23 @@ class CliProxyApiClient
     }
 
         /**
+     * Apakah body error gateway menandakan model itu sendiri yang
+     * bermasalah (bukan permintaan atau akun)? Dipakai untuk 400/403
+     * agar model_disabled / unknown provider tidak disamarkan jadi
+     * BAD_REQUEST generik atau retry transient.
+     */
+    private static function isModelProblemDetail(string $lowerDetail): bool
+    {
+        foreach (['model_disabled', 'model_not_found', 'model_not_available', 'unknown provider', 'unknown model', 'model not found', 'model is disabled', 'model has been disabled'] as $needle) {
+            if (str_contains($lowerDetail, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Satu percobaan chat, opsional dengan tool calling terstruktur.
      * Bila $tools diberikan, respons boleh tanpa teks selama ada
      * tool_calls yang argumennya JSON valid (terbukti lewat probe
@@ -544,7 +494,7 @@ class CliProxyApiClient
      * 'malformed' — pemanggil yang memutuskan repair, bukan retry buta.
      *
      * @param  array<int,array{type:string,function:array{name:string,parameters:array}}>|null  $tools
-     * @return array{status: 'ok'|'transient'|'permanent'|'not_found'|'malformed', text: ?string, error: string, tool_calls: array, usage: array, retry_after: ?int}
+     * @return array{status: 'ok'|'transient'|'permanent'|'model_problem'|'malformed', text: ?string, error: string, tool_calls: array, usage: array, retry_after: ?int}
      */
     private function attemptChat(string $model, string $systemPrompt, string $userMessage, int $timeout, ?array $image, ?array $tools = null): array
     {
@@ -562,7 +512,7 @@ class CliProxyApiClient
      *
      * @param  array<int,array{role:string,content:mixed}>  $messages
      * @param  array<int,array{type:string,function:array{name:string,parameters:array}}>|null  $tools
-     * @return array{status: 'ok'|'transient'|'permanent'|'not_found'|'malformed', text: ?string, error: string, tool_calls: array, usage: array, retry_after: ?int}
+     * @return array{status: 'ok'|'transient'|'permanent'|'model_problem'|'malformed', text: ?string, error: string, tool_calls: array, usage: array, retry_after: ?int}
      */
     private function attemptChatMessages(string $model, string $systemPrompt, array $messages, int $timeout, ?array $tools = null): array
     {
@@ -590,7 +540,9 @@ class CliProxyApiClient
             return ['status' => 'permanent', 'text' => null, 'error' => 'AUTH_FAILED', 'tool_calls' => [], 'usage' => [], 'retry_after' => null];
         }
         if ($status === 404) {
-            return ['status' => 'not_found', 'text' => null, 'error' => 'MODEL_NOT_FOUND', 'tool_calls' => [], 'usage' => [], 'retry_after' => null];
+            // Model tidak ditemukan = masalah model, BUKAN alasan untuk
+            // berpindah diam-diam ke model lain (aturan tanpa-default).
+            return ['status' => 'model_problem', 'text' => null, 'error' => 'MODEL_PROBLEMATIC', 'tool_calls' => [], 'usage' => [], 'retry_after' => null];
         }
         if ($status === 400) {
             // Jangan buang body error upstream: tanpa ini, 400 hanya tampil
@@ -599,11 +551,28 @@ class CliProxyApiClient
             $detail = (string) ($response->json('error.message') ?? $response->body() ?? '');
             Log::warning('CLIProxyAPI chat 400', ['model' => $model, 'error' => Str::limit($detail, 500)]);
             $lower = strtolower($detail);
+            if (self::isModelProblemDetail($lower)) {
+                // Gateway menolak model itu sendiri (unknown provider /
+                // model_not_found lewat 400, seperti ID ber-strip) — masalah
+                // model, bukan alasan substitusi diam-diam.
+                return ['status' => 'model_problem', 'text' => null, 'error' => 'MODEL_PROBLEMATIC', 'tool_calls' => [], 'usage' => [], 'retry_after' => null];
+            }
             if (str_contains($lower, 'project_id') || str_contains($lower, 'auth missing')) {
                 return ['status' => 'permanent', 'text' => null, 'error' => 'PROVIDER_AUTH_INCOMPLETE', 'tool_calls' => [], 'usage' => [], 'retry_after' => null];
             }
 
             return ['status' => 'permanent', 'text' => null, 'error' => 'BAD_REQUEST', 'tool_calls' => [], 'usage' => [], 'retry_after' => null];
+        }
+        if ($status === 403) {
+            // 403 model_disabled (kasus kimi-k2.8) adalah masalah model.
+            // 403 lain (bukan model) = permanen, bukan transient — jangan
+            // dibakar jadi retry buta seperti sebelumnya.
+            $detail = strtolower((string) ($response->json('error.message') ?? $response->body() ?? ''));
+            if (self::isModelProblemDetail($detail)) {
+                return ['status' => 'model_problem', 'text' => null, 'error' => 'MODEL_PROBLEMATIC', 'tool_calls' => [], 'usage' => [], 'retry_after' => null];
+            }
+
+            return ['status' => 'permanent', 'text' => null, 'error' => 'FORBIDDEN', 'tool_calls' => [], 'usage' => [], 'retry_after' => null];
         }
         if ($status === 429) {
             $retryAfter = (int) ($response->header('Retry-After') ?? 0);
@@ -678,108 +647,36 @@ class CliProxyApiClient
             return ['tool_calls' => [], 'text' => null, 'error' => 'DISABLED', 'model' => null, 'usage' => [], 'retry_after' => null];
         }
         $maxAttempts = max(1, (int) config('ai.cliproxy.chat_attempts', 3));
-        $maxFallbacks = max(0, (int) config('ai.cliproxy.chat_fallbacks', 2));
         $deadline = microtime(true) + (int) config('ai.cliproxy.chat_deadline', 240);
         $lastError = 'UNKNOWN';
         $lastRetryAfter = null;
-        foreach (array_slice($this->fallbackCandidates($model), 0, $maxFallbacks + 1) as $candidate) {
-            for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
-                if (microtime(true) >= $deadline) {
-                    return ['tool_calls' => [], 'text' => null, 'error' => $lastError === 'UNKNOWN' ? 'TIMEOUT' : $lastError, 'model' => null, 'usage' => [], 'retry_after' => $lastRetryAfter];
-                }
-                $outcome = $this->attemptChatMessages($candidate, $systemPrompt, $messages, $timeout, $tools);
-                if ($outcome['status'] === 'ok') {
-                    AiUsageRecorder::record($candidate, $outcome['usage'] ?? [], $usageContext);
-                    return ['tool_calls' => $outcome['tool_calls'], 'text' => $outcome['text'], 'error' => null, 'model' => $candidate, 'usage' => $outcome['usage'], 'retry_after' => null];
-                }
-                $lastError = $outcome['error'];
-                $lastRetryAfter = $outcome['retry_after'];
-                if (in_array($outcome['status'], ['permanent', 'malformed'], true)) {
-                    return ['tool_calls' => [], 'text' => null, 'error' => $lastError, 'model' => null, 'usage' => $outcome['usage'], 'retry_after' => $lastRetryAfter];
-                }
-                if ($outcome['status'] === 'not_found') {
-                    break;
-                }
-                if ($attempt < $maxAttempts) {
-                    sleep((int) min(max($outcome['retry_after'] ?? 0, 2 ** ($attempt - 1)), 60));
-                }
+        // TANPA substitusi model (aturan tanpa-default): retry hanya pada
+        // model yang diminta; model bermasalah langsung dikembalikan
+        // sebagai MODEL_PROBLEMATIC beserta daftar available.
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            if (microtime(true) >= $deadline) {
+                return ['tool_calls' => [], 'text' => null, 'error' => $lastError === 'UNKNOWN' ? 'TIMEOUT' : $lastError, 'model' => null, 'usage' => [], 'retry_after' => $lastRetryAfter];
+            }
+            $outcome = $this->attemptChatMessages($model, $systemPrompt, $messages, $timeout, $tools);
+            if ($outcome['status'] === 'ok') {
+                AiUsageRecorder::record($model, $outcome['usage'] ?? [], $usageContext);
+
+                return ['tool_calls' => $outcome['tool_calls'], 'text' => $outcome['text'], 'error' => null, 'model' => $model, 'usage' => $outcome['usage'], 'retry_after' => null];
+            }
+            $lastError = $outcome['error'];
+            $lastRetryAfter = $outcome['retry_after'];
+            if ($outcome['status'] === 'model_problem') {
+                return ['tool_calls' => [], 'text' => null, 'error' => 'MODEL_PROBLEMATIC', 'model' => $model, 'available_models' => array_column($this->models(), 'id'), 'usage' => $outcome['usage'], 'retry_after' => null];
+            }
+            if (in_array($outcome['status'], ['permanent', 'malformed'], true)) {
+                return ['tool_calls' => [], 'text' => null, 'error' => $lastError, 'model' => null, 'usage' => $outcome['usage'], 'retry_after' => $lastRetryAfter];
+            }
+            if ($attempt < $maxAttempts) {
+                sleep((int) min(max($outcome['retry_after'] ?? 0, 2 ** ($attempt - 1)), 60));
             }
         }
 
         return ['tool_calls' => [], 'text' => null, 'error' => $lastError, 'model' => null, 'usage' => [], 'retry_after' => $lastRetryAfter];
-    }
-
-    /**
-     * Kandidat model: utama dulu, lalu cadangan terbaik dari provider yang
-     * sama, lalu model terbaik tiap provider lain. Urutan ini penting:
-     * bila provider pilihan gagal transient (mis. semua modelnya cooldown
-     * 429 seperti kasus estimasi laundry Run 9–12), model dari provider
-     * lain yang sehat tetap dicoba — sebelumnya fallback berhenti di
-     * provider yang sama sehingga model Google yang sehat tidak pernah
-     * menyelamatkan peran Backend/QA. Model image-* dikecualikan (bukan
-     * untuk chat). Pemanggil membatasi jumlah kandidat lewat config
-     * chat_fallbacks, dan urutan di sini menjamin satu model lintas
-     * provider selalu masuk dalam batas itu.
-     *
-     * @return string[]
-     */
-    private function fallbackCandidates(string $model): array
-    {
-        $candidates = [$model];
-        $models = $this->models();
-        $primary = null;
-        foreach ($models as $m) {
-            if ($m['id'] === $model) {
-                $primary = $m;
-                break;
-            }
-        }
-        if ($primary === null) {
-            return $candidates;
-        }
-        $primaryProvider = null;
-        foreach (self::modelProviderSlugs() as $provider) {
-            if (self::modelMatchesProvider($primary['id'], $primary['owned_by'], $provider)) {
-                $primaryProvider = $provider;
-                break;
-            }
-        }
-        $sameProvider = [];
-        foreach ($models as $m) {
-            if ($m['id'] === $model
-                || str_contains(strtolower($m['id']), 'image')
-                || ($primaryProvider !== null && ! self::modelMatchesProvider($m['id'], $m['owned_by'], $primaryProvider))) {
-                continue;
-            }
-            $sameProvider[] = $m;
-        }
-        // Cadangan terbaik provider yang sama dulu, lalu satu model terbaik
-        // tiap provider lain (Google didahulukan: akun yang terverifikasi
-        // sehat saat insiden cooldown 2026-10-30).
-        if ($sameProvider !== []) {
-            $candidates[] = self::pickBest($sameProvider);
-        }
-        foreach (self::modelProviderSlugs() as $provider) {
-            if ($provider === $primaryProvider) {
-                continue;
-            }
-            $others = array_values(array_filter(
-                $models,
-                fn ($m) => $m['id'] !== $model
-                    && ! str_contains(strtolower($m['id']), 'image')
-                    && self::modelMatchesProvider($m['id'], $m['owned_by'], $provider)
-            ));
-            if ($others !== []) {
-                $candidates[] = self::pickBest($others);
-            }
-        }
-        foreach ($sameProvider as $m) {
-            if (! in_array($m['id'], $candidates, true)) {
-                $candidates[] = $m['id'];
-            }
-        }
-
-        return array_values(array_unique($candidates));
     }
 
     /**
@@ -807,9 +704,10 @@ class CliProxyApiClient
     }
 
     /**
-     * Slug grup provider dari registry config ai.model_providers, sesuai
-     * urutan prioritas fallback. Provider baru cukup ditambahkan di
-     * config — tidak perlu mengubah logika routing di sini.
+     * Slug grup provider dari registry config ai.model_providers.
+     * Dipakai untuk pengelompokan katalog dan pencatatan provider —
+     * BUKAN untuk memilih model (aturan tanpa-default: tidak ada
+     * pemetaan otomatis ke "model terbaik" per provider).
      *
      * @return string[]
      */
@@ -850,28 +748,6 @@ class CliProxyApiClient
         }
 
         return false;
-    }
-
-    /** Heuristik "terbaik": hindari model image, utamakan flagship. */
-    private static function pickBest(array $models): string
-    {
-        $ids = array_column($models, 'id');
-        $nonImage = array_values(array_filter($ids, fn ($id) => ! str_contains(strtolower($id), 'image')));
-        $pool = $nonImage !== [] ? $nonImage : $ids;
-        $ranked = [
-            'claude-opus', 'claude-sonnet', 'claude',
-            'gpt-5', 'gpt-6', 'gpt-4', 'gpt',
-            'gemini-2.5-pro', 'gemini-3', 'gemini-2.5', 'gemini-3.1-pro', 'gemini',
-        ];
-        foreach ($ranked as $needle) {
-            foreach ($pool as $id) {
-                if (str_contains(strtolower($id), $needle)) {
-                    return $id;
-                }
-            }
-        }
-
-        return $pool[0];
     }
 
     /**

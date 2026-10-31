@@ -53,6 +53,11 @@ class AiStatusSyncTest extends TestCase
             [$this->codexFile(false)],
             [['id' => 'gpt-5.6-sol', 'owned_by' => 'openai']]
         );
+        // Aturan tanpa-default: agent terhubung karena tiap role punya
+        // pilihan menu terverifikasi (bukan fallback ke provider).
+        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('current')->andReturn(['status' => 'verified', 'model' => 'gpt-5.6-sol']);
+        });
 
         $service = app(AiStatusService::class);
         $providers = $service->providers();
@@ -61,7 +66,7 @@ class AiStatusSyncTest extends TestCase
         $this->assertTrue($providers['codex']['connected']);
         $this->assertFalse($providers['antigravity']['connected']);
 
-        // Semua peran fallback ke Codex yang terhubung.
+        // Semua peran memakai pilihan menu terverifikasi.
         foreach (['scrum-master', 'backend-developer', 'frontend-developer', 'qa-engineer'] as $slug) {
             $this->assertTrue($agents[$slug]['connected'], "Agent {$slug} harus terhubung.");
             $this->assertSame('gpt-5.6-sol', $agents[$slug]['model']);
@@ -79,7 +84,7 @@ class AiStatusSyncTest extends TestCase
 
         foreach ($service->agents() as $slug => $agent) {
             $this->assertFalse($agent['connected'], "Agent {$slug} harus belum terhubung.");
-            $this->assertSame('Belum ada provider AI yang terhubung.', $agent['reason']);
+            $this->assertSame('Model belum dipilih di halaman Konfigurasi Agent.', $agent['reason']);
         }
     }
 
@@ -91,7 +96,7 @@ class AiStatusSyncTest extends TestCase
 
         foreach ($agents as $slug => $agent) {
             $this->assertFalse($agent['connected']);
-            $this->assertStringContainsString('Provider terhubung', $agent['reason']);
+            $this->assertStringContainsString('belum dipilih', $agent['reason']);
         }
     }
 
@@ -101,6 +106,9 @@ class AiStatusSyncTest extends TestCase
             [$this->codexFile(false)],
             [['id' => 'gpt-5.6-sol', 'owned_by' => 'openai']]
         );
+        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('current')->andReturn(['status' => 'verified', 'model' => 'gpt-5.6-sol']);
+        });
 
         $response = $this->actingAs(User::factory()->create())->get('/agents');
 

@@ -21,12 +21,15 @@ use Tests\TestCase;
 /**
  * Regresi insiden estimasi laundry Run 9–12 (2026-10-30): model Backend
  * (Codex) dan QA (Claude) menjawab 429 karena satu-satunya kandidat auth
- * sedang cooldown, sementara model Google sehat. Dua celah diperbaiki:
- * (1) failureCode tidak mengenali RATE_LIMITED sehingga semua gagal tampil
- * generik; (2) fallback berhenti di provider yang sama sehingga model
- * Google tidak pernah menyelamatkan peran Backend/QA.
+ * sedang cooldown. Satu celah diperbaiki saat itu dan dipertahankan:
+ * failureCode mengenali RATE_LIMITED sehingga gagal tidak tampil
+ * generik. Celah kedua — rescue lintas provider — SENGAJA DIHAPUS oleh
+ * aturan tanpa-default (Bima 2026-10-31): 429 kini di-retry pada model
+ * yang sama lalu antre ulang level job; model bermasalah (404/403)
+ * berhenti dengan MODEL_PROBLEMATIC + prompt penggantian. Tidak ada
+ * lagi substitusi diam-diam ke model lain.
  */
-class EstimationRateLimitFallbackTest extends TestCase
+class EstimationRateLimitStrictTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -39,7 +42,6 @@ class EstimationRateLimitFallbackTest extends TestCase
             'ai.cliproxy.api_key' => 'test-key',
             'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
             'ai.cliproxy.chat_attempts' => 3,
-            'ai.cliproxy.chat_fallbacks' => 2,
         ]);
     }
 
@@ -55,33 +57,36 @@ class EstimationRateLimitFallbackTest extends TestCase
         return Http::response(['choices' => [['message' => ['role' => 'assistant', 'content' => $text]]]], 200);
     }
 
-    public function test_cross_provider_fallback_rescues_rate_limited_primary(): void
+    public function test_rate_limited_primary_is_retried_not_replaced(): void
     {
+        // Aturan tanpa-default: 429 di-retry pada model yang sama
+        // (3 attempts), lalu gagal sebagai RATE_LIMITED — model Google
+        // yang sehat TIDAK dipakai diam-diam sebagai pengganti.
         $this->fakeModels([
             ['id' => 'claude-opus-4-6', 'owned_by' => 'anthropic'],
             ['id' => 'gemini-2.5-flash', 'owned_by' => 'google'],
         ]);
-        Http::fake(function (Request $request) {
+        $requested = [];
+        Http::fake(function (Request $request) use (&$requested) {
             if (str_ends_with($request->url(), '/v1/models')) {
                 return Http::response(['data' => [
                     ['id' => 'claude-opus-4-6', 'owned_by' => 'anthropic'],
                     ['id' => 'gemini-2.5-flash', 'owned_by' => 'google'],
                 ]]);
             }
+            $requested[] = $request['model'];
 
-            return $request['model'] === 'claude-opus-4-6'
-                ? Http::response('rate limited', 429)
-                : $this->okResponse('dari Google');
+            return Http::response('rate limited', 429);
         });
 
         $result = app(CliProxyApiClient::class)->chatResilient('claude-opus-4-6', 'sys', 'halo');
 
-        $this->assertSame('dari Google', $result['text']);
-        $this->assertSame('gemini-2.5-flash', $result['model']);
-        $this->assertNull($result['error']);
+        $this->assertNull($result['text']);
+        $this->assertSame('RATE_LIMITED', $result['error']);
+        $this->assertSame(['claude-opus-4-6', 'claude-opus-4-6', 'claude-opus-4-6'], $requested);
     }
 
-    public function test_same_provider_alternate_is_tried_before_cross_provider(): void
+    public function test_404_is_model_problem_not_fallback_chain(): void
     {
         $models = [
             ['id' => 'claude-a', 'owned_by' => 'anthropic'],
@@ -96,18 +101,15 @@ class EstimationRateLimitFallbackTest extends TestCase
             }
             $requested[] = $request['model'];
 
-            return match ($request['model']) {
-                'claude-a' => Http::response('no such model', 404),
-                'claude-b' => Http::response('rate limited', 429),
-                default => $this->okResponse('dari Google'),
-            };
+            return Http::response('no such model', 404);
         });
 
         $result = app(CliProxyApiClient::class)->chatResilient('claude-a', 'sys', 'halo');
 
-        $this->assertSame('dari Google', $result['text']);
-        $this->assertSame('gemini-x', $result['model']);
-        $this->assertSame(['claude-a', 'claude-b', 'claude-b', 'claude-b', 'gemini-x'], $requested);
+        $this->assertNull($result['text']);
+        $this->assertSame('MODEL_PROBLEMATIC', $result['error']);
+        $this->assertSame(['claude-a', 'claude-b', 'gemini-x'], $result['available_models']);
+        $this->assertSame(['claude-a'], $requested);
     }
 
     public function test_failure_code_recognizes_rate_limited(): void
@@ -131,12 +133,19 @@ class EstimationRateLimitFallbackTest extends TestCase
         $this->assertSame('PROVIDER_RATE_LIMITED', $method->invoke($service, new \RuntimeException('AI unavailable: RATE_LIMITED'), $run));
         $this->assertSame('PROVIDER_OVERLOADED', $method->invoke($service, new AiUnavailableException('UPSTREAM_OVERLOADED'), $run));
         $this->assertSame('PROVIDER_REQUEST_FAILED', $method->invoke($service, new AiUnavailableException('AUTH_FAILED'), $run));
+        $this->assertSame('MODEL_PROBLEMATIC', $method->invoke($service, new AiUnavailableException('MODEL_PROBLEMATIC'), $run));
+        $this->assertSame('MODEL_NOT_CHOSEN', $method->invoke($service, new \App\Exceptions\ModelNotChosenException('belum dipilih'), $run));
     }
 
     public function test_failed_send_message_carries_attempted_model(): void
     {
+        // sendMessage kini me-resolve model QA lewat StrictModelResolver:
+        // mock snapshot terverifikasi + katalog gateway, bukan resolveModel.
+        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('current')->with('qa-engineer')->andReturn(['status' => 'verified', 'model' => 'claude-opus-4-6']);
+        });
         $cliproxy = \Mockery::mock(CliProxyApiClient::class);
-        $cliproxy->shouldReceive('resolveModel')->with('qa-engineer')->andReturn('claude-opus-4-6');
+        $cliproxy->shouldReceive('models')->andReturn([['id' => 'claude-opus-4-6', 'owned_by' => 'anthropic']]);
         $cliproxy->shouldReceive('chatResilient')->once()->andReturn([
             'text' => null, 'error' => 'RATE_LIMITED', 'model' => null, 'retry_after' => null,
         ]);

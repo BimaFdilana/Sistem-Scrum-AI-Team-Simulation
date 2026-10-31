@@ -92,6 +92,13 @@ class BreakdownExecutionJob implements ShouldQueue
                     : $excerpt,
             ]);
             $run->forceFill(['status' => 'FAILED', 'error_code' => 'BREAKDOWN_FAILED', 'completed_at' => now()])->save();
+            // Kegagalan pemilihan model harus terlihat PO di summary run
+            // (pesan aksi: pilih di halaman Konfigurasi Agent), bukan
+            // hanya status FAILED tanpa penjelasan.
+            if (\App\Services\AiGateway::isModelChoiceFailure($exception)) {
+                $code = $exception instanceof \App\Exceptions\ModelNotChosenException ? 'MODEL_NOT_CHOSEN' : 'MODEL_PROBLEMATIC';
+                $run->forceFill(['error_code' => $code, 'summary' => $exception->getMessage()])->save();
+            }
             throw $exception;
         }
     }

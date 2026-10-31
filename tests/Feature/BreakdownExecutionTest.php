@@ -88,8 +88,13 @@ class BreakdownExecutionTest extends TestCase
     public function test_scrum_master_prompt_distinguishes_project_from_platform(): void
     {
         $captured = null;
+        // sendMessage SM kini ketat: mock snapshot terverifikasi +
+        // katalog gateway, bukan resolveModel.
+        $config = Mockery::mock(\App\Services\AgentConfiguration::class);
+        $config->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'gemini-test']);
+        $this->app->instance(\App\Services\AgentConfiguration::class, $config);
         $cliproxy = Mockery::mock(CliProxyApiClient::class);
-        $cliproxy->shouldReceive('resolveModel')->with('scrum-master')->andReturn('gemini-test');
+        $cliproxy->shouldReceive('models')->andReturn([['id' => 'gemini-test', 'owned_by' => 'google']]);
         $cliproxy->shouldReceive('chatResilient')->withArgs(function ($model, $systemPrompt, $message) use (&$captured) {
             $captured = $systemPrompt;
 

@@ -34,42 +34,40 @@ class CliProxyAgentWiringTest extends TestCase
         ]);
     }
 
-    public function test_model_for_role_memetakan_provider_sesuai_peran(): void
+    public function test_strict_resolver_rejects_unselected_role_without_calling_model(): void
     {
+        // Aturan tanpa-default menggantikan modelForRole/smartestModel:
+        // tanpa snapshot menu terverifikasi, role tidak tersedia dan
+        // sendMessage melempar peringatan TANPA panggilan chat apa pun.
         $this->fakeGateway([
             ['id' => 'gpt-5.6-luna', 'owned_by' => 'openai'],
             ['id' => 'claude-opus-4-6', 'owned_by' => 'anthropic'],
             ['id' => 'gemini-2.5-pro', 'owned_by' => 'google'],
         ]);
 
-        $client = app(CliProxyApiClient::class);
+        $profiles = app(AgentProfileClient::class);
 
-        $this->assertSame('claude-opus-4-6', $client->modelForRole('qa-engineer'));
-        $this->assertSame('gpt-5.6-luna', $client->modelForRole('backend-developer'));
-        $this->assertSame('gemini-2.5-pro', $client->modelForRole('frontend-developer'));
-        $this->assertSame('claude-opus-4-6', $client->smartestModel());
+        $this->assertFalse($profiles->isAvailable('qa-engineer'));
+        $this->assertFalse(app(HermesClient::class)->isAvailable());
+
+        try {
+            $profiles->sendMessage('qa-engineer', 'halo', 'conv-1');
+            $this->fail('Seharusnya melempar ModelNotChosenException.');
+        } catch (\App\Exceptions\ModelNotChosenException $e) {
+            $this->assertStringContainsString('belum dipilih di halaman Konfigurasi Agent', $e->getMessage());
+        }
+
+        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/v1/chat/completions'));
     }
 
-    public function test_model_for_role_fallback_ke_model_apapun_bila_provider_belum_ada(): void
-    {
-        $this->fakeGateway([
-            ['id' => 'gpt-5.6-luna', 'owned_by' => 'openai'],
-        ]);
-
-        $client = app(CliProxyApiClient::class);
-
-        // QA ingin anthropic, tapi hanya codex yang terhubung -> pakai yang ada.
-        $this->assertSame('gpt-5.6-luna', $client->modelForRole('qa-engineer'));
-    }
-
-    public function test_model_for_role_null_bila_dimatikan(): void
+    public function test_agents_disabled_means_unavailable(): void
     {
         config(['ai.cliproxy.agents_enabled' => false]);
 
         $client = app(CliProxyApiClient::class);
 
-        $this->assertNull($client->modelForRole('qa-engineer'));
-        $this->assertNull($client->smartestModel());
+        $this->assertFalse(app(AgentProfileClient::class)->isAvailable('qa-engineer'));
+        $this->assertFalse(app(HermesClient::class)->isAvailable());
         $this->assertNull($client->chat('gpt-5.6-luna', 'sys', 'hi'));
     }
 
@@ -80,6 +78,11 @@ class CliProxyAgentWiringTest extends TestCase
             ['id' => 'claude-opus-4-6', 'owned_by' => 'anthropic'],
             ['id' => 'gemini-2.5-pro', 'owned_by' => 'google'],
         ]);
+        // Chat kini ketat: perlu snapshot menu terverifikasi per role.
+        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('current')->with('qa-engineer')->andReturn(['status' => 'verified', 'model' => 'claude-opus-4-6']);
+            $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'gemini-2.5-pro']);
+        });
 
         $profiles = app(AgentProfileClient::class);
 
@@ -127,7 +130,7 @@ class CliProxyAgentWiringTest extends TestCase
 
         $this->assertSame('Jawaban AI', $content);
         Http::assertSent(function ($request) {
-            // chatResilient juga mengambil katalog model (untuk fallback);
+            // chatResilient juga mengambil katalog model (untuk pesan MODEL_PROBLEMATIC);
             // assertion ini hanya untuk request chat completions.
             if (! str_ends_with($request->url(), '/v1/chat/completions')) {
                 return false;
@@ -146,6 +149,10 @@ class CliProxyAgentWiringTest extends TestCase
         $this->fakeGateway([
             ['id' => 'gpt-5.6-luna', 'owned_by' => 'openai'],
         ]);
+        // Chat SM kini ketat: perlu snapshot SM terverifikasi.
+        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'gpt-5.6-luna']);
+        });
 
         $image = UploadedFile::fake()->image('mockup.png', 100, 100)->size(100);
 

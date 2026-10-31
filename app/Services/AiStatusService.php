@@ -41,23 +41,34 @@ class AiStatusService
 
     /**
      * Status per agent: ['slug' => ['connected','model','provider','reason']].
-     * Agent terhubung ⟺ provider-nya terhubung DAN ada model untuk perannya.
+     * Aturan tanpa-default: agent terhubung ⟺ role itu punya model yang
+     * dipilih PO di halaman Konfigurasi Agent DAN modelnya tersedia di
+     * gateway. Display tidak lagi mengklaim model pemetaan otomatis
+     * seolah-olah dipakai — bila tidak ada pilihan, tampilkan
+     * "belum dipilih" dengan alasan jujur dari resolver.
      */
     public function agents(): array
     {
         $result = [];
+        $resolver = app(StrictModelResolver::class);
 
         foreach (config('agents.profiles', []) as $profile) {
             $slug = $profile['slug'];
-            $model = $slug === 'scrum-master'
-                ? $this->client->smartestModel()
-                : $this->client->modelForRole($slug);
-
-            if ($model !== null) {
+            if (! $this->client->agentsEnabled()) {
+                $result[$slug] = [
+                    'connected' => false,
+                    'model' => null,
+                    'provider' => null,
+                    'reason' => 'Jalur agent AI dimatikan di konfigurasi.',
+                ];
+                continue;
+            }
+            $check = $resolver->check($slug);
+            if ($check['model'] !== null) {
                 $result[$slug] = [
                     'connected' => true,
-                    'model' => $model,
-                    'provider' => $this->providerLabelForModel($model),
+                    'model' => $check['model'],
+                    'provider' => $this->providerLabelForModel($check['model']),
                     'reason' => null,
                 ];
                 continue;
@@ -67,7 +78,7 @@ class AiStatusService
                 'connected' => false,
                 'model' => null,
                 'provider' => null,
-                'reason' => $this->unavailableReason(),
+                'reason' => $check['short_reason'],
             ];
         }
 
@@ -93,21 +104,5 @@ class AiStatusService
         }
 
         return null;
-    }
-
-    /** Alasan jujur kenapa sebuah agent belum terhubung. */
-    protected function unavailableReason(): string
-    {
-        if (! $this->client->agentsEnabled()) {
-            return 'Jalur agent AI dimatikan di konfigurasi.';
-        }
-
-        foreach ($this->providers() as $provider) {
-            if ($provider['connected']) {
-                return 'Provider terhubung, tetapi tidak ada model yang cocok untuk peran ini.';
-            }
-        }
-
-        return 'Belum ada provider AI yang terhubung.';
     }
 }

@@ -233,13 +233,18 @@ class StoryEstimationAsyncTest extends TestCase
 
     public function test_process_agent_logs_raw_answer_when_async_vote_fails_validation(): void
     {
+        // Vote QA kini lewat gateway dengan model dari menu.
         config([
-            'services.agent_profiles.qa-engineer.base_url' => 'http://qa.test/v1',
-            'services.agent_profiles.qa-engineer.api_key' => 'qa-test-key',
-            'services.agent_profiles.qa-engineer.model' => 'qa-engineer',
+            'ai.cliproxy.agents_enabled' => true,
+            'ai.cliproxy.api_key' => 'test-key',
+            'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
         ]);
+        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('current')->with('qa-engineer')->andReturn(['status' => 'verified', 'model' => 'qa-model']);
+        });
         \Illuminate\Support\Facades\Http::fake([
-            'qa.test/*' => \Illuminate\Support\Facades\Http::response(['choices' => [['message' => ['content' => 'Saya menilai story ini 5 poin.']]]]),
+            'http://127.0.0.1:8317/v1/models' => \Illuminate\Support\Facades\Http::response(['data' => [['id' => 'qa-model', 'owned_by' => 'openai']]]),
+            'http://127.0.0.1:8317/v1/chat/completions' => \Illuminate\Support\Facades\Http::response(['choices' => [['message' => ['content' => 'Saya menilai story ini 5 poin.']]]]),
         ]);
         \Illuminate\Support\Facades\Log::spy();
         [$owner, $project, $story] = $this->makeStory();

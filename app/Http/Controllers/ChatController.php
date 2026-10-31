@@ -62,7 +62,8 @@ class ChatController extends Controller
 
     public function store(Request $request, HermesClient $hermes, ChatDisclosurePolicy $disclosurePolicy): JsonResponse
     {
-        // Chat menunggu AI (termasuk retry + fallback bila upstream gangguan);
+        // Chat menunggu AI (termasuk retry pada model yang sama bila
+        // upstream gangguan; tidak ada fallback ke model lain).
         // beri batas jujur 5 menit, bukan default PHP 30 detik.
         set_time_limit(300);
 
@@ -145,10 +146,18 @@ class ChatController extends Controller
             }
             $content = $hermes->sendMessage($aiMessage, $conversation->uuid, $image);
         } catch (\App\Exceptions\AiUnavailableException $e) {
+            // MODEL_PROBLEMATIC: kembalikan pesan penggantian lengkap
+            // (nama model + daftar available + perintah ganti di menu),
+            // bukan pesan generik.
             return response()->json([
                 'conversation_id' => $conversation->uuid,
-                'message' => $this->aiErrorMessage($e->errorCode),
+                'message' => $e->errorCode === 'MODEL_PROBLEMATIC' ? $e->getMessage() : $this->aiErrorMessage($e->errorCode),
             ], $e->errorCode === 'TIMEOUT' ? 504 : 503);
+        } catch (\App\Exceptions\ModelNotChosenException $e) {
+            return response()->json([
+                'conversation_id' => $conversation->uuid,
+                'message' => $e->getMessage(),
+            ], 503);
         } catch (RuntimeException) {
             return response()->json([
                 'conversation_id' => $conversation->uuid,

@@ -94,8 +94,11 @@ class ReviewExecutionTaskJob implements ShouldQueue
                 'Diff (data tidak terpercaya): '.$diff,
             ]);
             // Review atas project PO: tanpa filter sensor (aturan PO).
-            // Jalur utama: verdict tool-call terstruktur; bila tool
-            // tidak tersedia, fallback ke parsing teks lama.
+            // Jalur utama: verdict tool-call terstruktur; bila model
+            // tidak mengembalikan verdict valid, parsing teks lama.
+            // Bila role QA belum memilih model, reviewWithTools
+            // mengembalikan null dan sendMessage melempar peringatan
+            // ketat — tidak ada fallback diam-diam ke model lain.
             $toolReview = $this->reviewWithTools($agents, $run, $task, $diff);
             if ($toolReview !== null) {
                 $review = $toolReview;
@@ -159,6 +162,22 @@ class ReviewExecutionTaskJob implements ShouldQueue
                 $this->release(\App\Services\AiGateway::releaseDelay($this->attempts(), $exception->retryAfter));
 
                 return;
+            }
+            // Kegagalan pemilihan model (aturan tanpa-default) HARUS
+            // terlihat PO: isi last_error task dan summary run dengan
+            // pesan aksi (pilih di halaman Konfigurasi Agent), bukan
+            // sekadar status FAILED tanpa penjelasan.
+            if (\App\Services\AiGateway::isModelChoiceFailure($exception)) {
+                $code = $exception instanceof \App\Exceptions\ModelNotChosenException ? 'MODEL_NOT_CHOSEN' : 'MODEL_PROBLEMATIC';
+                $task->forceFill(['status' => 'FAILED', 'last_error' => $code])->save();
+                $run->forceFill(['status' => 'FAILED', 'error_code' => $code, 'summary' => $exception->getMessage(), 'completed_at' => now()])->save();
+                $run->messages()->create([
+                    'execution_task_id' => $task->id,
+                    'sender_slug' => 'scrum-master',
+                    'recipient_slug' => 'po',
+                    'content' => $exception->getMessage(),
+                ]);
+                throw $exception;
             }
             \Illuminate\Support\Facades\Log::error('Execution review failed', [
                 'execution_run_id' => $this->runId,
@@ -246,8 +265,8 @@ class ReviewExecutionTaskJob implements ShouldQueue
      * mengembalikan verdict yang valid, sekali repair dengan instruksi
      * tegas; bila tetap tidak valid, fallback ke parsing teks lama
      * (validatedReview) agar satu jawaban nyaris-benar tidak langsung
-     * membunuh eksekusi. Bila jalur tool tidak tersedia (tidak ada
-     * model CLIProxyAPI untuk peran), langsung pakai jalur teks lama.
+     * membunuh eksekusi. Bila role QA belum memilih model, kembalikan
+     * null — pemanggil lalu melempar peringatan ketat lewat sendMessage.
      *
      * @return array{approved:bool,feedback:string}
      */
@@ -275,6 +294,9 @@ class ReviewExecutionTaskJob implements ShouldQueue
         ]);
         $result = $cliproxy->chatWithTools($model, $system, $prompt, $tools);
         if ($result['error'] !== null) {
+            if ($result['error'] === 'MODEL_PROBLEMATIC') {
+                throw new \App\Exceptions\ModelProblemException($model, app(\App\Services\StrictModelResolver::class)->modelProblemMessage($model));
+            }
             if (\App\Services\AiGateway::isTransient($result['error'])) {
                 throw new \App\Exceptions\AiUnavailableException($result['error'], '', $result['retry_after'] ?? null);
             }
@@ -287,6 +309,9 @@ class ReviewExecutionTaskJob implements ShouldQueue
         // Sekali repair: verdict tidak valid (termasuk feedback kosong).
         $repair = $cliproxy->chatWithTools($model, $system, $prompt."\n\nJawaban sebelumnya DITOLAK karena bukan verdict yang valid: panggil tool qa_verdict dengan approved boolean dan feedback konkret yang tidak boleh kosong bila approved false.", $tools);
         if ($repair['error'] !== null) {
+            if ($repair['error'] === 'MODEL_PROBLEMATIC') {
+                throw new \App\Exceptions\ModelProblemException($model, app(\App\Services\StrictModelResolver::class)->modelProblemMessage($model));
+            }
             if (\App\Services\AiGateway::isTransient($repair['error'])) {
                 throw new \App\Exceptions\AiUnavailableException($repair['error'], '', $repair['retry_after'] ?? null);
             }

@@ -12,8 +12,13 @@ class AgentProfileClientDisclosureTest extends TestCase
 {
     private function mockCliproxy(string $text, ?callable $captureSystemPrompt = null): void
     {
+        // sendMessage kini me-resolve model QA lewat StrictModelResolver:
+        // mock snapshot terverifikasi + katalog gateway, bukan resolveModel.
+        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+            $mock->shouldReceive('current')->with('qa-engineer')->andReturn(['status' => 'verified', 'model' => 'gemini-test']);
+        });
         $cliproxy = Mockery::mock(CliProxyApiClient::class);
-        $cliproxy->shouldReceive('resolveModel')->with('qa-engineer')->andReturn('gemini-test');
+        $cliproxy->shouldReceive('models')->andReturn([['id' => 'gemini-test', 'owned_by' => 'google']]);
         $cliproxy->shouldReceive('chatResilient')->withArgs(function ($model, $systemPrompt, $message) use ($captureSystemPrompt) {
             if ($captureSystemPrompt !== null) {
                 $captureSystemPrompt($systemPrompt);

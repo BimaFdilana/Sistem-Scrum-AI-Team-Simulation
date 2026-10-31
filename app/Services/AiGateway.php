@@ -3,7 +3,10 @@
 namespace App\Services;
 
 use App\Exceptions\AiUnavailableException;
+use App\Exceptions\ModelNotChosenException;
+use App\Exceptions\ModelProblemException;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Satu pintu klasifikasi kegagalan AI untuk semua job eksekusi.
@@ -33,6 +36,19 @@ class AiGateway
     public static function isTransient(string $errorCode): bool
     {
         return in_array($errorCode, self::TRANSIENT_CODES, true);
+    }
+
+    /**
+     * Kegagalan pemilihan/pemakaian model yang harus sampai ke PO
+     * sebagai peringatan (bukan antre ulang, bukan substitusi diam-diam):
+     * role belum memilih, atau model yang dipilih ternyata bermasalah
+     * (MODEL_PROBLEMATIC — sengaja bukan kode transient).
+     */
+    public static function isModelChoiceFailure(Throwable $exception): bool
+    {
+        return $exception instanceof ModelNotChosenException
+            || $exception instanceof ModelProblemException
+            || ($exception instanceof AiUnavailableException && $exception->errorCode === 'MODEL_PROBLEMATIC');
     }
 
     /**

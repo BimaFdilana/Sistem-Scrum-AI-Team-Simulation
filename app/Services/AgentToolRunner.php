@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Exceptions\AiUnavailableException;
+use App\Exceptions\ModelProblemException;
 use App\Models\AgentToolRound;
 use Illuminate\Support\Facades\File;
 use RuntimeException;
@@ -24,6 +25,9 @@ use Throwable;
 class AgentToolRunner
 {
     public const MAX_ROUNDS = 12;
+
+    /** Respons malformed berturut-turut sebelum model dinyatakan bermasalah. */
+    public const MALFORMED_LIMIT = 3;
 
     public const MAX_FILES = 50;
 
@@ -82,9 +86,13 @@ class AgentToolRunner
      */
     public function run(string $slug, string $worktree, string $taskPrompt, bool $allowDelete, array $context = []): array
     {
+        // Aturan tanpa-default: HANYA model yang dipilih PO di menu.
+        // toolModel() mengembalikan null bila belum dipilih — dan itu
+        // berarti alur berhenti dengan peringatan, BUKAN memakai model
+        // lain atau jalur lama.
         $model = $this->agents->toolModel($slug);
         if ($model === null) {
-            throw new RuntimeException('Tool calling tidak tersedia untuk peran '.$slug.' (tidak ada model CLIProxyAPI).');
+            throw app(StrictModelResolver::class)->notChosenException($slug);
         }
 
         return $this->runWithModel($slug, $model, $worktree, $taskPrompt, $allowDelete, $context);
@@ -113,17 +121,37 @@ class AgentToolRunner
 
         try {
             $usageContext = $this->usageContext($context);
+            // Respons malformed yang BERULANG dari model yang sama adalah
+            // masalah model (aturan tanpa-default): sekali malformed
+            // masih diperbaiki dengan teguran (putaran tetap terhitung),
+            // tiga kali berturut-turut berarti model itu tidak bisa
+            // dipakai — berhenti dengan prompt penggantian, bukan
+            // substitusi diam-diam atau retry tanpa batas.
+            $malformedStreak = 0;
             for ($round = 1; $round <= self::MAX_ROUNDS; $round++) {
                 $result = $this->cliproxy->chatWithToolsHistory($model, $system, $messages, self::tools(), 120, $usageContext);
                 if ($result['error'] !== null) {
+                    if ($result['error'] === 'MODEL_PROBLEMATIC') {
+                        throw new ModelProblemException($model, app(StrictModelResolver::class)->modelProblemMessage($model));
+                    }
+                    if ($result['error'] === 'MALFORMED_TOOL_CALL') {
+                        $malformedStreak++;
+                        $this->recordRound($context, $round, $model, [], ['MALFORMED_TOOL_CALL'], $result['text']);
+                        if ($malformedStreak >= self::MALFORMED_LIMIT) {
+                            throw new ModelProblemException($model, app(StrictModelResolver::class)->modelProblemMessage($model));
+                        }
+                        $messages[] = ['role' => 'user', 'content' => 'Argumen tool kamu sebelumnya bukan JSON yang valid. Perbaiki: setiap tool_call harus punya function.arguments berupa objek JSON yang valid, lalu panggil tool yang sama lagi. Jangan menulis code di teks chat.'];
+                        continue;
+                    }
                     if (AiGateway::isTransient($result['error'])) {
                         throw new AiUnavailableException($result['error'], '', $result['retry_after'] ?? null, $model);
                     }
                     throw new RuntimeException('Tool call gagal: '.$result['error']);
                 }
+                $malformedStreak = 0;
                 $calls = $result['tool_calls'];
-                // Model yang benar-benar melayani bisa berbeda dari yang
-                // diminta karena fallback lintas provider di client.
+                // Model yang melayani selalu sama dengan yang diminta:
+                // tidak ada lagi fallback lintas provider di client.
                 $served = $result['model'] ?? $model;
                 if ($calls === []) {
                     $this->recordRound($context, $round, $served, [], ['nudge' => 'Model tidak memanggil tool; dikirimi teguran.'], $result['text']);

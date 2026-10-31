@@ -3,30 +3,52 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Services\AgentConfiguration;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Mockery\MockInterface;
 use Tests\TestCase;
 
+/**
+ * Chat SM kini lewat gateway CLIProxyAPI (8317) dengan model SM yang
+ * dipilih PO di menu (aturan tanpa-default) — bukan lagi server Hermes
+ * legacy 8643 dengan model default 'scrumagent'. Jalur dispatcher
+ * legacy dihapus; tes ini memverifikasi perilaku chat lewat jalur
+ * gateway yang baru.
+ */
 class HermesChatTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_authenticated_user_can_send_a_message_to_hermes_and_keep_the_transcript(): void
+    private function mockStrictSm(string $model = 'gpt-5.6-sol'): void
     {
         config([
-            'services.hermes.base_url' => 'http://127.0.0.1:8643/v1',
-            'services.hermes.api_key' => 'test-hermes-server-key',
-            'services.hermes.model' => 'scrumagent',
+            'ai.cliproxy.agents_enabled' => true,
+            'ai.cliproxy.api_key' => 'test-key',
+            'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
         ]);
+        $this->mock(AgentConfiguration::class, function (MockInterface $mock) use ($model) {
+            $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => $model]);
+        });
+    }
 
+    private function fakeGatewayChat(string $text, string $model = 'gpt-5.6-sol'): void
+    {
         Http::fake([
-            'http://127.0.0.1:8643/v1/chat/completions' => Http::response([
+            'http://127.0.0.1:8317/v1/models' => Http::response(['data' => [['id' => $model, 'owned_by' => 'openai']]]),
+            'http://127.0.0.1:8317/v1/chat/completions' => Http::response([
                 'choices' => [[
-                    'message' => ['role' => 'assistant', 'content' => 'Mari kita pecah story menjadi acceptance criteria.'],
+                    'message' => ['role' => 'assistant', 'content' => $text],
                 ]],
             ]),
         ]);
+    }
+
+    public function test_authenticated_user_can_send_a_message_to_hermes_and_keep_the_transcript(): void
+    {
+        $this->mockStrictSm();
+        $this->fakeGatewayChat('Mari kita pecah story menjadi acceptance criteria.');
 
         $this->actingAs(User::factory()->create())
             ->postJson('/chat/messages', ['message' => 'Bantu refine story ini.'])
@@ -41,10 +63,9 @@ class HermesChatTest extends TestCase
             'content' => 'Mari kita pecah story menjadi acceptance criteria.',
         ]);
 
-        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://127.0.0.1:8643/v1/chat/completions'
-            && $request->hasHeader('Authorization', 'Bearer test-hermes-server-key')
-            && $request->hasHeader('X-Hermes-Session-Id')
-            && $request['model'] === 'scrumagent'
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://127.0.0.1:8317/v1/chat/completions'
+            && $request->hasHeader('Authorization', 'Bearer test-key')
+            && $request['model'] === 'gpt-5.6-sol'
             && $request['messages'][0]['role'] === 'system'
             && str_contains($request['messages'][0]['content'], 'ScrumSpace platform itself')
             && $request['messages'][1]['content'] === 'Bantu refine story ini.'
@@ -53,19 +74,8 @@ class HermesChatTest extends TestCase
 
     public function test_chat_message_can_be_scoped_to_a_project_and_general_chat_stays_separate(): void
     {
-        config([
-            'services.hermes.base_url' => 'http://127.0.0.1:8643/v1',
-            'services.hermes.api_key' => 'test-hermes-server-key',
-            'services.hermes.model' => 'scrumagent',
-        ]);
-
-        Http::fake([
-            'http://127.0.0.1:8643/v1/chat/completions' => Http::response([
-                'choices' => [[
-                    'message' => ['role' => 'assistant', 'content' => 'Siap, fokus ke project ini.'],
-                ]],
-            ]),
-        ]);
+        $this->mockStrictSm();
+        $this->fakeGatewayChat('Siap, fokus ke project ini.');
 
         $project = \App\Models\Project::create(['name' => 'Toko Online', 'project_type' => 'web']);
         $user = User::factory()->create();
@@ -93,14 +103,9 @@ class HermesChatTest extends TestCase
 
     public function test_dashboard_shows_hermes_connected_when_the_profile_api_responds(): void
     {
-        config([
-            'services.hermes.base_url' => 'http://127.0.0.1:8643/v1',
-            'services.hermes.api_key' => 'test-hermes-server-key',
-            'services.hermes.model' => 'scrumagent',
-        ]);
-
+        $this->mockStrictSm();
         Http::fake([
-            'http://127.0.0.1:8643/v1/models' => Http::response(['data' => [['id' => 'scrumagent']]]),
+            'http://127.0.0.1:8317/v1/models' => Http::response(['data' => [['id' => 'gpt-5.6-sol', 'owned_by' => 'openai']]]),
         ]);
 
         $this->actingAs(User::factory()->create())
@@ -121,13 +126,18 @@ class HermesChatTest extends TestCase
     public function test_agents_page_shows_per_profile_chat_status(): void
     {
         // Status halaman /agents kini dari AiStatusService (jalur OAuth),
-        // bukan server Hermes lama yang sudah dipensiunkan.
+        // bukan server Hermes lama yang sudah dipensiunkan. Dengan aturan
+        // tanpa-default, semua role perlu snapshot terverifikasi agar
+        // statusnya tetap terhubung.
         config([
             'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
             'ai.cliproxy.management_key' => 'test-mgmt-key',
             'ai.cliproxy.api_key' => 'test-key',
             'ai.cliproxy.agents_enabled' => true,
         ]);
+        $this->mock(AgentConfiguration::class, function (MockInterface $mock) {
+            $mock->shouldReceive('current')->andReturn(['status' => 'verified', 'model' => 'gpt-5.6-sol']);
+        });
 
         Http::fake([
             'http://127.0.0.1:8317/v0/management/auth-files' => Http::response(['files' => [[
@@ -151,10 +161,13 @@ class HermesChatTest extends TestCase
 
     public function test_chat_reports_backend_unavailable_without_exposing_the_key(): void
     {
+        // Tanpa pilihan SM di menu, chat kini gagal dengan pesan
+        // belum-memilih (aturan tanpa-default) — bukan pesan generik
+        // lama — dan tetap tidak membocorkan kunci apa pun.
         config([
-            'services.hermes.base_url' => 'http://127.0.0.1:8643/v1',
-            'services.hermes.api_key' => 'must-not-leak',
-            'services.hermes.model' => 'scrumagent',
+            'ai.cliproxy.agents_enabled' => true,
+            'ai.cliproxy.api_key' => 'must-not-leak',
+            'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
         ]);
 
         Http::fake(['*' => Http::response(['error' => 'unauthorized'], 401)]);
@@ -162,7 +175,7 @@ class HermesChatTest extends TestCase
         $this->actingAs(User::factory()->create())
             ->postJson('/chat/messages', ['message' => 'Halo'])
             ->assertServiceUnavailable()
-            ->assertJsonPath('message', 'AI Agent belum dapat dihubungi. Coba lagi sebentar.');
+            ->assertJsonPath('message', 'Model untuk peran Scrum Master belum dipilih di halaman Konfigurasi Agent — alur tidak dijalankan.');
 
         $this->get('/chat')->assertOk()->assertDontSee('must-not-leak');
     }
@@ -195,22 +208,13 @@ class HermesChatTest extends TestCase
 
     public function test_chat_replaces_a_model_reply_that_contains_a_platform_path(): void
     {
-        config([
-            'services.hermes.base_url' => 'http://127.0.0.1:8643/v1',
-            'services.hermes.api_key' => 'test-hermes-server-key',
-            'services.hermes.model' => 'scrumagent',
-        ]);
-
+        $this->mockStrictSm();
         // Aturan baru (PO 2026-10-29): yang diganti hanyalah NILAI
         // kebocoran platform — path source platform — bukan path biasa
         // atau kata "server". Path project PO justru boleh tampil.
         $platformPath = app()->basePath().'/app/Services/ChatDisclosurePolicy.php';
 
-        Http::fake([
-            'http://127.0.0.1:8643/v1/chat/completions' => Http::response([
-                'choices' => [['message' => ['role' => 'assistant', 'content' => 'Project berada di '.$platformPath.'.']]],
-            ]),
-        ]);
+        $this->fakeGatewayChat('Project berada di '.$platformPath.'.');
 
         $this->actingAs(User::factory()->create())
             ->postJson('/chat/messages', ['message' => 'Bantu saya merencanakan backlog.'])
@@ -221,12 +225,8 @@ class HermesChatTest extends TestCase
 
     public function test_chat_and_dashboard_use_ai_agent_branding_instead_of_runtime_branding(): void
     {
-        config([
-            'services.hermes.base_url' => 'http://127.0.0.1:8643/v1',
-            'services.hermes.api_key' => 'test-hermes-server-key',
-            'services.hermes.model' => 'scrumagent',
-        ]);
-        Http::fake(['http://127.0.0.1:8643/v1/models' => Http::response(['data' => [['id' => 'scrumagent']]])]);
+        $this->mockStrictSm();
+        Http::fake(['http://127.0.0.1:8317/v1/models' => Http::response(['data' => [['id' => 'gpt-5.6-sol', 'owned_by' => 'openai']]])]);
 
         $this->actingAs(User::factory()->create())
             ->get('/chat')

@@ -12,6 +12,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Mockery;
+use Mockery\MockInterface;
 use Tests\TestCase;
 
 class AiResilienceTest extends TestCase
@@ -27,7 +28,6 @@ class AiResilienceTest extends TestCase
             'ai.cliproxy.api_key' => 'test-key',
             'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
             'ai.cliproxy.chat_attempts' => 3,
-            'ai.cliproxy.chat_fallbacks' => 2,
         ]);
     }
 
@@ -108,8 +108,11 @@ class AiResilienceTest extends TestCase
         $this->assertSame(1, $calls);
     }
 
-    public function test_falls_back_to_same_provider_model_on_404(): void
+    public function test_404_returns_model_problematic_without_trying_other_models(): void
     {
+        // Aturan tanpa-default: 404 bukan lagi sinyal fallback ke model
+        // lain — alur berhenti dengan MODEL_PROBLEMATIC + daftar
+        // available, dan PO yang memilih penggantinya.
         $this->fakeModels(['gpt-a', 'gpt-b']);
         $requested = [];
         Http::fake(function (Request $request) use (&$requested) {
@@ -120,19 +123,19 @@ class AiResilienceTest extends TestCase
                 ]]);
             }
             $requested[] = $request['model'];
-            return $request['model'] === 'gpt-a'
-                ? Http::response('no such model', 404)
-                : $this->okResponse('dari model cadangan');
+            return Http::response('no such model', 404);
         });
 
         $result = app(CliProxyApiClient::class)->chatResilient('gpt-a', 'sys', 'halo');
 
-        $this->assertSame('dari model cadangan', $result['text']);
-        $this->assertSame('gpt-b', $result['model']);
-        $this->assertSame(['gpt-a', 'gpt-b'], $requested);
+        $this->assertNull($result['text']);
+        $this->assertSame('MODEL_PROBLEMATIC', $result['error']);
+        $this->assertSame('gpt-a', $result['model']);
+        $this->assertSame(['gpt-a', 'gpt-b'], $result['available_models']);
+        $this->assertSame(['gpt-a'], $requested);
     }
 
-    public function test_image_models_are_excluded_from_fallback(): void
+    public function test_404_lists_available_models_for_replacement(): void
     {
         $this->fakeModels(['gpt-a', 'gpt-image-1']);
         $requested = [];
@@ -150,7 +153,8 @@ class AiResilienceTest extends TestCase
         $result = app(CliProxyApiClient::class)->chatResilient('gpt-a', 'sys', 'halo');
 
         $this->assertNull($result['text']);
-        $this->assertSame('MODEL_NOT_FOUND', $result['error']);
+        $this->assertSame('MODEL_PROBLEMATIC', $result['error']);
+        $this->assertSame(['gpt-a', 'gpt-image-1'], $result['available_models']);
         $this->assertSame(['gpt-a'], $requested);
     }
 
@@ -196,8 +200,13 @@ class AiResilienceTest extends TestCase
 
     public function test_hermes_throws_specific_exception(): void
     {
+        // HermesClient kini me-resolve model SM lewat StrictModelResolver:
+        // mock snapshot terverifikasi + katalog gateway, bukan resolveModel.
+        $this->mock(\App\Services\AgentConfiguration::class, function (MockInterface $mock) {
+            $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'gpt-a']);
+        });
         $cliproxy = Mockery::mock(CliProxyApiClient::class);
-        $cliproxy->shouldReceive('resolveModel')->with('scrum-master')->andReturn('gpt-a');
+        $cliproxy->shouldReceive('models')->andReturn([['id' => 'gpt-a', 'owned_by' => 'openai']]);
         $cliproxy->shouldReceive('chatResilient')->once()->andReturn([
             'text' => null, 'error' => 'UPSTREAM_OVERLOADED', 'model' => null,
         ]);
@@ -214,6 +223,11 @@ class AiResilienceTest extends TestCase
     public function test_chat_returns_specific_indonesian_message_on_overload(): void
     {
         $this->fakeModels(['gpt-a']);
+        // Chat SM kini ketat: perlu snapshot SM terverifikasi agar
+        // sendMessage mencapai gateway (bukan gagal "belum memilih").
+        $this->mock(\App\Services\AgentConfiguration::class, function (MockInterface $mock) {
+            $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'gpt-a']);
+        });
         Http::fake(function (Request $request) {
             if (str_ends_with($request->url(), '/v1/models')) {
                 return Http::response(['data' => [['id' => 'gpt-a', 'owned_by' => 'openai']]]);

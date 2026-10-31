@@ -38,7 +38,7 @@ return [
     'hermes' => [
         'base_url' => env('HERMES_API_BASE_URL'),
         'api_key' => env('HERMES_API_KEY'),
-        'model' => env('HERMES_API_MODEL', 'scrumagent'),
+        'model' => env('HERMES_API_MODEL'),
         'timeout' => (int) env('HERMES_API_TIMEOUT', 120),
     ],
 
@@ -53,17 +53,17 @@ return [
         'backend-developer' => [
             'base_url' => env('AI_AGENT_BACKEND_API_BASE_URL'),
             'api_key' => env('AI_AGENT_BACKEND_API_KEY'),
-            'model' => env('AI_AGENT_BACKEND_MODEL', 'backend-developer'),
+            'model' => env('AI_AGENT_BACKEND_MODEL'),
         ],
         'frontend-developer' => [
             'base_url' => env('AI_AGENT_FRONTEND_API_BASE_URL'),
             'api_key' => env('AI_AGENT_FRONTEND_API_KEY'),
-            'model' => env('AI_AGENT_FRONTEND_MODEL', 'frontend-developer'),
+            'model' => env('AI_AGENT_FRONTEND_MODEL'),
         ],
         'qa-engineer' => [
             'base_url' => env('AI_AGENT_QA_API_BASE_URL'),
             'api_key' => env('AI_AGENT_QA_API_KEY'),
-            'model' => env('AI_AGENT_QA_MODEL', 'qa-engineer'),
+            'model' => env('AI_AGENT_QA_MODEL'),
         ],
     ],
 
