@@ -7,6 +7,7 @@ use App\Models\ExecutionTask;
 use App\Models\Notification;
 use App\Services\AgentProfileClient;
 use App\Services\AgentToolRunner;
+use App\Services\HermesTaskRunner;
 use App\Support\Workspace\PatchApplier;
 use App\Support\Workspace\PatchValidationException;
 use App\Support\Workspace\WorktreeManager;
@@ -33,7 +34,12 @@ class ExecuteExecutionTaskJob implements ShouldQueue
     public function __construct(
         public readonly int $runId,
         public readonly int $taskId,
-    ) {}
+    ) {
+        // Tugas Hermes bisa berjalan jauh lebih lama dari loop lama
+        // (simulasi US-01: 248 detik) — beri ruang, tetap dengan batas
+        // agar kegagalan tetap tercatat bersih.
+        $this->timeout = config('ai.execution_driver') === 'hermes' ? 1800 : 600;
+    }
 
     public function handle(
         WorktreeManager $worktrees,
@@ -73,7 +79,19 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             $worktree = $worktrees->create($baseline, $branch, $fromBranch);
             $task->forceFill(['worktree_path' => $worktree, 'branch' => $branch])->save();
 
-            $prompt = implode("\n\n", [
+            $useHermes = config('ai.execution_driver') === 'hermes';
+            // Prompt Hermes tidak menyebut tool lama (read_file/apply_edit/
+            // submit_task tidak ada di Hermes) — ia bekerja dengan tool
+            // file-nya sendiri di worktree; aturan kerja keras ditambahkan
+            // HermesTaskRunner di akhir prompt.
+            $prompt = $useHermes ? implode("\n\n", array_filter([
+                "Kamu {$task->assigneeName()}. Kerjakan task berikut pada project Laravel di direktori kerja ini.",
+                ($run->repair_order_id ? 'BATASAN PERINTAH PERBAIKAN: dilarang menghapus file dan dilarang operasi destruktif terhadap data; lakukan hanya perubahan minimal yang aman.' : ''),
+                $originalStatus === 'REVISION' && $task->qa_feedback
+                    ? 'REVISI (putaran '.($task->revision_count + 1).'): perbaiki berdasarkan feedback QA berikut: '.$task->qa_feedback
+                    : 'Task: '.$task->title.' — '.$task->description,
+                'Tugas dari: '.$run->subjectTitle().' | Kriteria: '.$run->subjectCriteria(),
+            ])) : implode("\n\n", [
                 "Kamu {$task->assigneeName()}. Kerjakan task berikut pada project Laravel HANYA lewat tool yang tersedia.",
                 'Langkah: baca file yang relevan dengan read_file, ubah dengan apply_edit (old_text harus cocok persis tepat satu kali), buat file baru dengan create_file, dan akhiri dengan submit_task berisi ringkasan perubahan. Jangan menulis code di teks chat.',
                 ($run->repair_order_id ? 'BATASAN PERINTAH PERBAIKAN: dilarang menghapus file (tool delete_file) dan dilarang operasi destruktif terhadap data; lakukan hanya perubahan minimal yang aman.' : ''),
@@ -89,11 +107,19 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // tiap tool terhadap worktree dan mengembalikan daftar file
             // yang berubah + ringkasan; kegagalan di tengah loop
             // mengembalikan worktree ke kondisi semula.
-            $result = $runner->run($task->assignee, $worktree, $prompt, $run->repair_order_id === null, [
-                'execution_run_id' => $run->id,
-                'execution_task_id' => $task->id,
-                'source' => 'execution',
-            ]);
+            // Driver Hermes memakai seam yang sama (files + summary) —
+            // commit, diff, IN_REVIEW, dan dispatch QA di bawah tidak berubah.
+            $result = $useHermes
+                ? app(HermesTaskRunner::class)->run($task->assignee, $worktree, $prompt, $run->repair_order_id === null, [
+                    'execution_run_id' => $run->id,
+                    'execution_task_id' => $task->id,
+                    'source' => 'execution',
+                ])
+                : $runner->run($task->assignee, $worktree, $prompt, $run->repair_order_id === null, [
+                    'execution_run_id' => $run->id,
+                    'execution_task_id' => $task->id,
+                    'source' => 'execution',
+                ]);
             $applied = $result['files'];
             $patch = ['summary' => $result['summary']];
 

@@ -29,6 +29,32 @@ return [
         'chat_deadline' => (int) env('CLIPROXY_CHAT_DEADLINE', 240),
     ],
 
+    /*--------------------------------------------------------------------------
+    | Driver eksekusi task
+    |--------------------------------------------------------------------------
+    | 'internal' = loop tool lama (AgentToolRunner, lewat gateway).
+    | 'hermes'   = adapter Hermes CLI (HermesTaskRunner): satu query
+    |              non-interaktif per task, bekerja langsung di worktree.
+    | Gerbang permission, QA, merge, dan demo tidak berubah di kedua driver.
+    | Loop lama dipertahankan sebagai fallback (ubah EXECUTION_DRIVER).
+    */
+    'execution_driver' => env('EXECUTION_DRIVER', 'internal'),
+
+    'hermes' => [
+        // Biner Hermes. Di VPS, worker www-data memanggil path absolut
+        // /home/sidik/.local/bin/hermes lewat env ini (PATH worker tidak
+        // mencakup bin user sidik).
+        'binary' => env('HERMES_BINARY', 'hermes'),
+        // Model eksekusi pilot (terbukti di tugas nyata 2026-10-31).
+        'model' => env('HERMES_MODEL', 'glm-5.3'),
+        'provider' => env('HERMES_PROVIDER', 'custom'),
+        'base_url' => env('HERMES_BASE_URL', 'http://127.0.0.1:8317/v1'),
+        'max_turns' => (int) env('HERMES_MAX_TURNS', 50),
+        // Harus < timeout job (1800) agar Hermes yang menggantung gagal
+        // bersih sebelum worker membunuh job.
+        'timeout' => (int) env('HERMES_TIMEOUT', 1500),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | OAuth providers
