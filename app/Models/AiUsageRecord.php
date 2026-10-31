@@ -8,6 +8,7 @@ class AiUsageRecord extends Model
 {
     protected $fillable = [
         'provider', 'model', 'prompt_tokens', 'completion_tokens', 'total_tokens',
+        'execution_run_id', 'execution_task_id', 'source',
     ];
 
     protected function casts(): array

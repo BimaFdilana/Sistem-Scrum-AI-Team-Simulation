@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Exceptions\AiUnavailableException;
+use App\Models\AgentToolRound;
 use Illuminate\Support\Facades\File;
 use RuntimeException;
 use Symfony\Component\Process\Process;
@@ -76,14 +77,30 @@ class AgentToolRunner
     }
 
     /**
+     * @param  array{execution_run_id?:int|null,execution_task_id?:int|null,source?:string|null,probe_token?:string|null}  $context
      * @return array{files: string[], summary: string}
      */
-    public function run(string $slug, string $worktree, string $taskPrompt, bool $allowDelete): array
+    public function run(string $slug, string $worktree, string $taskPrompt, bool $allowDelete, array $context = []): array
     {
         $model = $this->agents->toolModel($slug);
         if ($model === null) {
             throw new RuntimeException('Tool calling tidak tersedia untuk peran '.$slug.' (tidak ada model CLIProxyAPI).');
         }
+
+        return $this->runWithModel($slug, $model, $worktree, $taskPrompt, $allowDelete, $context);
+    }
+
+    /**
+     * Loop yang sama dengan run(), tapi model ditentukan langsung —
+     * dipakai perintah probe agar model yang diuji bisa dipilih eksplisit
+     * tanpa mengubah konfigurasi peran. Prompt sistem tetap dari peran,
+     * sehingga satu-satunya variabel yang berubah adalah model.
+     *
+     * @param  array{execution_run_id?:int|null,execution_task_id?:int|null,source?:string|null,probe_token?:string|null}  $context
+     * @return array{files: string[], summary: string}
+     */
+    public function runWithModel(string $slug, string $model, string $worktree, string $taskPrompt, bool $allowDelete, array $context = []): array
+    {
         $real = realpath($worktree);
         if ($real === false || ! is_dir($real)) {
             throw new RuntimeException('Worktree tidak valid.');
@@ -95,8 +112,9 @@ class AgentToolRunner
         $touched = [];
 
         try {
+            $usageContext = $this->usageContext($context);
             for ($round = 1; $round <= self::MAX_ROUNDS; $round++) {
-                $result = $this->cliproxy->chatWithToolsHistory($model, $system, $messages, self::tools());
+                $result = $this->cliproxy->chatWithToolsHistory($model, $system, $messages, self::tools(), 120, $usageContext);
                 if ($result['error'] !== null) {
                     if (AiGateway::isTransient($result['error'])) {
                         throw new AiUnavailableException($result['error'], '', $result['retry_after'] ?? null, $model);
@@ -104,11 +122,16 @@ class AgentToolRunner
                     throw new RuntimeException('Tool call gagal: '.$result['error']);
                 }
                 $calls = $result['tool_calls'];
+                // Model yang benar-benar melayani bisa berbeda dari yang
+                // diminta karena fallback lintas provider di client.
+                $served = $result['model'] ?? $model;
                 if ($calls === []) {
+                    $this->recordRound($context, $round, $served, [], ['nudge' => 'Model tidak memanggil tool; dikirimi teguran.'], $result['text']);
                     $messages[] = ['role' => 'user', 'content' => 'Kamu belum memanggil tool apa pun. Kerjakan task HANYA lewat tool (read_file/apply_edit/create_file/delete_file), lalu akhiri dengan submit_task. Jangan menulis code di teks chat.'];
                     continue;
                 }
                 $messages[] = ['role' => 'assistant', 'content' => $result['text'], 'tool_calls' => $this->rawToolCalls($calls)];
+                $outcomes = [];
                 foreach ($calls as $call) {
                     $name = $call['name'] ?? null;
                     $args = $call['arguments'] ?? [];
@@ -116,15 +139,21 @@ class AgentToolRunner
                         $summary = is_string($args['summary'] ?? null) ? trim($args['summary']) : '';
                         if ($summary === '') {
                             $messages[] = $this->toolMessage($call, 'error: summary tidak boleh kosong.');
+                            $outcomes[] = 'error: summary tidak boleh kosong.';
+                            $this->recordRound($context, $round, $served, $calls, $outcomes, $result['text']);
 
                             continue 2;
                         }
 
+                        $this->recordRound($context, $round, $served, $calls, $outcomes, $result['text']);
+
                         return ['files' => array_values(array_keys($touched)), 'summary' => $summary];
                     }
                     $outcome = $this->executeTool($real, $name, $args, $allowDelete, $backups, $createdDirs, $touched);
+                    $outcomes[] = $outcome;
                     $messages[] = $this->toolMessage($call, $outcome);
                 }
+                $this->recordRound($context, $round, $served, $calls, $outcomes, $result['text']);
             }
         } catch (Throwable $e) {
             $this->rollback($backups, $createdDirs);
@@ -154,6 +183,78 @@ class AgentToolRunner
         }
 
         return $raw;
+    }
+
+    /**
+     * Konteks pencatatan untuk client: hanya diteruskan bila pemanggil
+     * memberi konteks eksplisit (job eksekusi / probe). Tanpa konteks,
+     * perilaku lama dipertahankan (usage tanpa tautan).
+     *
+     * @param  array{execution_run_id?:int|null,execution_task_id?:int|null,source?:string|null,probe_token?:string|null}  $context
+     * @return array{execution_run_id?:int|null,execution_task_id?:int|null,source?:string|null}
+     */
+    private function usageContext(array $context): array
+    {
+        if ($context === []) {
+            return [];
+        }
+
+        return [
+            'execution_run_id' => $context['execution_run_id'] ?? null,
+            'execution_task_id' => $context['execution_task_id'] ?? null,
+            'source' => $context['source'] ?? 'execution',
+        ];
+    }
+
+    /**
+     * Simpan satu putaran loop untuk diagnosis. Best-effort: kegagalan
+     * tulis tidak boleh menggagalkan eksekusi. Tanpa konteks eksplisit
+     * tidak ada yang ditulis, supaya pemanggilan tanpa konteks (mis.
+     * tes) tidak mengotori tabel dengan baris tanpa tautan.
+     */
+    private function recordRound(array $context, int $round, string $model, array $calls, array $outcomes, ?string $assistantText): void
+    {
+        if ($context === []) {
+            return;
+        }
+        try {
+            AgentToolRound::query()->create([
+                'execution_run_id' => $context['execution_run_id'] ?? null,
+                'execution_task_id' => $context['execution_task_id'] ?? null,
+                'source' => $context['source'] ?? 'execution',
+                'probe_token' => $context['probe_token'] ?? null,
+                'round' => $round,
+                'model' => $model,
+                'tool_calls' => array_map(fn ($call) => [
+                    'name' => $call['name'] ?? null,
+                    'arguments' => $this->truncateForLog($call['arguments'] ?? []),
+                ], $calls),
+                'outcomes' => array_map(fn ($outcome) => is_string($outcome) ? mb_substr($outcome, 0, 1000) : $outcome, $outcomes),
+                'assistant_text' => $assistantText !== null ? mb_substr($assistantText, 0, 500) : null,
+            ]);
+        } catch (Throwable) {
+            // Pencatatan tidak boleh menggagalkan eksekusi.
+        }
+    }
+
+    private function truncateForLog(mixed $value, int $depth = 0): mixed
+    {
+        if (is_string($value)) {
+            return mb_substr($value, 0, 1000);
+        }
+        if (is_array($value)) {
+            if ($depth >= 2) {
+                return '[...]';
+            }
+            $out = [];
+            foreach (array_slice($value, 0, 20, true) as $key => $item) {
+                $out[$key] = $this->truncateForLog($item, $depth + 1);
+            }
+
+            return $out;
+        }
+
+        return $value;
     }
 
     private function toolMessage(array $call, string $content): array

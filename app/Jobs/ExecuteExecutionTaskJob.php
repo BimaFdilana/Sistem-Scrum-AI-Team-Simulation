@@ -89,7 +89,11 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // tiap tool terhadap worktree dan mengembalikan daftar file
             // yang berubah + ringkasan; kegagalan di tengah loop
             // mengembalikan worktree ke kondisi semula.
-            $result = $runner->run($task->assignee, $worktree, $prompt, $run->repair_order_id === null);
+            $result = $runner->run($task->assignee, $worktree, $prompt, $run->repair_order_id === null, [
+                'execution_run_id' => $run->id,
+                'execution_task_id' => $task->id,
+                'source' => 'execution',
+            ]);
             $applied = $result['files'];
             $patch = ['summary' => $result['summary']];
 

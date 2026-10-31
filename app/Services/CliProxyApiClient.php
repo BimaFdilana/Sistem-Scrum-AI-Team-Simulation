@@ -659,9 +659,9 @@ class CliProxyApiClient
      * @param  array<int,array{type:string,function:array{name:string,parameters:array}}>  $tools
      * @return array{tool_calls: array, text: ?string, error: ?string, model: ?string, usage: array, retry_after: ?int}
      */
-    public function chatWithTools(string $model, string $systemPrompt, string $userMessage, array $tools, int $timeout = 120): array
+    public function chatWithTools(string $model, string $systemPrompt, string $userMessage, array $tools, int $timeout = 120, array $usageContext = []): array
     {
-        return $this->chatWithToolsHistory($model, $systemPrompt, [['role' => 'user', 'content' => $userMessage]], $tools, $timeout);
+        return $this->chatWithToolsHistory($model, $systemPrompt, [['role' => 'user', 'content' => $userMessage]], $tools, $timeout, $usageContext);
     }
 
     /**
@@ -669,9 +669,10 @@ class CliProxyApiClient
      *
      * @param  array<int,array{role:string,content:mixed}>  $messages
      * @param  array<int,array{type:string,function:array{name:string,parameters:array}}>  $tools
+     * @param  array{execution_run_id?:int|null,execution_task_id?:int|null,source?:string|null}  $usageContext
      * @return array{tool_calls: array, text: ?string, error: ?string, model: ?string, usage: array, retry_after: ?int}
      */
-    public function chatWithToolsHistory(string $model, string $systemPrompt, array $messages, array $tools, int $timeout = 120): array
+    public function chatWithToolsHistory(string $model, string $systemPrompt, array $messages, array $tools, int $timeout = 120, array $usageContext = []): array
     {
         if (! $this->agentsEnabled() || ! $this->apiKey) {
             return ['tool_calls' => [], 'text' => null, 'error' => 'DISABLED', 'model' => null, 'usage' => [], 'retry_after' => null];
@@ -688,7 +689,7 @@ class CliProxyApiClient
                 }
                 $outcome = $this->attemptChatMessages($candidate, $systemPrompt, $messages, $timeout, $tools);
                 if ($outcome['status'] === 'ok') {
-                    AiUsageRecorder::record($candidate, $outcome['usage'] ?? []);
+                    AiUsageRecorder::record($candidate, $outcome['usage'] ?? [], $usageContext);
                     return ['tool_calls' => $outcome['tool_calls'], 'text' => $outcome['text'], 'error' => null, 'model' => $candidate, 'usage' => $outcome['usage'], 'retry_after' => null];
                 }
                 $lastError = $outcome['error'];

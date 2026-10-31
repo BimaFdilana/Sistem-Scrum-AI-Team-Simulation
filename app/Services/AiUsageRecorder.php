@@ -18,7 +18,10 @@ use Throwable;
  */
 class AiUsageRecorder
 {
-    public static function record(?string $model, array $usage): void
+    /**
+     * @param  array{execution_run_id?:int|null,execution_task_id?:int|null,source?:string|null}  $context
+     */
+    public static function record(?string $model, array $usage, array $context = []): void
     {
         $total = (int) ($usage['total_tokens'] ?? 0);
         if ($model === null || $model === '' || $total <= 0) {
@@ -31,6 +34,9 @@ class AiUsageRecorder
                 'prompt_tokens' => (int) ($usage['prompt_tokens'] ?? 0),
                 'completion_tokens' => (int) ($usage['completion_tokens'] ?? 0),
                 'total_tokens' => $total,
+                'execution_run_id' => $context['execution_run_id'] ?? null,
+                'execution_task_id' => $context['execution_task_id'] ?? null,
+                'source' => $context['source'] ?? null,
             ]);
         } catch (Throwable) {
             // Best-effort saja.
