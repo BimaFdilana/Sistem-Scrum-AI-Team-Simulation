@@ -141,4 +141,23 @@ class AgentToolRoundLoggingTest extends TestCase
 
         $this->assertSame(3, AgentToolRound::query()->where('source', 'probe')->count());
     }
+
+    public function test_probe_command_failure_says_no_rounds_were_recorded(): void
+    {
+        Cache::forget('cliproxy:models');
+        Http::fake([
+            'http://127.0.0.1:8317/v1/models' => Http::response(['data' => [
+                ['id' => 'gemini-3.1-flash-lite', 'owned_by' => 'google'],
+            ]]),
+            'http://127.0.0.1:8317/v1/chat/completions' => Http::response(['error' => ['message' => 'unknown provider']], 400),
+        ]);
+
+        $this->artisan('agent:probe', ['--model' => 'gemini-3.1-flash-lite'])
+            ->expectsOutputToContain('HASIL: GAGAL')
+            ->expectsOutputToContain('Putaran tercatat: 0')
+            ->expectsOutputToContain('Tidak ada putaran tercatat')
+            ->assertExitCode(1);
+
+        $this->assertSame(0, AgentToolRound::query()->where('source', 'probe')->count());
+    }
 }

@@ -75,7 +75,11 @@ class ProbeAgentTool extends Command
                 $names = collect($round->tool_calls ?? [])->map(fn ($call) => $call['name'] ?? '?')->implode(', ');
                 $this->line('  Putaran '.$round->round.' ['.$round->model.']: '.($names !== '' ? $names : '(tanpa tool call)'));
             }
-            $this->line('  (Putaran lengkap tersimpan di agent_tool_rounds, probe_token '.$token.')');
+            if ($rounds->count() > 0) {
+                $this->line('  (Putaran lengkap tersimpan di agent_tool_rounds, probe_token '.$token.')');
+            } else {
+                $this->line('  (Tidak ada putaran tercatat — model tidak pernah melayani.)');
+            }
             File::deleteDirectory($dir);
 
             return self::FAILURE;
