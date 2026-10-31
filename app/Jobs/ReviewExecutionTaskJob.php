@@ -53,9 +53,11 @@ class ReviewExecutionTaskJob implements ShouldQueue
         // meng-override gerbang yang gagal (rencana arsitektur baru).
         // Gerbang gagal BUKAN penolakan QA: kirim revisi tanpa menambah
         // hitungan revisi QA; gagal 3x -> task + run FAILED (GATE_FAILED).
+        // File yang diperiksa gerbang = perubahan task INI saja (terhadap
+        // chain base-nya), bukan seluruh rantai task sebelumnya.
         $gateError = app(TestGate::class)->run(
             $task->worktree_path ?? '',
-            $worktrees->changedFiles($project->workspace_path, $task->branch),
+            $worktrees->changedFiles($project->workspace_path, $task->branch, $task->chain_base ?: 'HEAD'),
             $project->test_command,
         );
         if ($gateError !== null) {
@@ -81,7 +83,10 @@ class ReviewExecutionTaskJob implements ShouldQueue
         }
 
         try {
-            $diff = $worktrees->diff($project->workspace_path, $task->branch);
+            // Diff yang ditinjau QA = perubahan task INI saja (terhadap
+            // chain base-nya); pada model berantai, diff terhadap HEAD
+            // baseline akan ikut menampilkan hasil task sebelumnya.
+            $diff = $worktrees->diff($project->workspace_path, $task->branch, $task->chain_base ?: 'HEAD');
             $prompt = implode("\n\n", [
                 'Kamu QA Engineer. Tinjau perubahan code berikut untuk task: '.$task->title.' — '.$task->description,
                 'Kembalikan JSON tepat: {"approved":true,"feedback":"..."}. approved true hanya jika code benar, lengkap, dan memenuhi kriteria; false bila ada yang harus diperbaiki beserta feedback konkret.',
@@ -166,6 +171,15 @@ class ReviewExecutionTaskJob implements ShouldQueue
         }
     }
 
+    /**
+     * Model berurutan (keputusan Bima 2026-10-31): sesudah satu task
+     * QA-APPROVED, jalannya run ditentukan di sini.
+     * - Semua task APPROVED -> MERGING + dispatch MergeExecutionJob.
+     * - Masih ada task PENDING -> dispatch task PENDING berikutnya
+     *   sesuai urutan (hanya bila tidak ada task lain yang sedang
+     *   berjalan, sebagai pengaman terhadap job review ganda).
+     * - Ada task BLOCKED/FAILED -> berhenti (semantik gagal tak berubah).
+     */
     private function advanceIfComplete(ExecutionRun $run, WorktreeManager $worktrees): void
     {
         $run->refresh();
@@ -176,6 +190,15 @@ class ReviewExecutionTaskJob implements ShouldQueue
         if (count(array_unique($statuses)) === 1 && $statuses[0] === 'APPROVED') {
             $run->forceFill(['status' => 'MERGING'])->save();
             MergeExecutionJob::dispatch($run->id);
+
+            return;
+        }
+        if (in_array('IN_PROGRESS', $statuses, true) || in_array('IN_REVIEW', $statuses, true)) {
+            return;
+        }
+        $next = $run->nextPendingTask();
+        if ($next) {
+            ExecuteExecutionTaskJob::dispatch($run->id, $next->id);
         }
     }
 

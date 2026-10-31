@@ -48,13 +48,21 @@ class MergeExecutionJob implements ShouldQueue
         }
 
         try {
-            foreach ($run->tasks as $task) {
+            // Merge SESUAI URUTAN task: pada model berantai, cabang task
+            // ke-N sudah mengandung commit task sebelumnya, sehingga git
+            // menganggap commit yang sudah ter-merge sebagai no-op dan
+            // hanya menerapkan commit baru task itu (diuji di
+            // SequentialExecutionTest). Urutan tetap wajib: merge dari
+            // cabang anak sebelum induknya akan menarik commit induk
+            // lebih awal dan mengaburkan atribusi per task.
+            $tasks = $run->tasks()->orderBy('sort_order')->orderBy('id')->get();
+            foreach ($tasks as $task) {
                 if ($task->status !== 'APPROVED' || ! $task->branch) {
                     throw new RuntimeException('Task #'.$task->id.' belum disetujui QA.');
                 }
                 $worktrees->merge($baseline, $task->branch);
             }
-            foreach ($run->tasks as $task) {
+            foreach ($tasks as $task) {
                 if ($task->worktree_path && $task->branch) {
                     $worktrees->remove($baseline, $task->worktree_path, $task->branch);
                 }

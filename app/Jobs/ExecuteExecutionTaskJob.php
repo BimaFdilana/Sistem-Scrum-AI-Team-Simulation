@@ -75,11 +75,33 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // ada percobaan sebelumnya).
             $attempt = $originalStatus === 'REVISION' ? max(2, $task->revision_count + 1) : 1;
             $branch = 'wt-'.$run->id.'-'.$task->id.'-'.$attempt;
-            $fromBranch = $attempt > 1 ? 'wt-'.$run->id.'-'.$task->id.'-'.($attempt - 1) : null;
+            // Model berurutan (keputusan Bima 2026-10-31): worktree task
+            // DIRANTAI — attempt pertama dibuat dari cabang task
+            // sebelumnya yang sudah QA-APPROVED (bukan selalu dari
+            // baseline), agar agen benar-benar MELIHAT file hasil task
+            // sebelumnya, bukan hanya membacanya di prompt. Revisi tetap
+            // bercabang dari attempt sebelumnya (rantai task itu sendiri),
+            // dan chain base-nya tetap basis attempt pertama.
+            if ($attempt > 1) {
+                $fromBranch = 'wt-'.$run->id.'-'.$task->id.'-'.($attempt - 1);
+                $chainBase = $task->chain_base;
+            } else {
+                $predecessor = $this->previousApprovedTask($run, $task);
+                $chainBase = $predecessor?->branch ?: null;
+                $fromBranch = $chainBase;
+            }
             $worktree = $worktrees->create($baseline, $branch, $fromBranch);
-            $task->forceFill(['worktree_path' => $worktree, 'branch' => $branch])->save();
+            $task->forceFill(['worktree_path' => $worktree, 'branch' => $branch, 'chain_base' => $chainBase])->save();
 
             $useHermes = config('ai.execution_driver') === 'hermes';
+            // Konteks hasil task sebelumnya yang sudah QA-APPROVED dalam
+            // run yang sama — dibangun SEKALI di sini (shared) sehingga
+            // berlaku untuk driver internal maupun Hermes. Ringkas:
+            // judul + ringkasan + daftar file, BUKAN diff penuh.
+            $previousContext = $this->previousApprovedContext($run, $task);
+            $previousSection = $previousContext !== ''
+                ? 'Hasil task sebelumnya dalam run ini (sudah disetujui QA — bangun di atasnya, jangan mengubah keputusan/interface yang sudah diputuskan kecuali task ini memintanya):'."\n".$previousContext
+                : '';
             // Prompt Hermes tidak menyebut tool lama (read_file/apply_edit/
             // submit_task tidak ada di Hermes) — ia bekerja dengan tool
             // file-nya sendiri di worktree; aturan kerja keras ditambahkan
@@ -90,16 +112,18 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                 $originalStatus === 'REVISION' && $task->qa_feedback
                     ? 'REVISI (putaran '.($task->revision_count + 1).'): perbaiki berdasarkan feedback QA berikut: '.$task->qa_feedback
                     : 'Task: '.$task->title.' — '.$task->description,
+                $previousSection,
                 'Tugas dari: '.$run->subjectTitle().' | Kriteria: '.$run->subjectCriteria(),
-            ])) : implode("\n\n", [
+            ])) : implode("\n\n", array_filter([
                 "Kamu {$task->assigneeName()}. Kerjakan task berikut pada project Laravel HANYA lewat tool yang tersedia.",
                 'Langkah: baca file yang relevan dengan read_file, ubah dengan apply_edit (old_text harus cocok persis tepat satu kali), buat file baru dengan create_file, dan akhiri dengan submit_task berisi ringkasan perubahan. Jangan menulis code di teks chat.',
                 ($run->repair_order_id ? 'BATASAN PERINTAH PERBAIKAN: dilarang menghapus file (tool delete_file) dan dilarang operasi destruktif terhadap data; lakukan hanya perubahan minimal yang aman.' : ''),
                 $originalStatus === 'REVISION' && $task->qa_feedback
                     ? 'REVISI (putaran '.($task->revision_count + 1).'): perbaiki berdasarkan feedback QA berikut: '.$task->qa_feedback
                     : 'Task: '.$task->title.' — '.$task->description,
+                $previousSection,
                 'Tugas dari: '.$run->subjectTitle().' | Kriteria: '.$run->subjectCriteria(),
-            ]);
+            ]));
             // Pekerjaan atas project PO: tanpa filter sensor (aturan PO:
             // tidak ada batasan terhadap project, termasuk env/kuncinya).
             // Jalur tool-call menggantikan patch JSON di chat (sumber
@@ -135,7 +159,10 @@ class ExecuteExecutionTaskJob implements ShouldQueue
 
             // Simpan diff hasil host per task agar halaman eksekusi bisa
             // menampilkannya walau cabang/worktree sudah dibersihkan.
-            $task->forceFill(['status' => 'IN_REVIEW', 'diff_snapshot' => $worktrees->diff($baseline, $branch)])->save();
+            // Diff terhadap chain base (bukan baseline) agar tetap PER TASK
+            // pada model berantai; task pertama / run lama (chain_base
+            // kosong) tetap memakai HEAD seperti dulu.
+            $task->forceFill(['status' => 'IN_REVIEW', 'diff_snapshot' => $worktrees->diff($baseline, $branch, $task->chain_base ?: 'HEAD')])->save();
             $run->forceFill(['status' => 'REVIEWING'])->save();
             ReviewExecutionTaskJob::dispatch($run->id, $task->id);
         } catch (Throwable $exception) {
@@ -157,6 +184,82 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             $this->failRun($run, $task, 'EXECUTION_FAILED', $worktrees, $baseline, $exception->getMessage());
             throw $exception;
         }
+    }
+
+    /**
+     * Task APPROVED terdekat SEBELUM task ini dalam urutan eksekusi
+     * (cabang inilah yang menjadi chain base worktree task ini).
+     * Hanya task dengan urutan lebih rendah yang dihitung, agar task
+     * yang tertukar urutannya tidak saling menjadi basis.
+     */
+    private function previousApprovedTask(ExecutionRun $run, ExecutionTask $task): ?ExecutionTask
+    {
+        return $run->tasks()
+            ->where('status', 'APPROVED')
+            ->where(function ($query) use ($task): void {
+                $query->where('sort_order', '<', $task->sort_order)
+                    ->orWhere(function ($query) use ($task): void {
+                        $query->where('sort_order', $task->sort_order)
+                            ->where('id', '<', $task->id);
+                    });
+            })
+            ->orderBy('sort_order', 'desc')
+            ->orderBy('id', 'desc')
+            ->first();
+    }
+
+    /**
+     * Ringkasan hasil semua task APPROVED sebelum task ini, dari pesan
+     * handoff agen -> QA (ringkasan + daftar file). Dibatasi agar prompt
+     * tidak membengkak: maks 800 karakter per task, 4000 total.
+     * String kosong bila belum ada task sebelumnya yang disetujui.
+     */
+    private function previousApprovedContext(ExecutionRun $run, ExecutionTask $task): string
+    {
+        $approved = $run->tasks()
+            ->where('status', 'APPROVED')
+            ->where(function ($query) use ($task): void {
+                $query->where('sort_order', '<', $task->sort_order)
+                    ->orWhere(function ($query) use ($task): void {
+                        $query->where('sort_order', $task->sort_order)
+                            ->where('id', '<', $task->id);
+                    });
+            })
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get();
+        if ($approved->isEmpty()) {
+            return '';
+        }
+        $lines = [];
+        $total = 0;
+        foreach ($approved as $previous) {
+            $message = $run->messages()
+                ->where('execution_task_id', $previous->id)
+                ->where('sender_slug', $previous->assignee)
+                ->latest('id')
+                ->first();
+            $summary = $message ? trim($message->content) : '';
+            // Pesan handoff menempelkan daftar file di akhir
+            // "(N file: ...)"; kupas agar tidak duplikat dengan daftar
+            // file lengkap dari metadata di bawah.
+            $summary = preg_replace('/ \(\d+ file: .*\)$/', '', $summary) ?? $summary;
+            $files = $message?->metadata['files'] ?? [];
+            $entry = '- '.$previous->title.' ('.$previous->assigneeName().')';
+            if ($summary !== '') {
+                $entry .= ': '.mb_substr($summary, 0, 800);
+            }
+            if (is_array($files) && $files !== []) {
+                $entry .= ' [file: '.implode(', ', array_slice($files, 0, 20)).']';
+            }
+            $lines[] = $entry;
+            $total += strlen($entry);
+            if ($total > 4000) {
+                break;
+            }
+        }
+
+        return implode("\n", $lines);
     }
 
     /**

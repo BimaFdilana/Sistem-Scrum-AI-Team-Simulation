@@ -119,14 +119,14 @@ class WorktreeManager
         ]);
     }
 
-    /** Daftar file yang berubah antara baseline HEAD dan branch task. */
-    public function changedFiles(string $baselinePath, ?string $branch): array
+    /** Daftar file yang berubah antara basis dan branch task. */
+    public function changedFiles(string $baselinePath, ?string $branch, string $base = 'HEAD'): array
     {
         if ($branch === null || $branch === '') {
             return [];
         }
         try {
-            $output = $this->git($baselinePath, ['diff', '--name-only', 'HEAD', $branch, '--']);
+            $output = $this->git($baselinePath, ['diff', '--name-only', $base, $branch, '--']);
         } catch (RuntimeException) {
             return [];
         }
@@ -135,11 +135,15 @@ class WorktreeManager
         return array_values($files);
     }
 
-    /** Diff statistik + isi (dibatasi) antara baseline HEAD dan branch task. */
-    public function diff(string $baselinePath, string $branch, int $maxBytes = 20000): string
+    /**
+     * Diff statistik + isi (dibatasi) antara basis dan branch task.
+     * $base default HEAD (perilaku lama); untuk task berantai, pemanggil
+     * mengisi chain base-nya agar diff QA tetap per task, bukan kumulatif.
+     */
+    public function diff(string $baselinePath, string $branch, string $base = 'HEAD', int $maxBytes = 20000): string
     {
-        $stat = $this->git($baselinePath, ['diff', '--stat', 'HEAD', $branch, '--']);
-        $body = $this->git($baselinePath, ['diff', 'HEAD', $branch, '--']);
+        $stat = $this->git($baselinePath, ['diff', '--stat', $base, $branch, '--']);
+        $body = $this->git($baselinePath, ['diff', $base, $branch, '--']);
         if (strlen($body) > $maxBytes) {
             $body = substr($body, 0, $maxBytes)."\n... (diff dipotong)";
         }

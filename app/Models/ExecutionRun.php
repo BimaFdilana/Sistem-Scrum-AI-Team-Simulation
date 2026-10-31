@@ -72,6 +72,22 @@ class ExecutionRun extends Model
         return $this->hasMany(ExecutionTask::class);
     }
 
+    /**
+     * Task dalam urutan eksekusi: sort_order dari breakdown SM, lalu id
+     * sebagai penyeimbang (run lama yang sort_order-nya semua 0 tetap
+     * terurut sesuai urutan pembuatan).
+     */
+    public function orderedTasks(): HasMany
+    {
+        return $this->hasMany(ExecutionTask::class)->orderBy('sort_order')->orderBy('id');
+    }
+
+    /** Task PENDING berikutnya sesuai urutan (model berurutan), atau null. */
+    public function nextPendingTask(): ?ExecutionTask
+    {
+        return $this->orderedTasks()->where('status', 'PENDING')->first();
+    }
+
     public function messages(): HasMany
     {
         return $this->hasMany(ExecutionMessage::class);
