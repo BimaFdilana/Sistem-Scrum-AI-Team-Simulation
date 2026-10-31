@@ -5,6 +5,7 @@ namespace App\Services;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Symfony\Component\Process\Process;
+use Throwable;
 
 /**
  * Adapter eksekusi via Hermes CLI.
@@ -16,6 +17,19 @@ use Symfony\Component\Process\Process;
  * tetap yang melakukan commit + diff + kirim ke QA, persis seperti
  * jalur lama — sehingga gerbang permission, QA, merge, dan demo
  * tidak berubah sama sekali.
+ *
+ * Model eksekusi diambil PER ROLE dari menu Konfigurasi Agent
+ * (keputusan Bima 2026-10-31, diperketat 20:57 WIB): HANYA model yang
+ * dipilih PO secara eksplisit yang boleh dipakai — snapshot
+ * AgentConfiguration terverifikasi DAN modelnya masih ada di daftar
+ * model gateway saat ini. TIDAK ADA fallback diam-diam apa pun:
+ * bukan HERMES_MODEL, bukan fallback otomatis resolveModel().
+ * Bila role belum memilih (tidak ada snapshot, belum terverifikasi,
+ * atau modelnya tidak lagi tersedia), Hermes TIDAK dipanggil sama
+ * sekali dan exception dilempar dengan pesan yang mengarah ke aksi
+ * PO — pesan itu sampai ke last_error task + notifikasi PO lewat
+ * failRun di job pemanggil. Provider/base_url/max_turns tetap dari
+ * config; hanya sumber model yang ketat per role.
  *
  * Bentuk kembalian SAMA dengan AgentToolRunner::run() agar job bisa
  * memakai salah satu driver tanpa mengubah alur berikutnya.
@@ -35,7 +49,7 @@ class HermesTaskRunner
 
         $cfg = config('ai.hermes', []);
         $binary = $cfg['binary'] ?? 'hermes';
-        $model = $cfg['model'] ?? 'glm-5.3';
+        $model = $this->strictModelForRole($slug);
         $provider = $cfg['provider'] ?? 'custom';
         $baseUrl = $cfg['base_url'] ?? 'http://127.0.0.1:8317/v1';
         $apiKey = config('ai.cliproxy.api_key');
@@ -107,6 +121,50 @@ class HermesTaskRunner
         } finally {
             @unlink($promptFile);
         }
+    }
+
+    /**
+     * Model untuk satu role, KETAT sesuai aturan Bima (2026-10-31):
+     * hanya snapshot AgentConfiguration terverifikasi yang modelnya
+     * masih ada di daftar model gateway saat ini yang boleh dipakai.
+     * Slug assignee task (frontend-developer/backend-developer) sudah
+     * sama dengan slug role di agent_role_settings, jadi tidak ada
+     * pemetaan tambahan. resolveModel() SENGAJA tidak dipakai karena
+     * ia mengandung fallback otomatis ke modelForRole() — fallback
+     * otomatis itulah yang dilarang. Bila syarat tidak terpenuhi,
+     * lempar exception SEBELUM Hermes dipanggil (tidak ada token
+     * terpakai, tidak ada perubahan worktree); job pemanggil
+     * mencatat pesan ini ke last_error task + notifikasi PO.
+     */
+    private function strictModelForRole(string $slug): string
+    {
+        $display = match ($slug) {
+            'frontend-developer' => 'Frontend Developer',
+            'backend-developer' => 'Backend Developer',
+            'qa-engineer' => 'QA Engineer',
+            'scrum-master' => 'Scrum Master',
+            default => $slug,
+        };
+        try {
+            $snapshot = app(AgentConfiguration::class)->current($slug);
+            $available = array_column(app(CliProxyApiClient::class)->models(), 'id');
+        } catch (Throwable) {
+            // Lapisan config/gateway tidak terbaca = dianggap belum
+            // memilih; jangan pernah jatuh ke fallback diam-diam.
+            $snapshot = null;
+            $available = [];
+        }
+        if (! is_array($snapshot) || ! is_string($snapshot['model'] ?? null) || ($snapshot['model'] ?? '') === '') {
+            throw new RuntimeException("Model untuk peran {$display} belum dipilih di halaman Konfigurasi Agent — eksekusi tidak dijalankan.");
+        }
+        if (($snapshot['status'] ?? null) !== 'verified') {
+            throw new RuntimeException("Model untuk peran {$display} belum terverifikasi di halaman Konfigurasi Agent — eksekusi tidak dijalankan.");
+        }
+        if (! in_array($snapshot['model'], $available, true)) {
+            throw new RuntimeException("Model {$snapshot['model']} yang dipilih untuk peran {$display} tidak ditemukan di daftar model gateway saat ini — perbarui pilihan di halaman Konfigurasi Agent, eksekusi tidak dijalankan.");
+        }
+
+        return $snapshot['model'];
     }
 
     private function buildPrompt(string $taskPrompt, bool $allowDelete): string
