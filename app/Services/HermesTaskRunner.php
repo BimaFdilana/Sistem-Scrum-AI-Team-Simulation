@@ -53,6 +53,13 @@ class HermesTaskRunner
         }
         try {
             file_put_contents($promptFile, $this->buildPrompt($taskPrompt, $allowDelete));
+            // WAJIB: tempnam() membuat file 0600 milik www-data, sementara
+            // Hermes berjalan sebagai sidik (lewat wrapper sudoers) — tanpa
+            // ini Hermes mati exit 2 "cannot read --query file" sebelum
+            // bekerja (Run #3, 2026-10-31). Isi prompt hanya teks task
+            // (tanpa secret — kunci lewat argv), jadi 0644 aman; file
+            // tetap dihapus di finally setelah jalan.
+            chmod($promptFile, 0644);
 
             $command = [
                 $binary, 'chat', '--query-file', $promptFile,
