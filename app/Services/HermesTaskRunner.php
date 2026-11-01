@@ -151,6 +151,7 @@ class HermesTaskRunner
             $taskPrompt,
             'ATURAN KERJA (wajib dipatuhi):',
             'Kerjakan HANYA dengan tool file (baca, ubah, buat file) di direktori kerja ini.',
+            'Ubah HANYA file yang disebut di task di atas (bagian FILE / FILE TERKAIT). Jangan mengubah file lain di project ini, dan jangan menyentuh project lain.',
             'JANGAN menjalankan perintah shell, server, instalasi paket, commit, push, atau merge.',
             'JANGAN menyentuh file di luar direktori kerja ini.',
             $allowDelete

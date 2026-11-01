@@ -4,10 +4,11 @@ namespace App\Jobs;
 
 use App\Models\ExecutionRun;
 use App\Models\ExecutionTask;
+use App\Models\PermissionRequest;
 use App\Models\Notification;
 use App\Services\AgentProfileClient;
 use App\Services\AgentToolRunner;
-use App\Services\HermesTaskRunner;
+use App\Services\KanbanClient;
 use App\Support\Workspace\PatchApplier;
 use App\Support\Workspace\PatchValidationException;
 use App\Support\Workspace\WorktreeManager;
@@ -106,12 +107,21 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // submit_task tidak ada di Hermes) — ia bekerja dengan tool
             // file-nya sendiri di worktree; aturan kerja keras ditambahkan
             // HermesTaskRunner di akhir prompt.
+            // File-scope (keputusan 1 Nov): todo dikirim ke Hermes BERSAMA
+            // daftar file terkait perubahan ini, agar Hermes tidak mengubah
+            // file/project yang salah. Sumber daftar: payload PermissionRequest
+            // yang disetujui PO untuk run ini (di sanalah SM menyimpan
+            // files per task); bila tidak ada, fallback ke bagian FILE di
+            // description task. Daftar ini hanya instruksi di prompt —
+            // tidak mengubah gerbang permission, QA, merge, atau demo.
+            $fileScopeSection = $useHermes ? $this->fileScopeSection($run, $task, $project?->name) : '';
             $prompt = $useHermes ? implode("\n\n", array_filter([
                 "Kamu {$task->assigneeName()}. Kerjakan task berikut pada project Laravel di direktori kerja ini.",
                 ($run->repair_order_id ? 'BATASAN PERINTAH PERBAIKAN: dilarang menghapus file dan dilarang operasi destruktif terhadap data; lakukan hanya perubahan minimal yang aman.' : ''),
                 $originalStatus === 'REVISION' && $task->qa_feedback
                     ? 'REVISI (putaran '.($task->revision_count + 1).'): perbaiki berdasarkan feedback QA berikut: '.$task->qa_feedback
                     : 'Task: '.$task->title.' — '.$task->description,
+                $fileScopeSection,
                 $previousSection,
                 'Tugas dari: '.$run->subjectTitle().' | Kriteria: '.$run->subjectCriteria(),
             ])) : implode("\n\n", array_filter([
@@ -124,6 +134,50 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                 $previousSection,
                 'Tugas dari: '.$run->subjectTitle().' | Kriteria: '.$run->subjectCriteria(),
             ]));
+            // JALUR KANBAN (perubahan 1 Nov, atas perintah Bima): eksekutor
+            // bukan lagi Laravel yang memanggil Hermes satu query
+            // (HermesTaskRunner) — Laravel hanya membuat board project +
+            // kartu todo, lalu MENUNGGU lewat KanbanExecutionPollJob.
+            // Yang mengerjakan kartu adalah worker profile Hermes lewat
+            // dispatcher gateway. Board diturunkan dari project yang
+            // tertaut dengan user story run ini (satu project = satu
+            // board), bukan dibuat manual per story. Gerbang tetap di
+            // Laravel: izin PO sudah lewat sebelum job ini, dan commit +
+            // diff + QA + test gate + merge tetap terjadi di poll job
+            // setelah kartu done — bukan oleh worker kanban.
+            // Pembuat kartu di sini adalah kode ini yang menerjemahkan
+            // todo list breakdown SM; SM profile sendiri belum membuat
+            // kartu lewat tool kanban_create (langkah lanjutan, lihat
+            // KanbanClient). HermesTaskRunner tidak lagi dipakai job ini.
+            if ($useHermes) {
+                if (! $project) {
+                    throw new RuntimeException('Project run tidak ditemukan untuk board kanban.');
+                }
+                $kanban = app(KanbanClient::class);
+                $board = $kanban->boardSlugForProject($project);
+                $kanban->ensureBoard($board, $project->name, 'Board eksekusi project '.$project->name.' dari website Scrum — user story, estimasi multi-agent, dan task todo dari Scrum Master.');
+                $profile = collect(config('agents.profiles', []))
+                    ->firstWhere('slug', $task->assignee)['profile'] ?? $task->assignee;
+                $cardBody = $prompt."\n\nATURAN PENYELESAIAN KANBAN: kerjakan hanya di direktori kerja ini, jangan commit, push, atau merge, jangan mengubah file di luar FILE TERKAIT, dan tandai kartu selesai dengan tool kanban_complete setelah memverifikasi perubahanmu (bukan sebelum). Laravel akan melakukan commit, QA, test gate, dan merge setelah kartu selesai.";
+                $cardId = $kanban->createTask(
+                    $board,
+                    'Task #'.$task->id.': '.$task->title,
+                    $cardBody,
+                    $profile,
+                    $worktree,
+                    'scrum-exec-'.$run->id.'-'.$task->id.'-'.$attempt,
+                );
+                $run->messages()->create([
+                    'execution_task_id' => $task->id,
+                    'sender_slug' => 'scrum-master',
+                    'recipient_slug' => $task->assignee,
+                    'content' => 'Task dikirim ke board kanban '.$board.' sebagai kartu '.$cardId.' untuk worker '.$profile.' (riwayat multi-agent tercatat di kartu kanban).',
+                    'metadata' => ['kanban_board' => $board, 'kanban_task_id' => $cardId, 'revision' => $task->revision_count],
+                ]);
+                KanbanExecutionPollJob::dispatch($run->id, $task->id);
+
+                return;
+            }
             // Pekerjaan atas project PO: tanpa filter sensor (aturan PO:
             // tidak ada batasan terhadap project, termasuk env/kuncinya).
             // Jalur tool-call menggantikan patch JSON di chat (sumber
@@ -131,19 +185,11 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // tiap tool terhadap worktree dan mengembalikan daftar file
             // yang berubah + ringkasan; kegagalan di tengah loop
             // mengembalikan worktree ke kondisi semula.
-            // Driver Hermes memakai seam yang sama (files + summary) —
-            // commit, diff, IN_REVIEW, dan dispatch QA di bawah tidak berubah.
-            $result = $useHermes
-                ? app(HermesTaskRunner::class)->run($task->assignee, $worktree, $prompt, $run->repair_order_id === null, [
-                    'execution_run_id' => $run->id,
-                    'execution_task_id' => $task->id,
-                    'source' => 'execution',
-                ])
-                : $runner->run($task->assignee, $worktree, $prompt, $run->repair_order_id === null, [
-                    'execution_run_id' => $run->id,
-                    'execution_task_id' => $task->id,
-                    'source' => 'execution',
-                ]);
+            $result = $runner->run($task->assignee, $worktree, $prompt, $run->repair_order_id === null, [
+                'execution_run_id' => $run->id,
+                'execution_task_id' => $task->id,
+                'source' => 'execution',
+            ]);
             $applied = $result['files'];
             $patch = ['summary' => $result['summary']];
 
@@ -184,6 +230,99 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             $this->failRun($run, $task, 'EXECUTION_FAILED', $worktrees, $baseline, $exception->getMessage());
             throw $exception;
         }
+    }
+
+    /**
+     * Blok PROJECT + FILE TERKAIT untuk prompt Hermes.
+     *
+     * Project diidentifikasi dari nama project run ini (bukan path server),
+     * dan worktree yang dipakai Hermes memang salinan project itu — jadi
+     * instruksi ini mengikat nama project ke direktori kerja yang sama.
+     */
+    private function fileScopeSection(ExecutionRun $run, ExecutionTask $task, ?string $projectName): string
+    {
+        $projectName = trim($projectName ?? '') !== '' ? trim($projectName) : 'project ini';
+        $header = 'PROJECT YANG DIKERJAKAN: '.$projectName.'. Direktori kerja ini adalah salinan project itu saja — bukan project lain.';
+        $files = $this->relatedFiles($run, $task);
+        if ($files === []) {
+            return $header."\n".'FILE TERKAIT: tidak ada daftar file terpisah untuk task ini — ubah HANYA file yang disebut di bagian FILE pada description task di atas, jangan file lain di project ini, apalagi project lain.';
+        }
+
+        return $header."\n".'FILE TERKAIT PERUBAHAN INI — hanya file-file ini yang boleh diubah/dibuat:'."\n".'- '.implode("\n- ", $files)."\n".'DILARANG mengubah file di luar daftar ini atau file project lain. Kalau file di daftar belum ada, buat file itu di path tersebut, jangan menggantinya dengan file lain. Kalau satu file ternyata tidak relevan, lewati file itu dan lanjutkan file lainnya, jangan mencari pengganti sendiri.';
+    }
+
+    /**
+     * Daftar file terkait satu task, dari sumber yang sudah ada.
+     *
+     * 1) Payload PermissionRequest run ini (SM menyimpan files per task di
+     *    sana, dan PO menyetujui daftar itu): cocokkan dulu lewat
+     *    sort_order sebagai indeks, lalu lewat title + assignee.
+     * 2) Fallback: parse bagian FILE di description task (format todo-list
+     *    baru: KERJAKAN / FILE / HASIL / SELESAI BILA).
+     * Path dibersihkan: hanya path relatif, tanpa .. dan tanpa path absolut
+     * — path di luar worktree tidak pernah diteruskan ke Hermes.
+     */
+    private function relatedFiles(ExecutionRun $run, ExecutionTask $task): array
+    {
+        $requests = PermissionRequest::query()
+            ->where('execution_run_id', $run->id)
+            ->orderBy('id', 'desc')
+            ->get();
+        foreach ($requests as $request) {
+            $payloadTasks = $request->payload['tasks'] ?? null;
+            if (! is_array($payloadTasks) || $payloadTasks === []) {
+                continue;
+            }
+            $candidate = $payloadTasks[$task->sort_order] ?? null;
+            if (! is_array($candidate) || ($candidate['title'] ?? null) !== $task->title) {
+                $candidate = null;
+                foreach ($payloadTasks as $payloadTask) {
+                    if (is_array($payloadTask)
+                        && ($payloadTask['title'] ?? null) === $task->title
+                        && ($payloadTask['assignee'] ?? null) === $task->assignee) {
+                        $candidate = $payloadTask;
+                        break;
+                    }
+                }
+            }
+            if (is_array($candidate) && is_array($candidate['files'] ?? null)) {
+                $cleaned = $this->cleanPaths($candidate['files']);
+                if ($cleaned !== []) {
+                    return $cleaned;
+                }
+            }
+        }
+
+        if (preg_match('/FILE\s*:\s*(.+?)(?=\n\s*(HASIL|SELESAI BILA|KERJAKAN)\b|$)/is', $task->description ?? '', $matches)) {
+            $parts = preg_split('/[\n,]+/', $matches[1]) ?: [];
+            $cleaned = $this->cleanPaths(array_map(
+                fn ($part) => trim($part, " \t\r\n-•`\"'"),
+                $parts
+            ));
+            if ($cleaned !== []) {
+                return $cleaned;
+            }
+        }
+
+        return [];
+    }
+
+    /** @param  array<int, mixed>  $paths */
+    private function cleanPaths(array $paths): array
+    {
+        $cleaned = [];
+        foreach ($paths as $path) {
+            if (! is_string($path)) {
+                continue;
+            }
+            $path = trim(trim($path), "`\"'");
+            if ($path === '' || str_contains($path, '..') || str_starts_with($path, '/') || str_starts_with($path, '\\')) {
+                continue;
+            }
+            $cleaned[] = $path;
+        }
+
+        return array_values(array_unique($cleaned));
     }
 
     /**
