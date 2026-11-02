@@ -39,6 +39,20 @@ return [
     */
     'execution_driver' => env('EXECUTION_DRIVER', 'internal'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Driver estimasi story
+    |--------------------------------------------------------------------------
+    | 'gateway' = jalur lama yang terbukti (vote + ringkasan SM lewat
+    |             model gateway Laravel, model dari menu Konfigurasi Agent).
+    | 'hermes'  = jalur baru (perintah Pilih 2 Nov 2026): vote tiap
+    |             spesialis + ringkasan SM lewat profile Hermes native
+    |             (HermesProfileChat). Model = model profile itu sendiri,
+    |             bukan menu; tidak ada fallback ke gateway.
+    | Aktifkan di live dengan ESTIMATION_DRIVER=hermes; default gateway.
+    */
+    'estimation_driver' => env('ESTIMATION_DRIVER', 'gateway'),
+
     'hermes' => [
         // Biner Hermes. Di VPS, worker www-data memanggil path absolut
         // /home/sidik/.local/bin/hermes lewat env ini (PATH worker tidak

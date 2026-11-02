@@ -21,7 +21,14 @@ class SendStoryEstimationReportJob implements ShouldQueue
 
     public int $timeout = 300;
 
-    public function __construct(public readonly int $runId) {}
+    public function __construct(public readonly int $runId)
+    {
+        // Ringkasan SM lewat profile Hermes juga bisa memakan waktu
+        // menit; samakan alasan dengan EstimateStoryAgentJob.
+        if (config('ai.estimation_driver') === 'hermes') {
+            $this->timeout = 900;
+        }
+    }
 
     public function handle(StoryEstimationService $estimator): void
     {

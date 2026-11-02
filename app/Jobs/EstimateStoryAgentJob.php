@@ -25,7 +25,16 @@ class EstimateStoryAgentJob implements ShouldBeUnique, ShouldQueue
 
     public int $uniqueFor = 86400;
 
-    public function __construct(public readonly int $runId, public readonly int $agentRunId) {}
+    public function __construct(public readonly int $runId, public readonly int $agentRunId)
+    {
+        // Vote lewat profile Hermes (CLI) bisa memakan waktu menit,
+        // bukan detik seperti gateway — timeout job harus lebih besar
+        // dari timeout perintah (600 detik) agar vote tidak dibunuh
+        // di tengah jalan. Jalur gateway tetap 180 detik seperti dulu.
+        if (config('ai.estimation_driver') === 'hermes') {
+            $this->timeout = 900;
+        }
+    }
 
     public function uniqueId(): string
     {
