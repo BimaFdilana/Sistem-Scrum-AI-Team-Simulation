@@ -16,19 +16,36 @@ class HermesProfileChatTest extends TestCase
 
     private string $argsFile;
 
+    private string $answerFile;
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->fakeBin = storage_path('framework/testing/hermes-chat-fake-'.uniqid().'.sh');
         $this->argsFile = storage_path('framework/testing/hermes-chat-args-'.uniqid().'.txt');
-        // Biner hermes palsu: mencatat argumen, lalu menjawab JSON vote.
-        // File prompt dibaca dari argumen terakhir (--query-file <file>),
-        // isinya harus memuat larangan mengubah file (keselamatan estimasi).
+        $this->answerFile = storage_path('framework/testing/hermes-chat-answer-'.uniqid().'.jsonl');
+        // Biner hermes palsu: mencatat argumen, lalu menyalin isi file prompt
+        // yang dirujuk --query-file, lalu menjawab jawaban gaya stream-json.
+        //
+        // PENTING: file prompt dibaca dengan cara mengikuti argumen
+        // --query-file, BUKAN dengan pola path. Versi lama memakai pola
+        // `/tmp/*`, padahal sys_get_temp_dir() di host ini menunjuk ke
+        // ~/.hermes/cache/scratch — sehingga isi prompt tidak pernah ikut
+        // tercatat dan assertion atas isi prompt selalu gagal walau kode
+        // benar (kegagalan lama yang membingungkan).
         $script = "#!/bin/sh\n";
         $script .= "printf '%s\\n' \"\$@\" > ".escapeshellarg($this->argsFile)."\n";
-        $script .= "for a in \"\$@\"; do case \"\$a\" in /tmp/*) cat \"\$a\" >> ".escapeshellarg($this->argsFile)." ;; esac; done\n";
-        $script .= "echo '{\"estimate_points\":5,\"rationale\":\"alasan uji\"}'\n";
+        $script .= 'while [ $# -gt 1 ]; do if [ "$1" = "--query-file" ]; then cat "$2" >> '.escapeshellarg($this->argsFile)."; fi; shift; done\n";
+        $script .= 'cat '.escapeshellarg($this->answerFile)."\n";
         file_put_contents($this->fakeBin, $script);
+        // Jawaban gaya stream-json ditulis dari PHP (bukan di-escape di shell),
+        // supaya kutip ganda di dalam event tidak perlu di-escape berlapis.
+        file_put_contents($this->answerFile, json_encode([
+            'type' => 'result',
+            'session_id' => 'local-fake',
+            'exit_code' => 0,
+            'text' => '{"estimate_points":5,"rationale":"alasan uji"}',
+        ])."\n");
         chmod($this->fakeBin, 0755);
         config(['ai.hermes.binary' => $this->fakeBin]);
         // Model menu, ketat seperti HermesTaskRunnerTest: peran sudah
@@ -47,6 +64,7 @@ class HermesProfileChatTest extends TestCase
     {
         File::delete($this->fakeBin);
         File::delete($this->argsFile);
+        File::delete($this->answerFile);
         parent::tearDown();
     }
 
@@ -73,6 +91,12 @@ class HermesProfileChatTest extends TestCase
         $this->assertStringNotContainsString('glm-5.3', $args);
         // Prompt yang dikirim harus memuat larangan mengubah file.
         $this->assertStringContainsString('jangan mengubah file apa pun', $args);
+        // stream-json WAJIB: dengan --format text, keluaran adalah seluruh
+        // transkrip sesi (echo prompt + banner + jawaban + ekor "Resume this
+        // session"), dan extractJsonObject() lalu mengambil rentang yang
+        // salah — akar 32 warning INVALID_JSON_SCHEMA di produksi.
+        $this->assertStringContainsString('--format', $args);
+        $this->assertStringContainsString('stream-json', $args);
         // Profile membawa provider-nya sendiri; kunci gateway tidak
         // boleh bocor ke argumen chat estimasi.
         $this->assertStringNotContainsString('--provider', $args);

@@ -3,6 +3,7 @@
 namespace App\Support\Workspace;
 
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -17,14 +18,48 @@ class WorktreeManager
     public function ensureRepo(string $baselinePath): void
     {
         if (File::exists($baselinePath.'/.git')) {
+            $this->normalizeRepo($baselinePath);
+
             return;
         }
         $this->git($baselinePath, ['init', '-b', 'main']);
+        $this->normalizeRepo($baselinePath);
         $this->git($baselinePath, ['add', '-A']);
         $this->git($baselinePath, [
             '-c', 'user.email=scrumspace@local', '-c', 'user.name=ScrumSpace',
             'commit', '-m', 'Baseline awal project', '--no-verify',
         ]);
+    }
+
+    /**
+     * Nonaktifkan pelacakan perubahan mode file di repo ini.
+     *
+     * WAJIB: worker queue berjalan sebagai www-data sedangkan Hermes berjalan
+     * sebagai user lain lewat wrapper sudoers. File yang ditulis agent bisa
+     * berubah permission-nya (100644 -> 100755) tanpa isinya berubah, dan
+     * dengan core.fileMode=true git menandai SETIAP file seperti itu sebagai
+     * "modified". Terbukti di baseline project Laundry: 1507 file "berubah",
+     * 0 di antaranya berbeda isi — semuanya murni mode change. Akibatnya
+     * changedFiles() mengembalikan 1507 path, diff ke QA jadi sampah, dan
+     * gerbang "Hermes tidak mengubah file apa pun" salah menilai.
+     *
+     * Best-effort: kegagalan konfigurasi tidak boleh menggagalkan pembuatan
+     * project/worktree — hanya dicatat, karena repo tetap bisa dipakai
+     * (hanya lebih berisik).
+     */
+    public function normalizeRepo(string $path): void
+    {
+        if (! File::exists($path.'/.git')) {
+            return;
+        }
+        try {
+            $this->git($path, ['config', 'core.fileMode', 'false']);
+        } catch (RuntimeException $exception) {
+            Log::warning('Gagal menonaktifkan core.fileMode', [
+                'path' => $path,
+                'error' => $exception->getMessage(),
+            ]);
+        }
     }
 
     /**
@@ -53,6 +88,11 @@ class WorktreeManager
     public function create(string $baselinePath, string $branch, ?string $fromBranch = null): string
     {
         $path = dirname($baselinePath).'/worktrees/'.$branch;
+        // Worktree baru mewarisi config dari repo utama untuk sebagian kunci,
+        // tapi core.fileMode TIDAK dijamin ikut — dan bila ia kembali true,
+        // seluruh masalah 1507-file palsu muncul lagi per task. Jadi
+        // normalisasi eksplisit di sini, bukan hanya di ensureRepo.
+        $this->normalizeRepo($baselinePath);
         try {
             $this->git($baselinePath, ['worktree', 'prune']);
         } catch (RuntimeException) {
@@ -60,6 +100,8 @@ class WorktreeManager
         }
         File::ensureDirectoryExists(dirname($path), 0700);
         if ($this->isWorktreeRegistered($baselinePath, $path)) {
+            $this->normalizeRepo($path);
+
             return $path;
         }
         if ($this->branchExists($baselinePath, $branch)) {
@@ -67,6 +109,7 @@ class WorktreeManager
                 File::deleteDirectory($path);
             }
             $this->git($baselinePath, ['worktree', 'add', $path, $branch]);
+            $this->normalizeRepo($path);
 
             return $path;
         }
@@ -75,6 +118,7 @@ class WorktreeManager
         }
         $base = ($fromBranch !== null && $this->branchExists($baselinePath, $fromBranch)) ? $fromBranch : 'HEAD';
         $this->git($baselinePath, ['worktree', 'add', '-b', $branch, $path, $base]);
+        $this->normalizeRepo($path);
 
         return $path;
     }

@@ -13,6 +13,7 @@ class StoryEstimationAgentRun extends Model
         'round',
         'status',
         'estimate_points',
+        'raw_estimate_points',
         'rationale',
         'error_code',
         'started_at',
@@ -25,6 +26,7 @@ class StoryEstimationAgentRun extends Model
         return [
             'round' => 'integer',
             'estimate_points' => 'integer',
+            'raw_estimate_points' => 'integer',
             'started_at' => 'datetime',
             'heartbeat_at' => 'datetime',
             'completed_at' => 'datetime',
