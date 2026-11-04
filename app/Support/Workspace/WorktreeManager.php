@@ -147,7 +147,7 @@ class WorktreeManager
         }
     }
 
-    private function branchExists(string $baselinePath, string $branch): bool
+    public function branchExists(string $baselinePath, string $branch): bool
     {
         try {
             $this->git($baselinePath, ['show-ref', '--verify', '--quiet', 'refs/heads/'.$branch]);

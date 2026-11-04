@@ -74,8 +74,21 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // attempt: PENDING -> 1; REVISION -> revision_count+1
             // (minimal 2, karena status REVISION selalu berarti sudah
             // ada percobaan sebelumnya).
-            $attempt = $originalStatus === 'REVISION' ? max(2, $task->revision_count + 1) : 1;
+            $attempt = max(
+                (int) $task->attempt_seq + 1,
+                $originalStatus === 'REVISION' ? max(2, $task->revision_count + 1) : 1
+            );
             $branch = 'wt-'.$run->id.'-'.$task->id.'-'.$attempt;
+            // Percobaan harus unik: cabang yang sudah ada berarti attempt ini
+            // pernah dipakai (mis. PO mereset revision_count setelah task
+            // diblokir), dan kartu kanban dijodohkan lewat nama attempt —
+            // memakai attempt lama akan mengambil kartu lama yang sudah
+            // blocked/done sehingga run langsung gagal. Majukan attempt
+            // sampai menemukan cabang yang belum ada.
+            while ($worktrees->branchExists($baseline, $branch)) {
+                $attempt++;
+                $branch = 'wt-'.$run->id.'-'.$task->id.'-'.$attempt;
+            }
             // Model berurutan (keputusan Bima 2026-10-31): worktree task
             // DIRANTAI — attempt pertama dibuat dari cabang task
             // sebelumnya yang sudah QA-APPROVED (bukan selalu dari
@@ -84,7 +97,14 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // bercabang dari attempt sebelumnya (rantai task itu sendiri),
             // dan chain base-nya tetap basis attempt pertama.
             if ($attempt > 1) {
-                $fromBranch = 'wt-'.$run->id.'-'.$task->id.'-'.($attempt - 1);
+                // Ambil attempt terdekat yang cabangnya benar-benar ada:
+                // setelah attempt dimajukan, attempt-1 bisa saja tidak ada
+                // sehingga rantai perubahan hilang tanpa pesan.
+                $previous = $attempt - 1;
+                while ($previous >= 1 && ! $worktrees->branchExists($baseline, 'wt-'.$run->id.'-'.$task->id.'-'.$previous)) {
+                    $previous--;
+                }
+                $fromBranch = $previous >= 1 ? 'wt-'.$run->id.'-'.$task->id.'-'.$previous : null;
                 $chainBase = $task->chain_base;
             } else {
                 $predecessor = $this->previousApprovedTask($run, $task);
@@ -92,7 +112,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                 $fromBranch = $chainBase;
             }
             $worktree = $worktrees->create($baseline, $branch, $fromBranch);
-            $task->forceFill(['worktree_path' => $worktree, 'branch' => $branch, 'chain_base' => $chainBase])->save();
+            $task->forceFill(['worktree_path' => $worktree, 'branch' => $branch, 'chain_base' => $chainBase, 'attempt_seq' => $attempt])->save();
 
             $useHermes = config('ai.execution_driver') === 'hermes';
             // Konteks hasil task sebelumnya yang sudah QA-APPROVED dalam
@@ -123,7 +143,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                     : 'Task: '.$task->title.' — '.$task->description,
                 $fileScopeSection,
                 $previousSection,
-                'Tugas dari: '.$run->subjectTitle().' | Kriteria: '.$run->subjectCriteria(),
+                $this->criteriaSection($run, $task),
             ])) : implode("\n\n", array_filter([
                 "Kamu {$task->assigneeName()}. Kerjakan task berikut pada project Laravel HANYA lewat tool yang tersedia.",
                 'Langkah: baca file yang relevan dengan read_file, ubah dengan apply_edit (old_text harus cocok persis tepat satu kali), buat file baru dengan create_file, dan akhiri dengan submit_task berisi ringkasan perubahan. Jangan menulis code di teks chat.',
@@ -132,7 +152,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                     ? 'REVISI (putaran '.($task->revision_count + 1).'): perbaiki berdasarkan feedback QA berikut: '.$task->qa_feedback
                     : 'Task: '.$task->title.' — '.$task->description,
                 $previousSection,
-                'Tugas dari: '.$run->subjectTitle().' | Kriteria: '.$run->subjectCriteria(),
+                $this->criteriaSection($run, $task),
             ]));
             // JALUR KANBAN (perubahan 1 Nov, atas perintah Bima): eksekutor
             // bukan lagi Laravel yang memanggil Hermes satu query
@@ -249,6 +269,26 @@ class ExecuteExecutionTaskJob implements ShouldQueue
         }
 
         return $header."\n".'FILE TERKAIT PERUBAHAN INI — hanya file-file ini yang boleh diubah/dibuat:'."\n".'- '.implode("\n- ", $files)."\n".'DILARANG mengubah file di luar daftar ini atau file project lain. Kalau file di daftar belum ada, buat file itu di path tersebut, jangan menggantinya dengan file lain. Kalau satu file ternyata tidak relevan, lewati file itu dan lanjutkan file lainnya, jangan mencari pengganti sendiri.';
+    }
+
+    /**
+     * Kriteria story bersifat kumulatif lintas task. Tanpa batas eksplisit,
+     * worker memblokir kartu karena kriteria menyebut file di luar FILE
+     * TERKAIT (run #6: task controller diblokir sebab AC story menyebut
+     * kolom di view). Bagian ini menjelaskan bagian mana yang milik task ini.
+     */
+    private function criteriaSection(ExecutionRun $run, ExecutionTask $task): string
+    {
+        $files = $this->relatedFiles($run, $task);
+        $scope = $files === []
+            ? 'file yang disebut di bagian FILE pada description task'
+            : implode(', ', $files);
+
+        return 'Tugas dari: '.$run->subjectTitle()."\n"
+            .'Kriteria story (kumulatif — dipenuhi bersama task lain dalam run ini): '.$run->subjectCriteria()."\n"
+            .'BATAS TASK INI: kamu hanya bertanggung jawab atas bagian kriteria yang menyangkut '.$scope.'. '
+            .'Kriteria yang menyebut file, halaman, atau komponen lain adalah tanggung jawab task lain — '
+            .'JANGAN memblokir kartu karena bagian itu, selesaikan bagianmu lalu tandai kartu selesai.';
     }
 
     /**

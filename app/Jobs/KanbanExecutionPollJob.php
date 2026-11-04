@@ -92,7 +92,19 @@ class KanbanExecutionPollJob implements ShouldQueue
             return;
         }
         if ($status === 'blocked') {
-            $reason = $result['raw']['blocked_reason'] ?? $result['raw']['last_failure_error'] ?? $result['raw']['result'] ?? 'Kartu kanban diblokir oleh worker/dispatcher.';
+            // Alasan blokir dari worker ada di beberapa tempat tergantung
+            // versi CLI: task.blocked_reason, latest_summary, atau summary
+            // run terakhir. Dulu hanya dua kunci pertama yang dibaca
+            // sehingga PO melihat pesan generik tanpa sebab.
+            $runs = $result['raw']['runs'] ?? [];
+            $lastRun = is_array($runs) && $runs !== [] ? end($runs) : [];
+            $reason = $result['raw']['task']['blocked_reason']
+                ?? $result['raw']['blocked_reason']
+                ?? $result['raw']['latest_summary']
+                ?? (is_array($lastRun) ? ($lastRun['summary'] ?? $lastRun['error'] ?? null) : null)
+                ?? $result['raw']['last_failure_error']
+                ?? $result['raw']['result']
+                ?? 'Kartu kanban diblokir oleh worker/dispatcher.';
             $this->failRun($run, $task, 'KANBAN_BLOCKED', $worktrees, $baseline, is_string($reason) ? mb_substr($reason, 0, 1000) : 'Kartu kanban diblokir.');
 
             return;
