@@ -535,19 +535,23 @@ class ApiKeyManagementTest extends TestCase
         });
     }
 
-    public function test_sections_render_active_and_connect_without_tabs(): void
+    public function test_sections_are_split_into_tabs_with_dialogs(): void
     {
         $this->fakePage(['gemini' => []]);
 
         $response = $this->actingAs(User::factory()->create())->get('/ai-providers');
 
         $response->assertOk();
+        $response->assertSee('role="tablist"', false);
+        $response->assertSee('data-tab="overview"', false);
+        $response->assertSee('data-tab="providers"', false);
+        $response->assertSee('data-tab="api-key"', false);
+        $response->assertSee('data-panel="providers"', false);
         $response->assertSee('Provider aktif');
-        $response->assertSee('Hubungkan Provider');
+        $response->assertSee('Hubungkan provider');
         $response->assertSee('Google Gemini');
-        $response->assertSee('api-key-dialog');
-        $response->assertDontSee('tab-panel');
-        $response->assertDontSee('data-tab-target');
+        $response->assertSee('id="connect-dialog"', false);
+        $response->assertSee('id="api-key-dialog"', false);
     }
 
     public function test_failed_create_reopens_dialog(): void
@@ -569,7 +573,8 @@ class ApiKeyManagementTest extends TestCase
             ->get('/ai-providers');
 
         $response->assertOk();
-        $response->assertSee('id="api-key-dialog" open', false);
+        $response->assertSee('data-initial-tab="api-key"', false);
+        $response->assertSee('id="api-key-dialog" data-auto-open="1"', false);
     }
 
     public function test_check_connection_reports_matched_and_missing_models(): void

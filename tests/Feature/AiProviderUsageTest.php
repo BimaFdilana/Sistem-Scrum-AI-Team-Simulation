@@ -102,7 +102,7 @@ class AiProviderUsageTest extends TestCase
             ->assertOk()
             ->assertSee('Pemakaian provider tanpa kartu di atas')
             ->assertSee('Google')
-            ->assertDontSee('Pemakaian 30 hari');
+            ->assertDontSee('ap-card ap-provider', false);
     }
 
     public function test_ai_providers_page_shows_other_provider_usage_separately(): void

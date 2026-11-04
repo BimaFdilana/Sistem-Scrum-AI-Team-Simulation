@@ -21,6 +21,9 @@
     @if (in_array(($activePage ?? ''), ['agents', 'agent-activity', 'ai-providers'], true))
         <link rel="stylesheet" href="/css/agents.css">
     @endif
+    @if (($activePage ?? '') === 'ai-providers')
+        <link rel="stylesheet" href="{{ asset('css/ai-providers.css') }}?v={{ filemtime(public_path('css/ai-providers.css')) }}">
+    @endif
     @if (in_array(($activePage ?? ''), ['chat', 'agent-chat', 'discussion'], true))
         <link rel="stylesheet" href="{{ asset('css/chat.css') }}?v=3">
     @endif
