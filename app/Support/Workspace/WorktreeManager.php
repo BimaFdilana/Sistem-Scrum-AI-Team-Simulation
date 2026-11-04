@@ -105,22 +105,46 @@ class WorktreeManager
             return $path;
         }
         if ($this->branchExists($baselinePath, $branch)) {
-            if (File::exists($path)) {
-                File::deleteDirectory($path);
-            }
+            $this->removePath($path);
             $this->git($baselinePath, ['worktree', 'add', $path, $branch]);
             $this->normalizeRepo($path);
 
             return $path;
         }
-        if (File::exists($path)) {
-            File::deleteDirectory($path);
-        }
+        $this->removePath($path);
         $base = ($fromBranch !== null && $this->branchExists($baselinePath, $fromBranch)) ? $fromBranch : 'HEAD';
         $this->git($baselinePath, ['worktree', 'add', '-b', $branch, $path, $base]);
         $this->normalizeRepo($path);
 
         return $path;
+    }
+
+    /**
+     * Hapus path lama sebelum worktree add, dan PASTIKAN benar-benar hilang.
+     *
+     * Kasus nyata (run #3, 4 Nov 2026): worktree rusak dimiliki user lain
+     * (sidik) sehingga `File::deleteDirectory()` sebagai www-data gagal
+     * diam-diam; `git worktree add` lalu gagal dengan pesan membingungkan
+     * "path already exists". Lebih baik gagal dengan sebab yang jelas.
+     */
+    private function removePath(string $path): void
+    {
+        if (! File::exists($path)) {
+            return;
+        }
+
+        try {
+            File::deleteDirectory($path);
+        } catch (\Throwable) {
+            // Diverifikasi di bawah; pesannya lebih berguna daripada exception mentah.
+        }
+
+        if (File::exists($path)) {
+            throw new RuntimeException(
+                'Worktree lama di '.$path.' tidak bisa dihapus (kemungkinan dimiliki user lain / sisa proses sebelumnya). '
+                .'Bersihkan direktori itu lalu jalankan task lagi.'
+            );
+        }
     }
 
     private function branchExists(string $baselinePath, string $branch): bool

@@ -158,7 +158,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                 $kanban->ensureBoard($board, $project->name, 'Board eksekusi project '.$project->name.' dari website Scrum — user story, estimasi multi-agent, dan task todo dari Scrum Master.');
                 $profile = collect(config('agents.profiles', []))
                     ->firstWhere('slug', $task->assignee)['profile'] ?? $task->assignee;
-                $cardBody = $prompt."\n\nATURAN PENYELESAIAN KANBAN: kerjakan hanya di direktori kerja ini, jangan commit, push, atau merge, jangan mengubah file di luar FILE TERKAIT, dan tandai kartu selesai dengan tool kanban_complete setelah memverifikasi perubahanmu (bukan sebelum). Laravel akan melakukan commit, QA, test gate, dan merge setelah kartu selesai.";
+                $cardBody = $prompt."\n\nATURAN PENYELESAIAN KANBAN: kerjakan hanya di direktori kerja ini, jangan commit, push, atau merge, jangan mengubah file di luar FILE TERKAIT, dan tandai kartu selesai dengan tool kanban_complete setelah memverifikasi perubahanmu (bukan sebelum). JANGAN menjalankan perintah git apa pun (termasuk git worktree/prune/checkout/commit/clean) — Laravel yang mengurus seluruh operasi git, dan perintah git dari worker pernah merusak registrasi worktree sehingga run gagal. Laravel akan melakukan commit, QA, test gate, dan merge setelah kartu selesai.";
                 $cardId = $kanban->createTask(
                     $board,
                     'Task #'.$task->id.': '.$task->title,

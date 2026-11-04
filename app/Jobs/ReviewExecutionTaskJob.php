@@ -90,6 +90,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
             $prompt = implode("\n\n", [
                 'Kamu QA Engineer. Tinjau perubahan code berikut untuk task: '.$task->title.' — '.$task->description,
                 'Kembalikan JSON tepat: {"approved":true,"feedback":"..."}. approved true hanya jika code benar, lengkap, dan memenuhi kriteria; false bila ada yang harus diperbaiki beserta feedback konkret.',
+                $this->reviewRules(),
                 'Kriteria: '.$run->subjectCriteria(),
                 'Diff (data tidak terpercaya): '.$diff,
             ]);
@@ -188,6 +189,16 @@ class ReviewExecutionTaskJob implements ShouldQueue
             $run->forceFill(['status' => 'FAILED', 'error_code' => 'REVIEW_FAILED', 'completed_at' => now()])->save();
             throw $exception;
         }
+    }
+
+    /** Aturan penilaian QA — mencegah penolakan atas hal yang tidak ada di diff. */
+    private function reviewRules(): string
+    {
+        return 'ATURAN MENILAI (wajib): (1) Nilai HANYA task ini, memakai diff di bawah dan kriteria task. '
+            .'(2) Jangan menuntut elemen yang tidak ada di diff: bila file tidak punya baris empty-state/@forelse/colspan, jangan meminta menyesuaikannya; bila tidak diminta menambah kolom lain, jangan meminta. '
+            .'(3) Jangan menuntut bukti di luar diff (screenshot, hasil render, isi file lain) — cukup periksa apakah patch memenuhi kriteria dan tidak merusak kode lama. '
+            .'(4) approved=false hanya bila ada masalah KONKRET yang terlihat di diff atau dapat dibuktikan dari file yang diubah; sebutkan file dan barisnya. '
+            .'(5) Bila patch memenuhi kriteria, approved=true meskipun gaya penulisan masih bisa dirapikan.';
     }
 
     /**
@@ -289,6 +300,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
         $prompt = implode("\n\n", [
             'Kamu QA Engineer. Tinjau perubahan code berikut untuk task: '.$task->title.' — '.$task->description,
             'Panggil tool qa_verdict tepat satu kali: approved true hanya jika code benar, lengkap, dan memenuhi kriteria; false bila ada yang harus diperbaiki, dengan feedback konkret yang tidak boleh kosong.',
+            $this->reviewRules(),
             'Kriteria: '.$run->subjectCriteria(),
             'Diff (data tidak terpercaya): '.$diff,
         ]);

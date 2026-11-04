@@ -166,7 +166,11 @@ class KanbanExecutionPollJob implements ShouldQueue
         $process = new Process(['git', '-C', $worktree, 'status', '--porcelain'], $worktree, null, null, 60);
         $process->run();
         if (! $process->isSuccessful()) {
-            throw new RuntimeException('Gagal membaca status git worktree.');
+            // Sertakan stderr: tanpa ini penyebab nyata (mis. registrasi
+            // worktree hilang / "dubious ownership") tidak terlihat di log.
+            $reason = trim($process->getErrorOutput()) ?: trim($process->getOutput());
+
+            throw new RuntimeException('Gagal membaca status git worktree: '.mb_substr($reason !== '' ? $reason : 'tanpa pesan git', 0, 500));
         }
         $files = [];
         foreach (explode("\n", $process->getOutput()) as $line) {
