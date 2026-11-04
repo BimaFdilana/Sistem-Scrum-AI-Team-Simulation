@@ -113,7 +113,7 @@ class HermesProfileChatTest extends TestCase
             app(HermesProfileChat::class)->chat('backend-developer', 'Vote', 'ctx-0');
             $this->fail('Seharusnya melempar ModelNotChosenException.');
         } catch (ModelNotChosenException $e) {
-            $this->assertStringContainsString('belum dipilih di halaman Konfigurasi Agent', $e->getMessage());
+            $this->assertStringContainsString('belum dipilih di halaman AI Providers', $e->getMessage());
         }
         // Hermes tidak boleh dipanggil sama sekali untuk peran ini.
         $this->assertFileDoesNotExist($this->argsFile);

@@ -2,8 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\ActiveModelService;
 use App\Services\AiStatusService;
+use App\Services\AiUsageRecorder;
 use App\Services\CliProxyApiClient;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -31,7 +34,7 @@ class AiProviderController extends Controller
         'openai-compatibility' => 'OpenAI-compatible (custom)',
     ];
 
-    public function index(CliProxyApiClient $client, AiStatusService $status): View
+    public function index(CliProxyApiClient $client, AiStatusService $status, ActiveModelService $activeModel): View
     {
         $gatewayUp = $client->isAvailable();
         $managementUp = $client->isManagementAvailable();
@@ -44,8 +47,39 @@ class AiProviderController extends Controller
             'apiKeyProviders' => self::API_KEY_PROVIDERS,
             'apiKeys' => $this->maskedApiKeyGroups($client),
             'v8Up' => $client->isV8ManagementAvailable(),
+            // Satu model untuk semua peran: dipilih di halaman ini, bukan
+            // lagi di halaman Konfigurasi Agent per peran (dihapus 3 Nov 2026).
+            'activeModel' => $activeModel->current(),
+            'availableModels' => $activeModel->available(),
             'activePage' => 'ai-providers',
         ]);
+    }
+
+    /**
+     * Simpan SATU model untuk semua peran agent.
+     *
+     * Model disebar ke `settings.active_model` (dibaca StrictModelResolver),
+     * baris per peran (cermin kompatibilitas), dan config profile Hermes
+     * (dipakai worker kanban). Lihat ActiveModelService untuk alasannya.
+     */
+    public function updateActiveModel(Request $request, ActiveModelService $activeModel): RedirectResponse
+    {
+        $validated = $request->validate([
+            'active_model' => ['required', 'string', 'max:120'],
+        ], [
+            'active_model.required' => 'Pilih model yang ingin dipakai semua agent.',
+        ]);
+
+        $result = $activeModel->set($validated['active_model']);
+
+        $message = 'Model aktif untuk semua agent disetel ke '.$validated['active_model'].'.';
+        if ($result['warnings'] !== []) {
+            return back()
+                ->with('status', $message)
+                ->withErrors(['active_model' => implode(' ', $result['warnings'])]);
+        }
+
+        return back()->with('status', $message);
     }
 
     /**
@@ -62,7 +96,7 @@ class AiProviderController extends Controller
      */
     private function usageByProviderCard(AiStatusService $status): array
     {
-        $summary = \App\Services\AiUsageRecorder::summary(30);
+        $summary = AiUsageRecorder::summary(30);
         $labelToSlug = ['Google' => 'antigravity', 'OpenAI' => 'codex', 'Anthropic' => 'anthropic'];
         $connected = [];
         foreach ($status->providers() as $slug => $info) {
@@ -389,7 +423,7 @@ class AiProviderController extends Controller
             $raw = (string) $known['expiresAt'];
 
             try {
-                $quota['expiresAt'] = \Carbon\Carbon::parse($raw)->format('d M Y, H:i');
+                $quota['expiresAt'] = Carbon::parse($raw)->format('d M Y, H:i');
             } catch (Throwable) {
                 $quota['expiresAt'] = $raw;
             }

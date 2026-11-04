@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Project;
 use App\Models\User;
 use App\Services\AgentConfiguration;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -77,7 +78,7 @@ class HermesChatTest extends TestCase
         $this->mockStrictSm();
         $this->fakeGatewayChat('Siap, fokus ke project ini.');
 
-        $project = \App\Models\Project::create(['name' => 'Toko Online', 'project_type' => 'web']);
+        $project = Project::create(['name' => 'Toko Online', 'project_type' => 'web']);
         $user = User::factory()->create();
 
         $this->actingAs($user)
@@ -175,7 +176,7 @@ class HermesChatTest extends TestCase
         $this->actingAs(User::factory()->create())
             ->postJson('/chat/messages', ['message' => 'Halo'])
             ->assertServiceUnavailable()
-            ->assertJsonPath('message', 'Model untuk peran Scrum Master belum dipilih di halaman Konfigurasi Agent — alur tidak dijalankan.');
+            ->assertJsonPath('message', 'Model AI belum dipilih di halaman AI Providers — alur tidak dijalankan.');
 
         $this->get('/chat')->assertOk()->assertDontSee('must-not-leak');
     }

@@ -2,19 +2,24 @@
 
 namespace Tests\Feature;
 
+use App\Exceptions\ModelNotChosenException;
+use App\Models\User;
+use App\Services\AgentConfiguration;
+use App\Services\AgentModelCatalog;
 use App\Services\AgentProfileClient;
 use App\Services\CliProxyApiClient;
 use App\Services\HermesClient;
-use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Mockery\MockInterface;
 use Tests\TestCase;
 
 class CliProxyAgentWiringTest extends TestCase
 {
     use RefreshDatabase;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -53,8 +58,8 @@ class CliProxyAgentWiringTest extends TestCase
         try {
             $profiles->sendMessage('qa-engineer', 'halo', 'conv-1');
             $this->fail('Seharusnya melempar ModelNotChosenException.');
-        } catch (\App\Exceptions\ModelNotChosenException $e) {
-            $this->assertStringContainsString('belum dipilih di halaman Konfigurasi Agent', $e->getMessage());
+        } catch (ModelNotChosenException $e) {
+            $this->assertStringContainsString('belum dipilih di halaman AI Providers', $e->getMessage());
         }
 
         Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/v1/chat/completions'));
@@ -79,7 +84,7 @@ class CliProxyAgentWiringTest extends TestCase
             ['id' => 'gemini-2.5-pro', 'owned_by' => 'google'],
         ]);
         // Chat kini ketat: perlu snapshot menu terverifikasi per role.
-        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+        $this->mock(AgentConfiguration::class, function (MockInterface $mock) {
             $mock->shouldReceive('current')->with('qa-engineer')->andReturn(['status' => 'verified', 'model' => 'claude-opus-4-6']);
             $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'gemini-2.5-pro']);
         });
@@ -110,7 +115,7 @@ class CliProxyAgentWiringTest extends TestCase
         $this->assertSame(['claude-opus-4-6'], $grouped['anthropic']);
         $this->assertSame(['gemini-2.5-pro'], $grouped['google']);
 
-        $catalog = app(\App\Services\AgentModelCatalog::class)->fetch('qa-engineer');
+        $catalog = app(AgentModelCatalog::class)->fetch('qa-engineer');
 
         $this->assertSame('online', $catalog['status']);
         $this->assertTrue(collect($catalog['providers'])->firstWhere('slug', 'anthropic')['available']);
@@ -150,7 +155,7 @@ class CliProxyAgentWiringTest extends TestCase
             ['id' => 'gpt-5.6-luna', 'owned_by' => 'openai'],
         ]);
         // Chat SM kini ketat: perlu snapshot SM terverifikasi.
-        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+        $this->mock(AgentConfiguration::class, function (MockInterface $mock) {
             $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'gpt-5.6-luna']);
         });
 

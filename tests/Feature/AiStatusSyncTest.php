@@ -3,10 +3,12 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Services\AgentConfiguration;
 use App\Services\AiStatusService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Mockery\MockInterface;
 use Tests\TestCase;
 
 /**
@@ -55,7 +57,7 @@ class AiStatusSyncTest extends TestCase
         );
         // Aturan tanpa-default: agent terhubung karena tiap role punya
         // pilihan menu terverifikasi (bukan fallback ke provider).
-        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+        $this->mock(AgentConfiguration::class, function (MockInterface $mock) {
             $mock->shouldReceive('current')->andReturn(['status' => 'verified', 'model' => 'gpt-5.6-sol']);
         });
 
@@ -84,7 +86,7 @@ class AiStatusSyncTest extends TestCase
 
         foreach ($service->agents() as $slug => $agent) {
             $this->assertFalse($agent['connected'], "Agent {$slug} harus belum terhubung.");
-            $this->assertSame('Model belum dipilih di halaman Konfigurasi Agent.', $agent['reason']);
+            $this->assertSame('Model belum dipilih di halaman AI Providers.', $agent['reason']);
         }
     }
 
@@ -106,7 +108,7 @@ class AiStatusSyncTest extends TestCase
             [$this->codexFile(false)],
             [['id' => 'gpt-5.6-sol', 'owned_by' => 'openai']]
         );
-        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+        $this->mock(AgentConfiguration::class, function (MockInterface $mock) {
             $mock->shouldReceive('current')->andReturn(['status' => 'verified', 'model' => 'gpt-5.6-sol']);
         });
 

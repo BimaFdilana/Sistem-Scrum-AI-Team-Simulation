@@ -34,7 +34,9 @@
                     @else
                         <span class="button button-ghost" aria-label="Agent spesialis dikoordinasikan oleh Scrum Master">Dipanggil melalui Scrum Master</span>
                     @endif
-                    <a class="button button-secondary" href="{{ route('agents.config.edit', ['slug' => $agent['slug']], false) }}">Konfigurasi Agent</a>
+                    {{-- Konfigurasi Agent per peran dihapus 3 Nov 2026: model
+                         kini dipilih sekali untuk semua agent di halaman AI Providers. --}}
+                    <a class="button button-secondary" href="{{ route('ai-providers.index') }}">Model AI</a>
                     <a class="button button-secondary" href="{{ $activityUrl }}">Log activity</a>
                 </div>
             </article>

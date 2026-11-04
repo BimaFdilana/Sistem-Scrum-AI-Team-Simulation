@@ -5,9 +5,9 @@ namespace Tests\Feature;
 use App\Services\AgentConfiguration;
 use App\Services\CliProxyApiClient;
 use App\Services\HermesTaskRunner;
-use RuntimeException;
 use Illuminate\Support\Facades\File;
 use Mockery\MockInterface;
+use RuntimeException;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
@@ -183,7 +183,7 @@ class HermesTaskRunnerTest extends TestCase
             $this->runTask('ok', true, 'backend-developer', $argsFile);
             $this->fail('Exception tidak dilempar untuk role yang belum memilih.');
         } catch (RuntimeException $exception) {
-            $this->assertStringContainsString('belum dipilih di halaman Konfigurasi Agent', $exception->getMessage());
+            $this->assertStringContainsString('belum dipilih di halaman AI Providers', $exception->getMessage());
         }
         // Biner Hermes palsu tidak pernah dijalankan: tidak ada file
         // argumen yang ditulis, dan worktree tidak berubah.
@@ -221,7 +221,7 @@ class HermesTaskRunnerTest extends TestCase
             $this->runTask('ok', true, 'backend-developer', $argsFile);
             $this->fail('Exception tidak dilempar untuk model yang belum terverifikasi.');
         } catch (RuntimeException $exception) {
-            $this->assertStringContainsString('belum terverifikasi di halaman Konfigurasi Agent', $exception->getMessage());
+            $this->assertStringContainsString('belum terverifikasi', $exception->getMessage());
         }
         $this->assertFileDoesNotExist($argsFile);
     }

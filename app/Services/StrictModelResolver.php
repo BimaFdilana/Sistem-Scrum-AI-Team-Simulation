@@ -38,42 +38,74 @@ class StrictModelResolver
      */
     public function check(string $role): array
     {
-        $display = $this->displayName($role);
         try {
-            $snapshot = app(AgentConfiguration::class)->current($role);
             $available = $this->availableModelIds();
         } catch (Throwable) {
-            // Lapisan config/gateway tidak terbaca = dianggap belum
-            // memilih; jangan pernah jatuh ke fallback diam-diam.
-            $snapshot = null;
-            $available = [];
-        }
-        if (! is_array($snapshot) || ! is_string($snapshot['model'] ?? null) || ($snapshot['model'] ?? '') === '') {
+            // Lapisan gateway tidak terbaca = dianggap belum memilih;
+            // jangan pernah jatuh ke fallback diam-diam.
             return [
                 'model' => null,
                 'state' => self::STATE_NOT_CHOSEN,
-                'message' => "Model untuk peran {$display} belum dipilih di halaman Konfigurasi Agent — alur tidak dijalankan.",
-                'short_reason' => 'Model belum dipilih di halaman Konfigurasi Agent.',
+                'message' => 'Daftar model gateway tidak terbaca — alur tidak dijalankan.',
+                'short_reason' => 'Daftar model gateway tidak terbaca.',
+            ];
+        }
+
+        // SATU model untuk semua peran (sejak halaman Konfigurasi Agent
+        // dihapus 3 Nov 2026): sumber utamanya setting global `active_model`
+        // yang dipilih PO di halaman AI Providers.
+        try {
+            $model = app(ActiveModelService::class)->current();
+        } catch (Throwable) {
+            $model = null;
+        }
+
+        if (is_string($model) && trim($model) !== '') {
+            if ($available !== [] && ! in_array($model, $available, true)) {
+                return [
+                    'model' => null,
+                    'state' => self::STATE_NOT_AVAILABLE,
+                    'message' => "Model {$model} yang dipilih tidak ditemukan di daftar model gateway saat ini — perbarui pilihan di halaman AI Providers, alur tidak dijalankan.",
+                    'short_reason' => 'Model yang dipilih tidak tersedia di gateway saat ini.',
+                ];
+            }
+
+            return ['model' => $model, 'state' => self::STATE_OK, 'message' => '', 'short_reason' => ''];
+        }
+
+        // Kompatibilitas migrasi: instalasi lama belum punya setting global.
+        // Pakai snapshot per peran yang masih terverifikasi, supaya tidak ada
+        // alur yang berhenti hanya karena menu lama dihapus. Begitu PO memilih
+        // model di halaman AI Providers, jalur ini tidak terpakai lagi.
+        $snapshot = app(AgentConfiguration::class)->current($role);
+        $legacyModel = is_array($snapshot) ? ($snapshot['model'] ?? null) : null;
+
+        if (! is_string($legacyModel) || trim($legacyModel) === '') {
+            return [
+                'model' => null,
+                'state' => self::STATE_NOT_CHOSEN,
+                'message' => 'Model AI belum dipilih di halaman AI Providers — alur tidak dijalankan.',
+                'short_reason' => 'Model belum dipilih di halaman AI Providers.',
             ];
         }
         if (($snapshot['status'] ?? null) !== 'verified') {
             return [
                 'model' => null,
                 'state' => self::STATE_NOT_VERIFIED,
-                'message' => "Model untuk peran {$display} belum terverifikasi di halaman Konfigurasi Agent — alur tidak dijalankan.",
-                'short_reason' => 'Model belum terverifikasi di halaman Konfigurasi Agent.',
+                'message' => 'Model AI belum terverifikasi — pilih ulang di halaman AI Providers, alur tidak dijalankan.',
+                'short_reason' => 'Model belum terverifikasi.',
             ];
         }
-        if (! in_array($snapshot['model'], $available, true)) {
+        if ($available !== [] && ! in_array($legacyModel, $available, true)) {
             return [
                 'model' => null,
                 'state' => self::STATE_NOT_AVAILABLE,
-                'message' => "Model {$snapshot['model']} yang dipilih untuk peran {$display} tidak ditemukan di daftar model gateway saat ini — perbarui pilihan di halaman Konfigurasi Agent, alur tidak dijalankan.",
+                'message' => "Model {$legacyModel} tidak ditemukan di daftar model gateway saat ini — perbarui pilihan di halaman AI Providers, alur tidak dijalankan.",
                 'short_reason' => 'Model yang dipilih tidak tersedia di gateway saat ini.',
             ];
         }
 
-        return ['model' => $snapshot['model'], 'state' => self::STATE_OK, 'message' => '', 'short_reason' => ''];
+        return ['model' => $legacyModel, 'state' => self::STATE_OK, 'message' => '', 'short_reason' => ''];
     }
 
     public function resolve(string $role): ?string

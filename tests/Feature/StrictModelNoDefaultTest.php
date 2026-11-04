@@ -20,7 +20,7 @@ use Tests\TestCase;
 
 /**
  * Aturan tanpa-default (Bima 2026-10-31): tidak ada model default di
- * mana pun; hanya model yang dipilih PO di halaman Konfigurasi Agent
+ * mana pun; hanya model yang dipilih PO di halaman AI Providers
  * yang boleh dipakai; model bermasalah memicu prompt penggantian,
  * bukan substitusi diam-diam; kegagalan transien tetap retry pada
  * model yang sama.
@@ -73,7 +73,7 @@ class StrictModelNoDefaultTest extends TestCase
             $resolver->require('qa-engineer');
             $this->fail('Seharusnya melempar ModelNotChosenException.');
         } catch (ModelNotChosenException $e) {
-            $this->assertStringContainsString('belum dipilih di halaman Konfigurasi Agent', $e->getMessage());
+            $this->assertStringContainsString('belum dipilih di halaman AI Providers', $e->getMessage());
         }
     }
 
@@ -83,7 +83,7 @@ class StrictModelNoDefaultTest extends TestCase
         $this->fakeModels(['gpt-a']);
         $check = app(StrictModelResolver::class)->check('qa-engineer');
         $this->assertSame('not_verified', $check['state']);
-        $this->assertStringContainsString('belum terverifikasi di halaman Konfigurasi Agent', $check['message']);
+        $this->assertStringContainsString('belum terverifikasi', $check['message']);
 
         $this->mockCurrent(['status' => 'verified', 'model' => 'stale-model']);
         $this->fakeModels(['gpt-a']);
@@ -115,7 +115,7 @@ class StrictModelNoDefaultTest extends TestCase
             app(HermesTaskRunner::class)->run('backend-developer', $dir, 'Kerjakan task.', true);
             $this->fail('Seharusnya melempar ModelNotChosenException.');
         } catch (ModelNotChosenException $e) {
-            $this->assertStringContainsString('belum dipilih di halaman Konfigurasi Agent', $e->getMessage());
+            $this->assertStringContainsString('belum dipilih di halaman AI Providers', $e->getMessage());
         } finally {
             rmdir($dir);
         }
@@ -130,7 +130,7 @@ class StrictModelNoDefaultTest extends TestCase
             app(AgentProfileClient::class)->sendMessage('qa-engineer', 'halo', 'conv-1');
             $this->fail('Seharusnya melempar ModelNotChosenException.');
         } catch (ModelNotChosenException $e) {
-            $this->assertStringContainsString('belum dipilih di halaman Konfigurasi Agent', $e->getMessage());
+            $this->assertStringContainsString('belum dipilih di halaman AI Providers', $e->getMessage());
         }
 
         Http::assertNotSent(fn (Request $request) => str_ends_with($request->url(), '/v1/chat/completions'));
