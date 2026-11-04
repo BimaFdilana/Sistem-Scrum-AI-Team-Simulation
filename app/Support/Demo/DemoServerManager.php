@@ -49,11 +49,23 @@ class DemoServerManager
             throw new RuntimeException('Baseline project belum siap untuk demo.');
         }
 
+        $projectRoot = $worktreePath !== null ? rtrim($worktreePath, '/') : rtrim((string) $project->workspace_path, '/');
         $port = $this->allocatePort();
         $log = storage_path('logs/demo-project-'.$project->id.'.log');
+
+        // Database demo memakai SQLite lokal: host demo tidak menyediakan
+        // MySQL, sementara project PO sering dikonfigurasi DB_CONNECTION=mysql.
+        // Env proses MENANG atas .env karena Dotenv bersifat immutable.
+        $demoEnv = $this->demoEnvironment($projectRoot, $project, $log);
+
+        $envPrefix = '';
+        foreach ($demoEnv as $key => $value) {
+            $envPrefix .= ' '.escapeshellarg($key.'='.$value);
+        }
+
         $cmd = sprintf(
-            'nohup php -S 0.0.0.0:%d -t %s > %s 2>&1 & echo $!',
-            $port, escapeshellarg($docroot), escapeshellarg($log)
+            'nohup env%s php -S 0.0.0.0:%d -t %s > %s 2>&1 & echo $!',
+            $envPrefix, $port, escapeshellarg($docroot), escapeshellarg($log)
         );
         $pid = (int) trim((string) shell_exec($cmd));
         if ($pid <= 0) {
@@ -62,12 +74,18 @@ class DemoServerManager
             }
             throw new RuntimeException('Gagal menjalankan server demo.');
         }
-        sleep(1);
-        if (! $this->pidAlive($pid)) {
+
+        // Jangan klaim RUNNING hanya karena proses hidup: pastikan endpoint
+        // benar-benar menjawab (dulu demo "RUNNING" padahal HTTP 500 karena
+        // vendor/DB tidak siap).
+        $healthError = $this->waitForHealthy($port, $pid, $log);
+        if ($healthError !== null) {
+            @posix_kill($pid, 9);
             if ($worktreePath !== null) {
                 $this->removeWorktree($project, $worktreePath);
             }
-            throw new RuntimeException('Server demo langsung berhenti. Periksa log: '.$log);
+
+            throw new RuntimeException($healthError);
         }
 
         return DemoServer::query()->create([
@@ -79,6 +97,174 @@ class DemoServerManager
             'expires_at' => now()->addMinutes((int) config('demo.ttl_minutes', 60)),
             'worktree_path' => $worktreePath,
         ]);
+    }
+
+    /**
+     * Env proses demo: paksa SQLite lokal + driver file agar tidak butuh
+     * MySQL/Redis di host demo. Migrasi dijalankan sekali saat DB masih kosong.
+     *
+     * @return array<string, string>
+     */
+    protected function demoEnvironment(string $projectRoot, Project $project, string $log): array
+    {
+        $dir = storage_path('app/demo-db');
+        if (! is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+
+        $database = $dir.'/project-'.$project->id.'.sqlite';
+        if (! file_exists($database)) {
+            @touch($database);
+        }
+
+        $env = [
+            'DB_CONNECTION' => 'sqlite',
+            'DB_DATABASE' => $database,
+            'DB_FOREIGN_KEYS' => 'true',
+            'SESSION_DRIVER' => 'file',
+            'CACHE_DRIVER' => 'file',
+            'QUEUE_CONNECTION' => 'sync',
+            'APP_ENV' => 'local',
+        ];
+
+        // Migrasi hanya saat DB masih kosong (file 0 byte / tanpa tabel).
+        if (filesize($database) === 0) {
+            $this->migrateDemoDatabase($projectRoot, $database, $env, $log);
+            $this->seedDemoDatabase($projectRoot, $env, $log);
+        }
+
+        return $env;
+    }
+
+    /**
+     * Migrasi SQLite untuk demo. Sebagian project PO memakai migrasi
+     * MySQL-only (raw `MODIFY`); migrasi seperti itu ditandai sudah jalan
+     * dan dilewati agar demo tetap bisa dibuka. Maksimum 10 putaran.
+     *
+     * @param  array<string, string>  $env
+     */
+    private function migrateDemoDatabase(string $projectRoot, string $database, array $env, string $log): void
+    {
+        for ($attempt = 1; $attempt <= 10; $attempt++) {
+            $process = new \Symfony\Component\Process\Process(
+                [PHP_BINARY, 'artisan', 'migrate', '--force', '--no-interaction'],
+                $projectRoot,
+                array_merge(getenv(), $env),
+                null,
+                300
+            );
+            $process->run();
+            $output = $process->getOutput().$process->getErrorOutput();
+
+            file_put_contents(
+                $log,
+                '['.date('c')."] migrate #{$attempt}: exit=".$process->getExitCode()."\n".mb_substr($output, -4000)."\n",
+                FILE_APPEND
+            );
+
+            if ($process->isSuccessful()) {
+                return;
+            }
+
+            if (! preg_match_all('/^Migrating:\s*(.+)$/m', $output, $matches) || $matches[1] === []) {
+                throw new RuntimeException('Demo tidak bisa disiapkan: migrasi SQLite gagal tanpa nama migrasi (lihat '.$log.').');
+            }
+
+            $failing = trim((string) end($matches[1]));
+
+            // Hanya lewati migrasi yang jelas MySQL-only (MODIFY/CHANGE/ENGINE).
+            if (! preg_match('/MODIFY|CHANGE\s+COLUMN|ENGINE\s*=/i', $output)) {
+                throw new RuntimeException('Demo tidak bisa disiapkan: migrasi "'.$failing.'" gagal di SQLite (lihat '.$log.').');
+            }
+
+            try {
+                $pdo = new \PDO('sqlite:'.$database);
+                $batch = (int) $pdo->query('SELECT COALESCE(MAX(batch),0)+1 FROM migrations')->fetchColumn();
+                $statement = $pdo->prepare('INSERT INTO migrations (migration, batch) VALUES (?, ?)');
+                $statement->execute([$failing, $batch]);
+            } catch (\Throwable $exception) {
+                throw new RuntimeException('Demo tidak bisa disiapkan: gagal menandai migrasi MySQL-only ('.$exception->getMessage().').');
+            }
+
+            file_put_contents(
+                $log,
+                '['.date('c')."] SKIP migrasi MySQL-only: {$failing}\n",
+                FILE_APPEND
+            );
+        }
+
+        throw new RuntimeException('Demo tidak bisa disiapkan: terlalu banyak migrasi MySQL-only dilewati (lihat '.$log.').');
+    }
+
+    /**
+     * Isi data awal (setting/role/admin) agar halaman demo tidak error
+     * karena tabel kosong. Gagal seeding TIDAK menggagalkan demo: sebagian
+     * project memang tidak punya seeder.
+     *
+     * @param  array<string, string>  $env
+     */
+    private function seedDemoDatabase(string $projectRoot, array $env, string $log): void
+    {
+        $process = new \Symfony\Component\Process\Process(
+            [PHP_BINARY, 'artisan', 'db:seed', '--force', '--no-interaction'],
+            $projectRoot,
+            array_merge(getenv(), $env),
+            null,
+            240
+        );
+        $process->run();
+
+        file_put_contents(
+            $log,
+            '['.date('c')."] db:seed exit=".$process->getExitCode()."\n".mb_substr($process->getOutput().$process->getErrorOutput(), -2000)."\n",
+            FILE_APPEND
+        );
+    }
+
+    /**
+     * Tunggu endpoint demo menjawab. Null = sehat; string = pesan kegagalan.
+     * 2xx/3xx dianggap sehat (halaman login juga valid), 5xx/putus = gagal.
+     */
+    protected function waitForHealthy(int $port, int $pid, string $log): ?string
+    {
+        $url = 'http://127.0.0.1:'.$port.'/';
+
+        for ($attempt = 1; $attempt <= 20; $attempt++) {
+            usleep(500_000);
+
+            if (! $this->pidAlive($pid)) {
+                return 'Server demo berhenti saat start. Log: '.$this->logTail($log);
+            }
+
+            try {
+                $response = \Illuminate\Support\Facades\Http::timeout(5)->get($url);
+                $status = $response->status();
+
+                if ($status < 500) {
+                    return null;
+                }
+
+                if ($attempt >= 4) {
+                    return 'Demo menjawab HTTP '.$status.' — project gagal boot. Log: '.$this->logTail($log);
+                }
+            } catch (\Throwable) {
+                // Belum siap (connection refused) — coba lagi.
+            }
+        }
+
+        return 'Demo tidak menjawab di '.$url.' setelah 10 detik. Log: '.$this->logTail($log);
+    }
+
+    /** Ambil 2 baris terakhir log demo untuk pesan error. */
+    private function logTail(string $log): string
+    {
+        if (! is_file($log)) {
+            return '(log tidak ada)';
+        }
+
+        $lines = array_slice(array_filter(explode("\n", (string) @file_get_contents($log))), -2);
+
+        return mb_substr(trim(implode(' | ', $lines)), 0, 300);
     }
 
     /**
