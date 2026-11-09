@@ -63,7 +63,7 @@ class SequentialExecutionTest extends TestCase
             'story_id' => $story->id, 'requested_by' => $owner->id, 'status' => 'QUEUED',
         ]);
         $fake = Mockery::mock(HermesClient::class);
-        $fake->shouldReceive('sendMessage')->once()->andReturn(json_encode(['tasks' => [
+        $fake->shouldReceive('sendMessage')->once()->andReturn($this->withCriteria(['tasks' => [
             ['title' => 'Partial dulu', 'description' => 'Buat partial.', 'assignee' => 'backend-developer', 'files' => []],
             ['title' => 'Baru styling', 'description' => 'Pakai partial task sebelumnya.', 'assignee' => 'frontend-developer', 'files' => []],
         ]]));
@@ -207,5 +207,18 @@ class SequentialExecutionTest extends TestCase
         $worktrees->merge($baseline, 'wt-seq-merge-b');
         $this->assertSame('dari cabang A', file_get_contents($baseline.'/a.txt'));
         $this->assertSame('dari cabang B', file_get_contents($baseline.'/b.txt'));
+    }
+
+    /** JSON breakdown lengkap: tiap criteria dipetakan ke semua task. */
+    private function withCriteria(array $data): string
+    {
+        $ids = $data['tasks'] === [] ? [1] : range(1, count($data['tasks']));
+        $data['criteria'] = [
+            ['criterion' => 'Kriteria 1', 'tasks' => $ids],
+            ['criterion' => 'Kriteria 2', 'tasks' => $ids],
+            ['criterion' => 'Kriteria 3', 'tasks' => $ids],
+        ];
+
+        return json_encode($data);
     }
 }

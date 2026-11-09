@@ -34,6 +34,18 @@
             </ul>
         @endif
 
+        @if (! empty($pendingPermission->payload['coverage']))
+            <h4 style="margin:12px 0 4px">Acceptance criteria dan task yang memenuhinya</h4>
+            <ul class="exec-permission-list">
+                @foreach ($pendingPermission->payload['coverage'] as $cover)
+                    <li>
+                        {{ $cover['criterion'] ?? '' }}
+                        <span class="exec-chip">task {{ implode(', ', (array) ($cover['tasks'] ?? [])) }}</span>
+                    </li>
+                @endforeach
+            </ul>
+        @endif
+
         <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:12px">
             <form method="POST" action="{{ route('accepted.approve', $pendingPermission) }}">
                 @csrf

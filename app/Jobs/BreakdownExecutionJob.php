@@ -2,8 +2,12 @@
 
 namespace App\Jobs;
 
+use App\Exceptions\ModelNotChosenException;
 use App\Models\ExecutionRun;
 use App\Models\PermissionRequest;
+use App\Models\RepairOrder;
+use App\Models\Story;
+use App\Services\AiGateway;
 use App\Services\ChatDisclosurePolicy;
 use App\Services\HermesClient;
 use App\Support\Agents\AgentSoul;
@@ -13,6 +17,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
 
@@ -50,13 +55,13 @@ class BreakdownExecutionJob implements ShouldQueue
                 ? $this->storyPrompt($run->story, $inventory)
                 : $this->repairOrderPrompt($run->repairOrder, $inventory);
             $raw = $scrumMaster->sendMessage($prompt, 'execution-breakdown-'.$run->id);
-            $inspection = $this->inspectTasks($raw, $inventory);
+            $inspection = $this->inspectTasks($raw, $inventory, [], $run->story);
 
             // Dua kesempatan perbaikan: JSON cacat (field hilang) maupun path
             // yang dikarang. Jawaban perbaikan yang hanya memuat sebagian
             // objek dilengkapi dari percobaan sebelumnya, bukan langsung gagal.
             for ($repair = 1; $repair <= 2 && $inspection['violations'] !== []; $repair++) {
-                \Illuminate\Support\Facades\Log::warning('Breakdown ditolak validator — minta perbaikan SM', [
+                Log::warning('Breakdown ditolak validator — minta perbaikan SM', [
                     'run_id' => $run->id,
                     'repair' => $repair,
                     'violations' => $inspection['violations'],
@@ -67,7 +72,7 @@ class BreakdownExecutionJob implements ShouldQueue
                     $this->repairPrompt($prompt, $inspection['violations']),
                     'execution-breakdown-'.$run->id.'-repair-'.$repair
                 );
-                $inspection = $this->inspectTasks($raw, $inventory, $previous);
+                $inspection = $this->inspectTasks($raw, $inventory, $previous, $run->story, $inspection['coverage'] ?? []);
             }
 
             if ($inspection['violations'] !== []) {
@@ -75,6 +80,7 @@ class BreakdownExecutionJob implements ShouldQueue
             }
 
             $tasks = $inspection['tasks'];
+            $coverage = $inspection['coverage'] ?? [];
 
             foreach ($tasks as $index => $task) {
                 $run->tasks()->create([
@@ -96,6 +102,8 @@ class BreakdownExecutionJob implements ShouldQueue
                     'tasks' => array_map(fn ($t) => [
                         'title' => $t['title'], 'assignee' => $t['assignee'], 'files' => $t['files'],
                     ], $tasks),
+                    // Bukti rencana mencakup semua acceptance criteria (diverifikasi server).
+                    'coverage' => $coverage,
                 ],
                 'status' => 'PENDING',
                 'requested_by' => $run->requested_by,
@@ -105,7 +113,7 @@ class BreakdownExecutionJob implements ShouldQueue
                 'sender_slug' => 'scrum-master',
                 'recipient_slug' => 'team',
                 'content' => $run->subjectLabel().' dipecah menjadi '.count($tasks).' task. Menunggu persetujuan PO di menu Accepted sebelum agen mengubah code.',
-                'metadata' => ['tasks' => array_column($tasks, 'title')],
+                'metadata' => ['tasks' => array_column($tasks, 'title'), 'coverage' => $coverage],
             ]);
 
             $run->forceFill(['status' => 'AWAITING_PERMISSION'])->save();
@@ -115,7 +123,7 @@ class BreakdownExecutionJob implements ShouldQueue
             // US-01 #1 dulu tidak bisa didiagnosis karena payload mentah
             // tidak tercatat di mana pun.
             $excerpt = mb_substr($raw ?? '', 0, 2000);
-            \Illuminate\Support\Facades\Log::warning('Execution breakdown failed validation', [
+            Log::warning('Execution breakdown failed validation', [
                 'run_id' => $run->id,
                 'error' => $exception->getMessage(),
                 'matched_categories' => $disclosure->matchedSecretCategories($excerpt),
@@ -133,20 +141,20 @@ class BreakdownExecutionJob implements ShouldQueue
             // Kegagalan pemilihan model harus terlihat PO di summary run
             // (pesan aksi: pilih di halaman Konfigurasi Agent), bukan
             // hanya status FAILED tanpa penjelasan.
-            if (\App\Services\AiGateway::isModelChoiceFailure($exception)) {
-                $code = $exception instanceof \App\Exceptions\ModelNotChosenException ? 'MODEL_NOT_CHOSEN' : 'MODEL_PROBLEMATIC';
+            if (AiGateway::isModelChoiceFailure($exception)) {
+                $code = $exception instanceof ModelNotChosenException ? 'MODEL_NOT_CHOSEN' : 'MODEL_PROBLEMATIC';
                 $run->forceFill(['error_code' => $code, 'summary' => $exception->getMessage()])->save();
             }
             throw $exception;
         }
     }
 
-    private function storyPrompt(\App\Models\Story $story, ?ProjectFileInventory $inventory = null): string
+    private function storyPrompt(Story $story, ?ProjectFileInventory $inventory = null): string
     {
         return implode("\n\n", array_filter([
             AgentSoul::promptLine('scrum-master'),
             'Kamu Scrum Master. Pecah user story berikut menjadi TODO LIST task-task kecil yang dikerjakan BERURUTAN oleh Frontend Developer dan Backend Developer, sesuai dependensi antar task. Tiap task harus langsung bisa dikerjakan tanpa perlu ditafsirkan lagi.',
-            'Kembalikan JSON tepat: {"tasks":[{"title":"...","description":"...","assignee":"frontend-developer","files":["path/relatif/file.php"]}, ...]}. WAJIB: setiap objek task memuat KEEMPAT field (title, description, assignee, files) — jangan ada yang dihilangkan.',
+            'Kembalikan JSON tepat: {"tasks":[{"title":"...","description":"...","assignee":"frontend-developer","files":["path/relatif/file.php"]}, ...],"criteria":[{"criterion":"salinan satu acceptance criteria","tasks":[1,2]}, ...]}. WAJIB: setiap objek task memuat KEEMPAT field (title, description, assignee, files) — jangan ada yang dihilangkan. "criteria" memetakan SETIAP acceptance criteria story ke nomor task (mulai dari 1, sesuai urutan array tasks) yang memenuhinya; tiap acceptance criteria harus punya minimal satu task, dan tiap task harus melayani minimal satu criteria.',
             'Aturan TODO LIST (wajib): 1-6 task; assignee hanya "frontend-developer" atau "backend-developer"; title diawali kata kerja dan menyebut hasil konkretnya, bukan topik (contoh benar: "Tambahkan kolom status pada tabel daftar pesanan", contoh salah: "Tetapkan sumber pemetaan status", "Analisis daftar pesanan"); description WAJIB memuat empat bagian: KERJAKAN (perubahan kode konkret), FILE (file yang diubah/dibuat, sama dengan files — files tidak boleh kosong untuk task kode), HASIL (apa yang berubah dan terlihat setelah task ini), SELESAI BILA (kriteria selesai task ini saja yang bisa dicek dari patch-nya); LARANG task yang hanya analisis, riset, diskusi, perencanaan, atau penentuan tanpa perubahan kode — tiap task HARUS berakhir dengan patch (buat/ubah file), dan jangan buat task terpisah yang hanya menguji: pengujian menjadi bagian SELESAI BILA tiap task, QA yang akan menguji setelahnya; URUTAN ARRAY = URUTAN EKSEKUSI: task yang hasilnya dibutuhkan task lain HARUS diletakkan lebih dulu, dan tiap description task yang bergantung harus menyebut hasil task sebelumnya yang dipakainya.',
             $inventory?->promptSection(),
             $this->pathRuleSection($inventory !== null),
@@ -155,7 +163,7 @@ class BreakdownExecutionJob implements ShouldQueue
         ], fn ($part) => is_string($part) && trim($part) !== ''));
     }
 
-    private function repairOrderPrompt(\App\Models\RepairOrder $order, ?ProjectFileInventory $inventory = null): string
+    private function repairOrderPrompt(RepairOrder $order, ?ProjectFileInventory $inventory = null): string
     {
         return implode("\n\n", array_filter([
             AgentSoul::promptLine('scrum-master'),
@@ -250,7 +258,7 @@ class BreakdownExecutionJob implements ShouldQueue
     /**
      * @return array{tasks: ?array<int, array<string, mixed>>, violations: array<int, string>}
      */
-    private function inspectTasks(string $raw, ?ProjectFileInventory $inventory, array $fallback = []): array
+    private function inspectTasks(string $raw, ?ProjectFileInventory $inventory, array $fallback = [], ?Story $story = null, array $fallbackCoverage = []): array
     {
         try {
             $tasks = $this->validatedTasks($raw, $fallback);
@@ -267,10 +275,71 @@ class BreakdownExecutionJob implements ShouldQueue
         // blade yang paling cocok dari inventaris nyata.
         $tasks = $inventory !== null ? $this->autofillViewFiles($tasks, $inventory) : $tasks;
 
+        $violations = $inventory !== null ? $this->scopeViolations($tasks, $inventory) : [];
+        $coverage = [];
+        if ($story !== null) {
+            [$coverage, $coverageViolations] = $this->coverage($raw, $tasks, $story, $fallbackCoverage);
+            $violations = array_merge($violations, $coverageViolations);
+        }
+
         return [
             'tasks' => $tasks,
-            'violations' => $inventory !== null ? $this->scopeViolations($tasks, $inventory) : [],
+            'coverage' => $coverage,
+            'violations' => $violations,
         ];
+    }
+
+    /**
+     * Pemetaan acceptance criteria -> task, diverifikasi server.
+     * Tidak menilai apakah SM benar; memastikan pemetaannya ADA, utuh, dan
+     * konsisten sehingga PO dan QA punya acuan yang sama.
+     *
+     * @param  array<int, array<string, mixed>>  $tasks
+     * @param  array<int, array{criterion: string, tasks: array<int, int>}>  $fallback
+     * @return array{0: array<int, array{criterion: string, tasks: array<int, int>}>, 1: array<int, string>}
+     */
+    private function coverage(string $raw, array $tasks, Story $story, array $fallback): array
+    {
+        $json = $this->extractJsonObject($raw);
+        $data = $json !== null ? (json_decode($json, true) ?: []) : [];
+        $entries = is_array($data['criteria'] ?? null) ? $data['criteria'] : $fallback;
+
+        $source = array_values(array_filter(array_map(
+            fn (string $line) => trim(preg_replace('/^\s*(?:[-*•]|\d+[.)])\s*/u', '', $line) ?? ''),
+            preg_split('/\R+/u', (string) $story->effectiveAcceptanceCriteria()) ?: []
+        ), fn (string $line) => $line !== ''));
+
+        $count = count($tasks);
+        $coverage = [];
+        $violations = [];
+        $usedTasks = [];
+
+        foreach ($entries as $i => $entry) {
+            $ids = is_array($entry) && is_array($entry['tasks'] ?? null)
+                ? array_values(array_unique(array_filter(array_map('intval', $entry['tasks']), fn (int $n) => $n >= 1 && $n <= $count)))
+                : [];
+            $text = is_array($entry) ? trim((string) ($entry['criterion'] ?? '')) : '';
+            if ($text === '' || $ids === []) {
+                $violations[] = 'criteria #'.($i + 1).' tidak valid: wajib berisi teks "criterion" dan "tasks" (nomor task 1-'.$count.' yang memenuhinya).';
+
+                continue;
+            }
+            $coverage[] = ['criterion' => $text, 'tasks' => $ids];
+            $usedTasks = array_merge($usedTasks, $ids);
+        }
+
+        if ($coverage === [] && $violations === []) {
+            $violations[] = 'Field "criteria" hilang: petakan setiap acceptance criteria story ke nomor task yang memenuhinya.';
+        }
+        if ($coverage !== [] && count($coverage) < count($source)) {
+            $violations[] = 'Acceptance criteria story ada '.count($source).' butir, tetapi "criteria" hanya memuat '.count($coverage).'; petakan semua butir.';
+        }
+        $orphans = array_values(array_diff(range(1, max(1, $count)), $usedTasks));
+        if ($coverage !== [] && $orphans !== []) {
+            $violations[] = 'Task nomor '.implode(', ', $orphans).' tidak melayani acceptance criteria mana pun; hapus task itu atau petakan ke criteria yang dilayaninya.';
+        }
+
+        return [$coverage, $violations];
     }
 
     /** Prompt perbaikan: kirim ulang aturan + daftar pelanggaran yang harus dibetulkan. */
@@ -363,8 +432,8 @@ class BreakdownExecutionJob implements ShouldQueue
     /** @return array<int, array{title:string,description:string,assignee:string,files:array}> */
     /**
      * @param  array<int, array<string, mixed>>  $fallback  task percobaan sebelumnya;
-     *         dipakai mengisi field yang hilang pada jawaban perbaikan (SM kadang
-     *         hanya mengirim sebagian objek, dan run sebelumnya mati karenanya).
+     *                                                      dipakai mengisi field yang hilang pada jawaban perbaikan (SM kadang
+     *                                                      hanya mengirim sebagian objek, dan run sebelumnya mati karenanya).
      */
     private function validatedTasks(string $raw, array $fallback = []): array
     {

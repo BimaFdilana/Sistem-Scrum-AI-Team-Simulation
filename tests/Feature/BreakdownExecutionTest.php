@@ -101,7 +101,7 @@ class BreakdownExecutionTest extends TestCase
 
     private function tasksJson(): string
     {
-        return json_encode(['tasks' => [
+        return $this->withCriteria(['tasks' => [
             ['title' => 'Tambah tombol', 'description' => 'Buat komponen tombol.', 'assignee' => 'frontend-developer', 'files' => ['resources/js/back-to-top.js']],
         ]]);
     }
@@ -180,14 +180,14 @@ class BreakdownExecutionTest extends TestCase
         ]);
         $run = $this->makeRun($root);
 
-        $broken = json_encode(['tasks' => [[
+        $broken = $this->withCriteria(['tasks' => [[
             'title' => 'Tambahkan tanggal pada daftar pesanan',
             'description' => 'KERJAKAN: ubah controller. FILE: app/Http/Controllers/OrderController.php. HASIL: daftar menampilkan tanggal. SELESAI BILA: setiap baris menampilkan tanggal.',
             'assignee' => 'backend-developer',
             'files' => ['app/Http/Controllers/OrderController.php'],
         ]]]);
 
-        $fixed = json_encode(['tasks' => [[
+        $fixed = $this->withCriteria(['tasks' => [[
             'title' => 'Tambahkan tanggal pada daftar pesanan',
             'description' => 'KERJAKAN: kirim tanggal terformat dari controller dan render di view. FILE: app/Http/Controllers/TransaksiController.php, resources/views/modul_admin/transaksi/index.blade.php. HASIL: daftar menampilkan tanggal. SELESAI BILA: setiap baris menampilkan tanggal.',
             'assignee' => 'backend-developer',
@@ -226,7 +226,7 @@ class BreakdownExecutionTest extends TestCase
         $root = $this->workspaceWith(['app/Http/Controllers/TransaksiController.php']);
         $run = $this->makeRun($root);
 
-        $bad = json_encode(['tasks' => [[
+        $bad = $this->withCriteria(['tasks' => [[
             'title' => 'Tambahkan tanggal pada daftar pesanan',
             'description' => 'KERJAKAN: ubah controller. FILE: app/Http/Controllers/OrderController.php. HASIL: data tersedia. SELESAI BILA: field tanggal terisi.',
             'assignee' => 'backend-developer',
@@ -254,7 +254,7 @@ class BreakdownExecutionTest extends TestCase
         $root = $this->workspaceWith(['app/Http/Controllers/TransaksiController.php']);
         $run = $this->makeRun($root);
 
-        $answers = json_encode(['tasks' => [[
+        $answers = $this->withCriteria(['tasks' => [[
             'title' => 'Kirim tanggal terformat dari controller',
             'description' => 'KERJAKAN: pakai helper tanggal di controller. FILE: app/Http/Controllers/TransaksiController.php. HASIL: setiap baris membawa field tanggal terformat. SELESAI BILA: field tanggal terisi untuk data valid.',
             'assignee' => 'backend-developer',
@@ -276,12 +276,12 @@ class BreakdownExecutionTest extends TestCase
         $root = $this->workspaceWith(['resources/views/customer/transaksi/index.blade.php']);
         $run = $this->makeRun($root);
 
-        $incomplete = json_encode(['tasks' => [[
+        $incomplete = $this->withCriteria(['tasks' => [[
             'title' => 'Tambahkan kolom tanggal pada daftar pesanan customer',
             'description' => 'KERJAKAN: tambah kolom. FILE: resources/views/customer/transaksi/index.blade.php. HASIL: tanggal tampil. SELESAI BILA: tanggal tampil.',
         ]]]);
 
-        $complete = json_encode(['tasks' => [[
+        $complete = $this->withCriteria(['tasks' => [[
             'title' => 'Tambahkan kolom tanggal pada daftar pesanan customer',
             'description' => 'KERJAKAN: tambah kolom. FILE: resources/views/customer/transaksi/index.blade.php. HASIL: tanggal tampil. SELESAI BILA: tanggal tampil.',
             'assignee' => 'frontend-developer',
@@ -301,5 +301,102 @@ class BreakdownExecutionTest extends TestCase
         $this->assertSame('AWAITING_PERMISSION', $run->fresh()->status);
         $this->assertStringContainsString('KEEMPAT field', $prompts[1]);
         $this->assertSame(1, $run->tasks()->count());
+    }
+
+    private function oneTask(): array
+    {
+        return [[
+            'title' => 'Kirim tanggal terformat dari controller',
+            'description' => 'KERJAKAN: pakai helper tanggal. FILE: app/Http/Controllers/TransaksiController.php. HASIL: field tanggal. SELESAI BILA: field tanggal terisi.',
+            'assignee' => 'backend-developer',
+            'files' => ['app/Http/Controllers/TransaksiController.php'],
+        ]];
+    }
+
+    public function test_missing_criteria_mapping_is_repaired_and_coverage_is_stored(): void
+    {
+        $root = $this->workspaceWith(['app/Http/Controllers/TransaksiController.php']);
+        $run = $this->makeRun($root);
+        $noCriteria = json_encode(['tasks' => $this->oneTask()]);
+        $complete = json_encode(['tasks' => $this->oneTask(), 'criteria' => [
+            ['criterion' => 'Tombol muncul setelah scroll.', 'tasks' => [1]],
+            ['criterion' => 'Klik menggulir halus ke atas.', 'tasks' => [1]],
+        ]]);
+
+        $prompts = [];
+        $fake = Mockery::mock(HermesClient::class);
+        $fake->shouldReceive('sendMessage')->twice()->andReturnUsing(function (string $prompt) use (&$prompts, $noCriteria, $complete) {
+            $prompts[] = $prompt;
+
+            return count($prompts) === 1 ? $noCriteria : $complete;
+        });
+
+        (new BreakdownExecutionJob($run->id))->handle($fake, app(ChatDisclosurePolicy::class));
+
+        $this->assertSame('AWAITING_PERMISSION', $run->fresh()->status);
+        $this->assertStringContainsString('Field "criteria" hilang', $prompts[1]);
+        $payload = PermissionRequest::query()->latest('id')->firstOrFail()->payload;
+        $this->assertCount(2, $payload['coverage']);
+        $this->assertSame([1], $payload['coverage'][0]['tasks']);
+    }
+
+    public function test_plan_with_task_serving_no_criterion_is_rejected(): void
+    {
+        $root = $this->workspaceWith(['app/Http/Controllers/TransaksiController.php']);
+        $run = $this->makeRun($root);
+        $tasks = array_merge($this->oneTask(), [[
+            'title' => 'Ubah hal lain yang tidak diminta',
+            'description' => 'KERJAKAN: ubah. FILE: app/Http/Controllers/TransaksiController.php. HASIL: x. SELESAI BILA: x.',
+            'assignee' => 'backend-developer',
+            'files' => ['app/Http/Controllers/TransaksiController.php'],
+        ]]);
+        $orphan = json_encode(['tasks' => $tasks, 'criteria' => [
+            ['criterion' => 'Tombol muncul setelah scroll.', 'tasks' => [1]],
+            ['criterion' => 'Klik menggulir halus ke atas.', 'tasks' => [1]],
+        ]]);
+
+        $fake = Mockery::mock(HermesClient::class);
+        $fake->shouldReceive('sendMessage')->times(3)->andReturn($orphan);
+
+        try {
+            (new BreakdownExecutionJob($run->id))->handle($fake, app(ChatDisclosurePolicy::class));
+            $this->fail('Task yang tidak melayani criteria mana pun harus ditolak.');
+        } catch (\Throwable $exception) {
+            $this->assertStringContainsString('Task nomor 2', $exception->getMessage());
+        }
+
+        $this->assertSame('FAILED', $run->fresh()->status);
+    }
+
+    public function test_plan_mapping_fewer_criteria_than_story_has_is_rejected(): void
+    {
+        $root = $this->workspaceWith(['app/Http/Controllers/TransaksiController.php']);
+        $run = $this->makeRun($root);
+        $partial = json_encode(['tasks' => $this->oneTask(), 'criteria' => [
+            ['criterion' => 'Tombol muncul setelah scroll.', 'tasks' => [1]],
+        ]]);
+
+        $fake = Mockery::mock(HermesClient::class);
+        $fake->shouldReceive('sendMessage')->times(3)->andReturn($partial);
+
+        try {
+            (new BreakdownExecutionJob($run->id))->handle($fake, app(ChatDisclosurePolicy::class));
+            $this->fail('Pemetaan yang melewatkan butir criteria harus ditolak.');
+        } catch (\Throwable $exception) {
+            $this->assertStringContainsString('hanya memuat 1', $exception->getMessage());
+        }
+    }
+
+    /** JSON breakdown lengkap: tiap criteria dipetakan ke semua task. */
+    private function withCriteria(array $data): string
+    {
+        $ids = $data['tasks'] === [] ? [1] : range(1, count($data['tasks']));
+        $data['criteria'] = [
+            ['criterion' => 'Kriteria 1', 'tasks' => $ids],
+            ['criterion' => 'Kriteria 2', 'tasks' => $ids],
+            ['criterion' => 'Kriteria 3', 'tasks' => $ids],
+        ];
+
+        return json_encode($data);
     }
 }
