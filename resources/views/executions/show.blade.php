@@ -117,13 +117,13 @@
 </section>
 
 @if ($story->isAccepted())
-    <div class="notice-bar"><span class="notice-icon">✓</span><p><strong>Keputusan final PO: {{ $story->acceptanceLabel() }}</strong> ({{ $story->accepted_at?->format('d M Y H:i') }}). Story terkunci.</p></div>
+    <div class="notice-bar"><span class="notice-icon">✓</span><p><strong>Keputusan final PO: {{ $story->acceptanceLabel() }}</strong> ({{ $story->accepted_at?->format('d M Y H:i') }}). {{ $story->isLockedFromExecution() ? 'Story terkunci.' : 'Story bisa dieksekusi ulang dari halaman project.' }}</p></div>
 @elseif ($run->isTerminal())
     <div class="notice-bar"><span class="notice-icon">★</span><p><strong>Eksekusi selesai ({{ str_replace('_', ' ', $run->status) }}).</strong> Beri keputusan final sebagai Product Owner:</p></div>
     <form method="POST" action="{{ route('stories.executions.accept', [$story, $run]) }}" style="display:flex;gap:.5rem;margin-bottom:1rem">
         @csrf
         <button class="button button-primary" type="submit" name="status" value="BERHASIL" onclick="return handleConfirm(event, {title: 'Terima sebagai Berhasil?', message: 'Terima story ini sebagai BERHASIL? Story akan terkunci dari eksekusi ulang.', confirmLabel: 'Ya, terima'})">Terima sebagai Berhasil</button>
-        <button class="button button-danger" type="submit" name="status" value="GAGAL" onclick="return handleConfirm(event, {title: 'Tandai sebagai Gagal?', message: 'Tandai story ini sebagai GAGAL? Story akan terkunci dari eksekusi ulang.', confirmLabel: 'Ya, tandai gagal', danger: true})">Tandai Gagal</button>
+        <button class="button button-danger" type="submit" name="status" value="GAGAL" onclick="return handleConfirm(event, {title: 'Tandai sebagai Gagal?', message: 'Tandai eksekusi ini sebagai GAGAL? Hasilnya tidak digabung ke kode utama, dan story bisa dieksekusi ulang.', confirmLabel: 'Ya, tandai gagal', danger: true})">Tandai Gagal</button>
     </form>
 @endif
 

@@ -63,7 +63,7 @@
                             $total = $run ? $run->tasks->count() : 0;
                             $done = $run ? $run->tasks->whereIn('status', ['APPROVED', 'QA_PENDING'])->count() : 0;
                             $pct = $total > 0 ? (int) round($done / $total * 100) : 0;
-                            $locked = $story->isAccepted();
+                            $locked = $story->isLockedFromExecution();
                             $link = $run && $story->project
                                 ? route('stories.executions.show', [$story, $run])
                                 : route('stories.edit', $story);

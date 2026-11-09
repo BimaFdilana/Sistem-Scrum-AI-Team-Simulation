@@ -25,7 +25,7 @@ class ExecutionController extends Controller
     public function store(Story $story): RedirectResponse
     {
         $story->load('project');
-        if ($story->isAccepted()) {
+        if ($story->isLockedFromExecution()) {
             return back()->withErrors(['execution' => 'Story sudah diterima PO ('.$story->acceptanceLabel().') dan tidak bisa dieksekusi lagi.']);
         }
         if (! $story->estimate_points) {
@@ -43,6 +43,11 @@ class ExecutionController extends Controller
             ->exists();
         if ($active) {
             return back()->withErrors(['execution' => 'Sudah ada eksekusi yang berjalan untuk story ini.']);
+        }
+
+        // Story yang ditandai GAGAL dibuka lagi: keputusan PO berikutnya untuk run baru ini.
+        if ($story->acceptance_status === 'GAGAL') {
+            $story->forceFill(['acceptance_status' => null, 'accepted_at' => null])->save();
         }
 
         $run = ExecutionRun::query()->create([

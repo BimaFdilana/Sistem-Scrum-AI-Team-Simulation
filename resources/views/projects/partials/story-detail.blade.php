@@ -73,7 +73,10 @@
                                 </div>
 
                                 <div class="story-section"><p class="story-section-label">Eksekusi</p>
-                                    @if ($story->isAccepted())
+                                    @if ($story->acceptance_status === 'GAGAL')
+                                        <p class="field-help">Eksekusi sebelumnya ditandai Gagal oleh PO. Story bisa dieksekusi ulang.</p>
+                                    @endif
+                                    @if ($story->isLockedFromExecution())
                                         <p class="story-estimate-final"><strong>Keputusan final PO:</strong> {{ $story->acceptanceLabel() }}</p>
                                         <button class="button button-ghost" type="button" disabled title="Story sudah diterima PO ({{ $story->acceptanceLabel() }}) dan terkunci dari eksekusi ulang">Eksekusi User Story — terkunci</button>
                                         @if ($latestExecution)

@@ -80,6 +80,12 @@ class Story extends Model
         return in_array($this->acceptance_status, ['BERHASIL', 'GAGAL'], true);
     }
 
+    /** Hanya story yang diterima BERHASIL terkunci; story GAGAL boleh dieksekusi ulang. */
+    public function isLockedFromExecution(): bool
+    {
+        return $this->acceptance_status === 'BERHASIL';
+    }
+
     public function acceptanceLabel(): ?string
     {
         return match ($this->acceptance_status) {

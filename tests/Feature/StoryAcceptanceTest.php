@@ -11,6 +11,7 @@ use App\Models\StoryEstimationRun;
 use App\Models\User;
 use App\Support\Demo\DemoServerManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class StoryAcceptanceTest extends TestCase
@@ -68,6 +69,21 @@ class StoryAcceptanceTest extends TestCase
         $this->assertSame(1, ExecutionRun::query()->where('story_id', $story->id)->count());
     }
 
+    public function test_story_marked_gagal_can_be_executed_again_and_is_reopened(): void
+    {
+        [$owner, $project, $story, $run] = $this->makeExecutedStory('COMPLETED');
+        $project->forceFill(['workspace_path' => storage_path('framework/testing')])->save();
+        $story->forceFill(['acceptance_status' => 'GAGAL', 'accepted_at' => now()])->save();
+        Queue::fake();
+
+        $this->actingAs($owner)
+            ->post('/stories/'.$story->id.'/executions')
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame(2, ExecutionRun::query()->where('story_id', $story->id)->count());
+        $this->assertNull($story->fresh()->acceptance_status);
+    }
+
     public function test_accept_requires_terminal_run(): void
     {
         [$owner, $project, $story, $run] = $this->makeExecutedStory('EXECUTING');
@@ -106,13 +122,24 @@ class StoryAcceptanceTest extends TestCase
     public function test_backlog_locks_execution_button_for_accepted_story(): void
     {
         [$owner, $project, $story, $run] = $this->makeExecutedStory('COMPLETED');
-        $story->forceFill(['acceptance_status' => 'GAGAL', 'accepted_at' => now()])->save();
+        $story->forceFill(['acceptance_status' => 'BERHASIL', 'accepted_at' => now()])->save();
 
         $this->actingAs($owner)->get('/projects/'.$project->id)
             ->assertOk()
             ->assertSee('Keputusan final PO:')
-            ->assertSee('Gagal')
+            ->assertSee('Berhasil')
             ->assertSee('Eksekusi User Story — terkunci');
+    }
+
+    public function test_backlog_offers_rerun_for_story_marked_gagal(): void
+    {
+        [$owner, $project, $story, $run] = $this->makeExecutedStory('COMPLETED');
+        $story->forceFill(['acceptance_status' => 'GAGAL', 'accepted_at' => now()])->save();
+
+        $this->actingAs($owner)->get('/projects/'.$project->id)
+            ->assertOk()
+            ->assertSee('Story bisa dieksekusi ulang')
+            ->assertDontSee('Eksekusi User Story — terkunci');
     }
 
     public function test_execution_show_displays_accept_buttons_for_terminal_run(): void
