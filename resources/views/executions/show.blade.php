@@ -66,8 +66,8 @@
             · <span class="exec-chip {{ $run->mode === 'direct' ? 'exec-chip--ok' : '' }}">{{ $run->mode === 'direct' ? 'direct · sekuensial' : 'worktree · paralel' }}</span>
             · <span class="exec-chip">{{ ($run->qa_mode ?? 'per_task') === 'batch' ? 'QA sekali di akhir' : 'QA per task' }}</span>
         </p>
-        @if ((int) $run->qa_rounds > 0)
-            <div class="notice-bar"><span class="notice-icon">!</span><p>QA sudah memberi perbaikan sekali dan run ditutup tanpa review kedua. Periksa demo sebelum menerima.</p></div>
+        @if ((int) $run->qa_rounds > 0 && $run->status === 'COMPLETED')
+            <div class="notice-bar"><span class="notice-icon">✓</span><p>QA meminta {{ (int) $run->qa_rounds }} putaran perbaikan; hasil akhirnya sudah dinilai ulang dan disetujui QA.</p></div>
         @endif
     </div>
     <a class="button button-ghost" href="{{ route('projects.show', $story->project) }}">← Kembali</a>
