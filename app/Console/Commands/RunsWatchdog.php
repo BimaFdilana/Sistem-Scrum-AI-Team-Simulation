@@ -89,6 +89,18 @@ class RunsWatchdog extends Command
             if ($run->tasks()->whereIn('status', ['IN_PROGRESS', 'IN_REVIEW'])->exists()) {
                 continue;
             }
+
+            // QA batch yang job-nya mati: run diam di QA_REVIEW dengan task QA_PENDING.
+            // Lanjutkan dari NEEDS_PO mengulang QA (kode QA_ ditangani resumeFromPo).
+            if ($run->status === 'QA_REVIEW' && $run->tasks()->where('status', 'QA_PENDING')->exists()) {
+                $this->line('run #'.$run->id.' QA batch tidak selesai');
+                if (! $dry) {
+                    $this->handOverToPo($run, null, 'Review QA batch tidak selesai dalam '.($minutes * 2).' menit.', 'QA_STALLED');
+                    $changed++;
+                }
+
+                continue;
+            }
             $waiting = $run->tasks()->whereIn('status', ['PENDING', 'REVISION'])->count();
             if ($waiting === 0) {
                 continue;
@@ -118,10 +130,10 @@ class RunsWatchdog extends Command
         return self::SUCCESS;
     }
 
-    private function handOverToPo(ExecutionRun $run, ?ExecutionTask $task, string $reason): void
+    private function handOverToPo(ExecutionRun $run, ?ExecutionTask $task, string $reason, string $code = 'WATCHDOG_STALLED'): void
     {
         $moved = $run->transitionTo(ExecutionRun::NEEDS_PO, ['EXECUTING', 'REVIEWING', 'QA_REVIEW'], [
-            'error_code' => 'WATCHDOG_STALLED',
+            'error_code' => $code,
             'summary' => $reason.' Run dihentikan agar tidak menggantung; Lanjutkan atau tandai Gagal.',
         ]);
 

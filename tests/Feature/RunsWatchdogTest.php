@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\BatchReviewExecutionJob;
 use App\Jobs\ExecuteExecutionTaskJob;
 use App\Models\ExecutionRun;
 use App\Models\Project;
@@ -126,5 +127,23 @@ class RunsWatchdogTest extends TestCase
 
         $this->assertSame('IN_PROGRESS', $task->fresh()->status);
         $this->assertSame(0, (int) $task->fresh()->attempt_seq);
+    }
+
+    public function test_batch_qa_that_never_finished_hands_over_and_resume_reruns_qa(): void
+    {
+        Queue::fake();
+        [, $run] = $this->runWithStalledTask();
+        $run->tasks()->update(['status' => 'QA_PENDING', 'last_progress_at' => now()->subHours(3)]);
+        ExecutionRun::query()->whereKey($run->id)->update(['status' => 'QA_REVIEW', 'qa_started_at' => now()->subHours(3), 'updated_at' => now()->subHours(3)]);
+
+        $this->artisan('runs:watchdog')->assertSuccessful();
+
+        $fresh = $run->fresh();
+        $this->assertSame('NEEDS_PO', $fresh->status);
+        $this->assertSame('QA_STALLED', $fresh->error_code);
+
+        $this->assertTrue($fresh->resumeFromPo());
+        $this->assertSame('QA_REVIEW', $run->fresh()->status);
+        Queue::assertPushed(BatchReviewExecutionJob::class);
     }
 }

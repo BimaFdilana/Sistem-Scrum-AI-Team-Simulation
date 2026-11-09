@@ -11,10 +11,10 @@ use App\Services\AgentProfileClient;
 use App\Services\AgentToolRunner;
 use App\Services\AiGateway;
 use App\Services\KanbanClient;
-use App\Support\Execution\BatchQa;
 use App\Support\Execution\DirectWorkspace;
 use App\Support\Execution\ExecutorPlanner;
 use App\Support\Execution\OpenCodeRunner;
+use App\Support\Execution\TaskCompletion;
 use App\Support\Workspace\PatchApplier;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Bus\Queueable;
@@ -280,17 +280,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // kosong) tetap memakai HEAD seperti dulu.
             $diffSnapshot = $worktrees->diff($baseline, $branch, $task->chain_base ?: 'HEAD');
 
-            // QA batch: task berhenti di QA_PENDING, dinilai sekali di akhir.
-            if (($run->qa_mode ?: 'per_task') === 'batch') {
-                $task->forceFill(['diff_snapshot' => $diffSnapshot])->save();
-                app(BatchQa::class)->taskReady($run, $task);
-
-                return;
-            }
-
-            $task->forceFill(['status' => 'IN_REVIEW', 'diff_snapshot' => $diffSnapshot])->save();
-            $run->forceFill(['status' => 'REVIEWING'])->save();
-            ReviewExecutionTaskJob::dispatch($run->id, $task->id);
+            app(TaskCompletion::class)->submitForQa($run, $task, $diffSnapshot);
         } catch (Throwable $exception) {
             // Seperti di ReviewExecutionTaskJob: kegagalan AI sementara
             // dilepas kembali ke antrean (task dikembalikan ke status
@@ -716,12 +706,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             'metadata' => ['files' => $files, 'driver' => 'opencode', 'revision' => $task->revision_count],
         ]);
 
-        $task->forceFill([
-            'status' => 'IN_REVIEW',
-            'diff_snapshot' => $worktrees->diff($baseline, $task->branch, $task->chain_base ?: 'HEAD'),
-        ])->save();
-        $run->forceFill(['status' => 'REVIEWING'])->save();
-        ReviewExecutionTaskJob::dispatch($run->id, $task->id);
+        app(TaskCompletion::class)->submitForQa($run, $task, $worktrees->diff($baseline, $task->branch, $task->chain_base ?: 'HEAD'));
     }
 
     /**

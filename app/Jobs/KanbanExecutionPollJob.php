@@ -6,12 +6,14 @@ use App\Models\ExecutionRun;
 use App\Models\ExecutionTask;
 use App\Models\Notification;
 use App\Services\KanbanClient;
+use App\Support\Execution\TaskCompletion;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Carbon;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 use Throwable;
@@ -147,9 +149,7 @@ class KanbanExecutionPollJob implements ShouldQueue
             'content' => $summary.' ('.count($files).' file: '.implode(', ', array_slice($files, 0, 5)).(count($files) > 5 ? ', ...' : '').')',
             'metadata' => ['files' => $files, 'revision' => $task->revision_count, 'kanban_board' => $card['board'], 'kanban_task_id' => $card['id'], 'kanban_status' => 'done'],
         ]);
-        $task->forceFill(['status' => 'IN_REVIEW', 'diff_snapshot' => $worktrees->diff($baseline, $branch, $task->chain_base ?: 'HEAD')])->save();
-        $run->forceFill(['status' => 'REVIEWING'])->save();
-        ReviewExecutionTaskJob::dispatch($run->id, $task->id);
+        app(TaskCompletion::class)->submitForQa($run, $task, $worktrees->diff($baseline, $branch, $task->chain_base ?: 'HEAD'));
     }
 
     /** Job kehabisan tries: jangan biarkan task menggantung IN_PROGRESS. */
@@ -234,7 +234,7 @@ class KanbanExecutionPollJob implements ShouldQueue
                 continue;
             }
             try {
-                $moment = \Illuminate\Support\Carbon::parse($candidate);
+                $moment = Carbon::parse($candidate);
             } catch (Throwable) {
                 continue;
             }
