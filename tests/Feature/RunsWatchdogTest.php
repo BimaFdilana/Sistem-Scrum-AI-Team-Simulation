@@ -5,8 +5,11 @@ namespace Tests\Feature;
 use App\Jobs\ExecuteExecutionTaskJob;
 use App\Models\ExecutionRun;
 use App\Models\Project;
+use App\Models\RepairOrder;
 use App\Models\Story;
 use App\Models\User;
+use App\Services\AgentToolRunner;
+use App\Support\Workspace\WorktreeManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -99,5 +102,57 @@ class RunsWatchdogTest extends TestCase
 
         $this->actingAs($user)->post(route('stories.executions.accept', [$story, $run]), ['status' => 'GAGAL']);
         $this->assertSame('GAGAL', $story->fresh()->acceptance_status);
+    }
+
+    public function test_stale_job_cannot_overwrite_needs_po_status(): void
+    {
+        Queue::fake();
+        [, $run] = $this->runWithStalledTask(stallCount: 2);
+        $stale = ExecutionRun::query()->find($run->id); // dimuat sebelum watchdog berjalan
+        $this->artisan('runs:watchdog');
+
+        $stale->forceFill(['status' => 'REVIEWING'])->save();
+
+        $this->assertSame('NEEDS_PO', $run->fresh()->status);
+    }
+
+    public function test_po_can_resume_repair_order_run(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create();
+        $project = Project::query()->create([
+            'name' => 'RO', 'project_type' => 'NEW_PROJECT', 'stack' => 'Laravel', 'status' => 'BASELINE_READY',
+        ]);
+        $order = RepairOrder::query()->create([
+            'requested_by' => $owner->id, 'project_id' => $project->id, 'title' => 'Perbaiki', 'summary' => 'x', 'original_message' => 'x', 'status' => 'EXECUTING',
+        ]);
+        $run = ExecutionRun::query()->create([
+            'repair_order_id' => $order->id, 'requested_by' => $owner->id, 'status' => 'EXECUTING',
+        ]);
+        $task = $run->tasks()->create([
+            'title' => 'T', 'description' => 'D', 'assignee' => 'backend-developer', 'status' => 'IN_PROGRESS',
+            'stall_count' => 2, 'last_progress_at' => now()->subHour(),
+        ]);
+        $this->artisan('runs:watchdog');
+        $this->assertSame('NEEDS_PO', $run->fresh()->status);
+
+        $this->actingAs($owner)->post(route('repair-orders.executions.resume', [$order, $run]))->assertRedirect();
+
+        $this->assertSame('EXECUTING', $run->fresh()->status);
+        $this->assertSame('PENDING', $task->fresh()->status);
+        Queue::assertPushed(ExecuteExecutionTaskJob::class);
+    }
+
+    public function test_duplicate_job_for_already_claimed_task_does_nothing(): void
+    {
+        [, $run, $task] = $this->runWithStalledTask(); // sudah IN_PROGRESS
+
+        (new ExecuteExecutionTaskJob($run->id, $task->id))->handle(
+            app(WorktreeManager::class),
+            app(AgentToolRunner::class),
+        );
+
+        $this->assertSame('IN_PROGRESS', $task->fresh()->status);
+        $this->assertSame(0, (int) $task->fresh()->attempt_seq);
     }
 }

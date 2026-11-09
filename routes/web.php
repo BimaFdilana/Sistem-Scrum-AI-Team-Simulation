@@ -88,6 +88,7 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/repair-orders/{repairOrder}/run', [RepairOrderController::class, 'run'])->middleware('throttle:6,1')->name('repair-orders.run');
     Route::post('/repair-orders/{repairOrder}/retry', [RepairOrderController::class, 'retry'])->middleware('throttle:6,1')->name('repair-orders.retry');
     Route::get('/repair-orders/{repairOrder}/executions/{run}', [RepairOrderController::class, 'showExecution'])->name('repair-orders.executions.show');
+    Route::post('/repair-orders/{repairOrder}/executions/{run}/resume', [RepairOrderController::class, 'resume'])->middleware('throttle:6,1')->name('repair-orders.executions.resume');
     Route::post('/repair-orders/{repairOrder}/executions/{run}/accept', [RepairOrderController::class, 'accept'])->name('repair-orders.executions.accept');
     // Halaman "Accepted" dilebur ke halaman eksekusi: izin disetujui di sana.
     Route::get('/accepted', fn () => redirect()->route('dashboard'))->name('accepted.index');

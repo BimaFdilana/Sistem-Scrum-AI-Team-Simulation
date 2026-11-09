@@ -2,21 +2,27 @@
 
 namespace App\Jobs;
 
+use App\Exceptions\AiUnavailableException;
 use App\Models\ExecutionRun;
 use App\Models\ExecutionTask;
-use App\Models\PermissionRequest;
 use App\Models\Notification;
+use App\Models\PermissionRequest;
 use App\Services\AgentProfileClient;
 use App\Services\AgentToolRunner;
+use App\Services\AiGateway;
 use App\Services\KanbanClient;
+use App\Support\Execution\BatchQa;
+use App\Support\Execution\DirectWorkspace;
+use App\Support\Execution\ExecutorPlanner;
+use App\Support\Execution\OpenCodeRunner;
 use App\Support\Workspace\PatchApplier;
-use App\Support\Workspace\PatchValidationException;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
 
@@ -65,8 +71,16 @@ class ExecuteExecutionTaskJob implements ShouldQueue
 
         // Pelaksana ditentukan otomatis (lihat ExecutorPlanner): kebijakan run,
         // kill-switch, peran, dan override fallback.
-        $executor = app(\App\Support\Execution\ExecutorPlanner::class)->forTask($run, $task);
-        $task->forceFill(['status' => 'IN_PROGRESS', 'executor' => $executor])->save();
+        $executor = app(ExecutorPlanner::class)->forTask($run, $task);
+        // Klaim atomik + heartbeat: dua job untuk task yang sama (mis. dikirim ulang
+        // watchdog) tidak boleh sama-sama mengerjakannya.
+        $claimed = ExecutionTask::query()->whereKey($task->id)
+            ->whereIn('status', ['PENDING', 'REVISION'])
+            ->update(['status' => 'IN_PROGRESS', 'executor' => $executor, 'last_progress_at' => now()]);
+        if ($claimed === 0) {
+            return;
+        }
+        $task->refresh();
 
         try {
             $worktrees->ensureRepo($baseline);
@@ -76,7 +90,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             $directMode = ($run->mode ?: config('execution.mode', 'worktree')) === 'direct';
 
             if ($directMode) {
-                $direct = app(\App\Support\Execution\DirectWorkspace::class);
+                $direct = app(DirectWorkspace::class);
                 $direct->assertClean($project);
 
                 $attempt = max(1, (int) $task->attempt_seq + 1);
@@ -91,53 +105,53 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                     'attempt_seq' => $attempt,
                 ])->save();
             } else {
-            // Satu worktree per task+attempt (wt-{run}-{task}-{attempt}):
-            // percobaan revisi TIDAK memakai ulang worktree percobaan
-            // sebelumnya — ia dibuat dari cabang percobaan sebelumnya,
-            // sehingga file hasil percobaan lama diwarisi lewat git,
-            // tapi tidak ada lagi tabrakan nama cabang seperti #6.
-            // attempt: PENDING -> 1; REVISION -> revision_count+1
-            // (minimal 2, karena status REVISION selalu berarti sudah
-            // ada percobaan sebelumnya).
-            $attempt = max(
-                (int) $task->attempt_seq + 1,
-                $originalStatus === 'REVISION' ? max(2, $task->revision_count + 1) : 1
-            );
-            $branch = 'wt-'.$run->id.'-'.$task->id.'-'.$attempt;
-            // Percobaan harus unik: cabang yang sudah ada berarti attempt ini
-            // pernah dipakai (mis. PO mereset revision_count setelah task
-            // diblokir), dan kartu kanban dijodohkan lewat nama attempt —
-            // memakai attempt lama akan mengambil kartu lama yang sudah
-            // blocked/done sehingga run langsung gagal. Majukan attempt
-            // sampai menemukan cabang yang belum ada.
-            while ($worktrees->branchExists($baseline, $branch)) {
-                $attempt++;
+                // Satu worktree per task+attempt (wt-{run}-{task}-{attempt}):
+                // percobaan revisi TIDAK memakai ulang worktree percobaan
+                // sebelumnya — ia dibuat dari cabang percobaan sebelumnya,
+                // sehingga file hasil percobaan lama diwarisi lewat git,
+                // tapi tidak ada lagi tabrakan nama cabang seperti #6.
+                // attempt: PENDING -> 1; REVISION -> revision_count+1
+                // (minimal 2, karena status REVISION selalu berarti sudah
+                // ada percobaan sebelumnya).
+                $attempt = max(
+                    (int) $task->attempt_seq + 1,
+                    $originalStatus === 'REVISION' ? max(2, $task->revision_count + 1) : 1
+                );
                 $branch = 'wt-'.$run->id.'-'.$task->id.'-'.$attempt;
-            }
-            // Model berurutan (keputusan Bima 2026-10-31): worktree task
-            // DIRANTAI — attempt pertama dibuat dari cabang task
-            // sebelumnya yang sudah QA-APPROVED (bukan selalu dari
-            // baseline), agar agen benar-benar MELIHAT file hasil task
-            // sebelumnya, bukan hanya membacanya di prompt. Revisi tetap
-            // bercabang dari attempt sebelumnya (rantai task itu sendiri),
-            // dan chain base-nya tetap basis attempt pertama.
-            if ($attempt > 1) {
-                // Ambil attempt terdekat yang cabangnya benar-benar ada:
-                // setelah attempt dimajukan, attempt-1 bisa saja tidak ada
-                // sehingga rantai perubahan hilang tanpa pesan.
-                $previous = $attempt - 1;
-                while ($previous >= 1 && ! $worktrees->branchExists($baseline, 'wt-'.$run->id.'-'.$task->id.'-'.$previous)) {
-                    $previous--;
+                // Percobaan harus unik: cabang yang sudah ada berarti attempt ini
+                // pernah dipakai (mis. PO mereset revision_count setelah task
+                // diblokir), dan kartu kanban dijodohkan lewat nama attempt —
+                // memakai attempt lama akan mengambil kartu lama yang sudah
+                // blocked/done sehingga run langsung gagal. Majukan attempt
+                // sampai menemukan cabang yang belum ada.
+                while ($worktrees->branchExists($baseline, $branch)) {
+                    $attempt++;
+                    $branch = 'wt-'.$run->id.'-'.$task->id.'-'.$attempt;
                 }
-                $fromBranch = $previous >= 1 ? 'wt-'.$run->id.'-'.$task->id.'-'.$previous : null;
-                $chainBase = $task->chain_base;
-            } else {
-                $predecessor = $this->previousApprovedTask($run, $task);
-                $chainBase = $predecessor?->branch ?: null;
-                $fromBranch = $chainBase;
-            }
-            $worktree = $worktrees->create($baseline, $branch, $fromBranch);
-            $task->forceFill(['worktree_path' => $worktree, 'branch' => $branch, 'chain_base' => $chainBase, 'attempt_seq' => $attempt])->save();
+                // Model berurutan (keputusan Bima 2026-10-31): worktree task
+                // DIRANTAI — attempt pertama dibuat dari cabang task
+                // sebelumnya yang sudah QA-APPROVED (bukan selalu dari
+                // baseline), agar agen benar-benar MELIHAT file hasil task
+                // sebelumnya, bukan hanya membacanya di prompt. Revisi tetap
+                // bercabang dari attempt sebelumnya (rantai task itu sendiri),
+                // dan chain base-nya tetap basis attempt pertama.
+                if ($attempt > 1) {
+                    // Ambil attempt terdekat yang cabangnya benar-benar ada:
+                    // setelah attempt dimajukan, attempt-1 bisa saja tidak ada
+                    // sehingga rantai perubahan hilang tanpa pesan.
+                    $previous = $attempt - 1;
+                    while ($previous >= 1 && ! $worktrees->branchExists($baseline, 'wt-'.$run->id.'-'.$task->id.'-'.$previous)) {
+                        $previous--;
+                    }
+                    $fromBranch = $previous >= 1 ? 'wt-'.$run->id.'-'.$task->id.'-'.$previous : null;
+                    $chainBase = $task->chain_base;
+                } else {
+                    $predecessor = $this->previousApprovedTask($run, $task);
+                    $chainBase = $predecessor?->branch ?: null;
+                    $fromBranch = $chainBase;
+                }
+                $worktree = $worktrees->create($baseline, $branch, $fromBranch);
+                $task->forceFill(['worktree_path' => $worktree, 'branch' => $branch, 'chain_base' => $chainBase, 'attempt_seq' => $attempt])->save();
             }
 
             $useHermes = config('ai.execution_driver') === 'hermes';
@@ -184,7 +198,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // Jalur OpenCode (bila peran ini diaktifkan di OPENCODE_ROLES):
             // coding agent eksternal mengedit worktree, lalu Laravel tetap
             // melakukan commit + QA + merge seperti biasa.
-            if ($executor === \App\Support\Execution\ExecutorPlanner::OPENCODE) {
+            if ($executor === ExecutorPlanner::OPENCODE) {
                 $this->executeWithOpenCode($run, $task, $worktree, $prompt, $worktrees, $baseline);
 
                 return;
@@ -270,7 +284,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // QA batch: task berhenti di QA_PENDING, dinilai sekali di akhir.
             if (($run->qa_mode ?: 'per_task') === 'batch') {
                 $task->forceFill(['diff_snapshot' => $diffSnapshot])->save();
-                app(\App\Support\Execution\BatchQa::class)->taskReady($run, $task);
+                app(BatchQa::class)->taskReady($run, $task);
 
                 return;
             }
@@ -285,12 +299,12 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // failRun. Worktree/cabang task dipertahankan untuk
             // percobaan berikutnya (create() sudah aman untuk cabang
             // yang ada sejak perbaikan #6).
-            if ($exception instanceof \App\Exceptions\AiUnavailableException
-                && \App\Services\AiGateway::isTransient($exception->errorCode)
-                && $this->attempts() < \App\Services\AiGateway::MAX_QUEUE_ATTEMPTS) {
+            if ($exception instanceof AiUnavailableException
+                && AiGateway::isTransient($exception->errorCode)
+                && $this->attempts() < AiGateway::MAX_QUEUE_ATTEMPTS) {
                 $task->forceFill(['status' => $originalStatus, 'last_error' => $exception->errorCode])->save();
-                \App\Services\AiGateway::logFailure($this->runId, $this->taskId, 'ExecuteExecutionTaskJob', $exception, $this->attempts(), true);
-                $this->release(\App\Services\AiGateway::releaseDelay($this->attempts(), $exception->retryAfter));
+                AiGateway::logFailure($this->runId, $this->taskId, 'ExecuteExecutionTaskJob', $exception, $this->attempts(), true);
+                $this->release(AiGateway::releaseDelay($this->attempts(), $exception->retryAfter));
 
                 return;
             }
@@ -521,7 +535,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // Kegagalan eksekusi US-01 #3 (13:42:12 UTC) justru jalur ini:
             // RuntimeException tanpa payload tercatat, sehingga bentuk
             // jawaban agent tidak bisa didiagnosis. Catat selalu.
-            \Illuminate\Support\Facades\Log::warning('Execution patch failed validation', [
+            Log::warning('Execution patch failed validation', [
                 'execution_run_id' => $this->runId,
                 'execution_task_id' => $this->taskId,
                 'raw_excerpt' => mb_substr($raw, 0, 2000),
@@ -535,7 +549,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // Catat potongan jawaban gagal — kegagalan eksekusi US-01 #2
             // dulu tidak bisa didiagnosis karena payload mentah tidak
             // tercatat di mana pun.
-            \Illuminate\Support\Facades\Log::warning('Execution patch failed validation', [
+            Log::warning('Execution patch failed validation', [
                 'execution_run_id' => $this->runId,
                 'execution_task_id' => $this->taskId,
                 'raw_excerpt' => mb_substr($raw, 0, 2000),
@@ -544,7 +558,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             throw $exception;
         }
         if (! is_array($data) || ! is_array($data['files'] ?? null) || ! is_string($data['summary'] ?? null)) {
-            \Illuminate\Support\Facades\Log::warning('Execution patch failed validation', [
+            Log::warning('Execution patch failed validation', [
                 'execution_run_id' => $this->runId,
                 'execution_task_id' => $this->taskId,
                 'raw_excerpt' => mb_substr($raw, 0, 2000),
@@ -637,7 +651,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             'content' => 'Task #'.$task->id.' dikirim ke OpenCode (agen coding eksternal).',
         ]);
 
-        $result = app(\App\Support\Execution\OpenCodeRunner::class)->run(
+        $result = app(OpenCodeRunner::class)->run(
             $worktree,
             $prompt."\n\n".$this->openCodeRules()
         );
@@ -650,7 +664,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
         if (! $result['ok'] && str_contains(strtolower($result['output']), 'content filter')) {
             $fallbackModel = (string) config('ai.opencode.fallback_model', '');
             if ($fallbackModel !== '') {
-                $retry = app(\App\Support\Execution\OpenCodeRunner::class)->run($worktree, $prompt, 0, $fallbackModel);
+                $retry = app(OpenCodeRunner::class)->run($worktree, $prompt, 0, $fallbackModel);
                 if ($retry['ok']) {
                     $result = $retry;
                 }
@@ -675,10 +689,10 @@ class ExecuteExecutionTaskJob implements ShouldQueue
         // menghabiskan langkah untuk eksplorasi (php artisan tinker) lalu
         // selesai tanpa menulis file, sehingga task view jatuh ke Hermes.
         if ($files === []) {
-            $strict = "TULIS FILE SEKARANG. Jangan menjalankan php artisan, tinker, composer, curl, atau tes apa pun. "
+            $strict = 'TULIS FILE SEKARANG. Jangan menjalankan php artisan, tinker, composer, curl, atau tes apa pun. '
                 ."Jangan membaca lebih dari 3 file. Gunakan tool write/edit pada file target yang disebut di FILE TERKAIT.\n\n".$prompt;
 
-            $retry = app(\App\Support\Execution\OpenCodeRunner::class)->run($worktree, $strict."\n\n".$this->openCodeRules());
+            $retry = app(OpenCodeRunner::class)->run($worktree, $strict."\n\n".$this->openCodeRules());
             if ($retry['ok']) {
                 $files = $worktrees->dirtyFiles($worktree);
             }
@@ -709,7 +723,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             'diff_snapshot' => $worktrees->diff($baseline, $task->branch, $task->chain_base ?: 'HEAD'),
         ])->save();
         $run->forceFill(['status' => 'REVIEWING'])->save();
-        \App\Jobs\ReviewExecutionTaskJob::dispatch($run->id, $task->id);
+        ReviewExecutionTaskJob::dispatch($run->id, $task->id);
     }
 
     /**
@@ -749,7 +763,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             return false;
         }
 
-        app(\App\Support\Execution\ExecutorPlanner::class)->fallbackTo($task, 'hermes');
+        app(ExecutorPlanner::class)->fallbackTo($task, 'hermes');
         $task->forceFill([
             'status' => 'REVISION',
             'last_error' => 'OPENCODE_FALLBACK',

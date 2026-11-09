@@ -153,6 +153,18 @@ class RepairOrderController extends Controller
         ]);
     }
 
+    /** PO melanjutkan run yang dihentikan watchdog (NEEDS_PO). */
+    public function resume(RepairOrder $repairOrder, ExecutionRun $run): RedirectResponse
+    {
+        abort_unless((int) $run->repair_order_id === (int) $repairOrder->id, 404);
+
+        if (! $run->resumeFromPo()) {
+            return back()->withErrors(['acceptance' => 'Eksekusi ini tidak sedang menunggu keputusan PO.']);
+        }
+
+        return back()->with('status', 'Eksekusi dilanjutkan.');
+    }
+
     /** Keputusan final PO: Berhasil / Gagal. Mengunci perintah dari eksekusi ulang. */
     public function accept(Request $request, RepairOrder $repairOrder, ExecutionRun $run): RedirectResponse
     {
@@ -164,7 +176,8 @@ class RepairOrderController extends Controller
         if ($repairOrder->isAccepted()) {
             return back()->withErrors(['acceptance' => 'Perintah sudah diterima sebelumnya.']);
         }
-        if (! $run->isTerminal()) {
+        $closableByPo = $run->isTerminal() || ($run->isWaitingForPo() && $status === 'GAGAL');
+        if (! $closableByPo) {
             return back()->withErrors(['acceptance' => 'Keputusan final hanya untuk eksekusi yang sudah selesai atau diblokir.']);
         }
 

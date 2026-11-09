@@ -24,7 +24,7 @@ class RunsWatchdog extends Command
     /** Berapa kali sebuah task dijalankan ulang otomatis sebelum meminta PO. */
     public const MAX_AUTO_RESUME = 2;
 
-    protected $signature = 'runs:watchdog {--minutes=20} {--dry-run}';
+    protected $signature = 'runs:watchdog {--minutes=35} {--dry-run}';
 
     protected $description = 'Jalankan ulang task macet, atau hentikan run ke NEEDS_PO bila tetap macet';
 

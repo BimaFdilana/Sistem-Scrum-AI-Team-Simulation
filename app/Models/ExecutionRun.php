@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\Execution\ExecutionScheduler;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -135,6 +136,29 @@ class ExecutionRun extends Model
         return $updated > 0;
     }
 
+    /**
+     * PO melanjutkan run NEEDS_PO: task terblokir dijalankan ulang dari awal.
+     * False bila run tidak sedang menunggu PO (mis. sudah dilanjutkan orang lain).
+     */
+    public function resumeFromPo(): bool
+    {
+        if (! $this->transitionTo('EXECUTING', [self::NEEDS_PO], ['error_code' => null, 'summary' => null])) {
+            return false;
+        }
+
+        $this->tasks()->where('status', 'BLOCKED')->update([
+            'status' => 'PENDING', 'stall_count' => 0, 'last_error' => null, 'last_progress_at' => now(),
+        ]);
+        $this->messages()->create([
+            'sender_slug' => 'product-owner',
+            'recipient_slug' => 'scrum-master',
+            'content' => 'PO melanjutkan eksekusi; task terblokir dijalankan ulang.',
+        ]);
+        app(ExecutionScheduler::class)->dispatchReady($this);
+
+        return true;
+    }
+
     public function isTerminal(): bool
     {
         // FAILED ikut terminal: run yang gagal di tengah jalan (AI timeout,
@@ -145,6 +169,19 @@ class ExecutionRun extends Model
 
     protected static function booted(): void
     {
+        // NEEDS_PO hanya bisa keluar lewat transitionTo()/resumeFromPo(). Job yang
+        // masih berjalan (model usang di memorinya) tidak boleh menimpa status
+        // ini secara diam-diam, apa pun status yang ia kira sedang berlaku.
+        static::updating(function (ExecutionRun $run): void {
+            if (! $run->isDirty('status') || $run->status === self::NEEDS_PO) {
+                return;
+            }
+            $current = static::query()->whereKey($run->getKey())->value('status');
+            if ($current === self::NEEDS_PO) {
+                $run->status = self::NEEDS_PO;
+            }
+        });
+
         // Sinkronkan status perintah perbaikan saat execution run-nya terminal.
         static::updated(function (ExecutionRun $run): void {
             if (! $run->wasChanged('status') || ! $run->repair_order_id) {

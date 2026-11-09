@@ -9,7 +9,6 @@ use App\Models\Story;
 use App\Services\GithubApiClient;
 use App\Services\GithubProjectService;
 use App\Support\Demo\DemoServerManager;
-use App\Support\Execution\ExecutionScheduler;
 use App\Support\Workspace\BaselineSnapshot;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -83,19 +82,9 @@ class ExecutionController extends Controller
     {
         abort_unless((int) $run->story_id === (int) $story->id, 404);
 
-        if (! $run->transitionTo('EXECUTING', [ExecutionRun::NEEDS_PO], ['error_code' => null, 'summary' => null])) {
+        if (! $run->resumeFromPo()) {
             return back()->withErrors(['acceptance' => 'Eksekusi ini tidak sedang menunggu keputusan PO.']);
         }
-
-        $run->tasks()->where('status', 'BLOCKED')->update([
-            'status' => 'PENDING', 'stall_count' => 0, 'last_error' => null, 'last_progress_at' => now(),
-        ]);
-        $run->messages()->create([
-            'sender_slug' => 'product-owner',
-            'recipient_slug' => 'scrum-master',
-            'content' => 'PO melanjutkan eksekusi; task terblokir dijalankan ulang.',
-        ]);
-        app(ExecutionScheduler::class)->dispatchReady($run);
 
         return back()->with('status', 'Eksekusi dilanjutkan.');
     }

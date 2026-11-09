@@ -32,6 +32,18 @@
     @include('executions.partials.permission-approval', ['run' => $run])
 @elseif ($run->status === 'COMPLETED')
     <p class="discussion-banner"><strong>Eksekusi selesai.</strong> {{ $run->summary }}</p>
+@elseif ($run->status === 'NEEDS_PO')
+    <div class="discussion-banner discussion-banner--danger">
+        <p><strong>Eksekusi berhenti, menunggu keputusan Anda.</strong> {{ $run->summary }}</p>
+        <form method="POST" action="{{ route('repair-orders.executions.resume', [$repairOrder, $run]) }}">
+            @csrf
+            <button class="button button-primary" type="submit">Lanjutkan eksekusi</button>
+        </form>
+        <form method="POST" action="{{ route('repair-orders.executions.accept', [$repairOrder, $run]) }}">
+            @csrf
+            <button class="button button-danger" type="submit" name="status" value="GAGAL">Tandai Gagal</button>
+        </form>
+    </div>
 @elseif ($run->status === 'BLOCKED')
     <p class="discussion-banner discussion-banner--danger"><strong>Eksekusi diblokir.</strong> {{ $run->summary }}</p>
 @elseif ($run->status === 'FAILED')
