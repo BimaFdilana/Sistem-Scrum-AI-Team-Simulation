@@ -106,7 +106,26 @@ class BatchReviewExecutionJob implements ShouldQueue
             $dialogue->resolveSmoke($run);
         }
 
-        if ($fromSmoke) {
+        // Tidak ada crash: bandingkan dengan kode sebelum run ini. Halaman/form yang dulu
+        // berhasil lalu kini gagal adalah regresi, dikembalikan ke developer sebelum QA.
+        $regressionFindings = [];
+        if (! $fromSmoke && $smoke !== null && $smoke['ran']) {
+            $baseSmoke = $this->baseSmoke($run, $project, array_keys($changed));
+            if ($baseSmoke !== null && $baseSmoke['ran']) {
+                $regressionFindings = app(RuntimeSmoke::class)->regressions($baseSmoke, $smoke);
+            }
+        }
+
+        if ($regressionFindings !== []) {
+            $run->messages()->create([
+                'sender_slug' => 'qa-engineer',
+                'recipient_slug' => 'team',
+                'content' => 'Uji regresi menemukan '.count($regressionFindings).' perilaku lama yang rusak; kode dikembalikan ke developer sebelum dinilai QA.'."\n"
+                    .collect($regressionFindings)->map(fn (array $f) => '- '.$f['instruction'])->implode("\n"),
+                'metadata' => ['batch_qa' => true, 'smoke' => true, 'regression' => true, 'approved' => false],
+            ]);
+            $review = ['approved' => false, 'feedback' => '', 'findings' => $regressionFindings, 'resolved' => []];
+        } elseif ($fromSmoke) {
             $run->messages()->create([
                 'sender_slug' => 'qa-engineer',
                 'recipient_slug' => 'team',
@@ -357,6 +376,34 @@ class BatchReviewExecutionJob implements ShouldQueue
             Log::warning('Uji jalan gagal', ['run' => $run->id, 'error' => $exception->getMessage()]);
 
             return ['ran' => false, 'error' => Str::limit($exception->getMessage(), 300), 'roles' => [], 'results' => []];
+        }
+    }
+
+    /**
+     * Uji jalan kode sebelum run ini (titik awal run) untuk pembanding regresi.
+     * Hanya mode direct: di sana titik awal tersimpan sebagai ref git.
+     *
+     * @param  array<int, string>  $changedFiles
+     * @return array{ran: bool, error: ?string, roles: array<int, ?string>, results: array<int, array<string, mixed>>}|null
+     */
+    private function baseSmoke(ExecutionRun $run, ?Project $project, array $changedFiles): ?array
+    {
+        if ($project === null || ($run->mode ?: config('execution.mode', 'worktree')) !== 'direct') {
+            return null;
+        }
+
+        $start = 'refs/scrumspace/run-'.$run->id.'-start';
+
+        try {
+            if (! app(WorktreeManager::class)->branchExists((string) $project->workspace_path, $start)) {
+                return null;
+            }
+
+            return app(RuntimeSmoke::class)->runAtRef($project, $start, $changedFiles);
+        } catch (\Throwable $exception) {
+            Log::warning('Uji regresi gagal', ['run' => $run->id, 'error' => $exception->getMessage()]);
+
+            return null;
         }
     }
 

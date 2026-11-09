@@ -34,12 +34,31 @@ class RuntimeSmokeGateTest extends TestCase
 
     private const APPROVED = '{"approved":true,"feedback":"ok","criteria":[{"criterion":"IKU bisa ditambah","met":true,"evidence":"IkuController@store"}]}';
 
-    /** @param array<int, array<string, mixed>> $results */
-    private function fakeSmoke(array $results, bool $ran = true): void
+    /**
+     * @param  array<int, array<string, mixed>>  $results  hasil kode run ini
+     * @param  array<int, array<string, mixed>>|null  $baseResults  hasil kode sebelum run (null = tidak diuji)
+     */
+    private function fakeSmoke(array $results, bool $ran = true, ?array $baseResults = null, ?array $branchAtRef = null): void
     {
         $smoke = Mockery::mock(RuntimeSmoke::class, [app(DemoServerManager::class)])->makePartial();
         $smoke->shouldReceive('run')->andReturn(['ran' => $ran, 'error' => $ran ? null : 'tidak siap', 'roles' => ['admin'], 'results' => $results]);
+        $smoke->shouldReceive('runAtRef')->andReturnUsing(function ($project, string $ref) use ($baseResults, $branchAtRef) {
+            $results = str_starts_with($ref, 'refs/scrumspace/') ? $baseResults : $branchAtRef;
+
+            return $results === null
+                ? ['ran' => false, 'error' => 'tidak diuji', 'roles' => [], 'results' => []]
+                : ['ran' => true, 'error' => null, 'roles' => ['admin'], 'results' => $results];
+        });
         $this->app->instance(RuntimeSmoke::class, $smoke);
+    }
+
+    private function directRunGit(ExecutionRun $run): void
+    {
+        $git = Mockery::mock(WorktreeManager::class);
+        $git->shouldReceive('branchExists')->andReturn(true);
+        $git->shouldReceive('currentBranch')->andReturn('scrum/run-'.$run->id);
+        $git->shouldReceive('changedFilesBetween')->andReturn(['app/Http/Controllers/ProfileController.php']);
+        $this->app->instance(WorktreeManager::class, $git);
     }
 
     private function makeRun(): ExecutionRun
@@ -118,6 +137,79 @@ class RuntimeSmokeGateTest extends TestCase
         $this->assertStringContainsString('Uji jalan nyata (1 permintaan, 0 error)', $prompts[0]);
         $this->assertSame(ExecutionFinding::RESOLVED, $old->fresh()->status);
         $this->assertSame('COMPLETED', $run->fresh()->status);
+    }
+
+    public function test_regressions_are_behaviour_that_worked_before_and_fails_after(): void
+    {
+        $base = ['results' => [
+            ['kind' => 'ok', 'method' => 'PATCH', 'uri' => '/profile', 'route_file' => 'app/Http/Controllers/ProfileController.php'],
+            ['kind' => 'ok', 'method' => 'GET', 'uri' => '/users/12/edit', 'route_file' => 'app/Http/Controllers/UserController.php'],
+            ['kind' => 'ok', 'method' => 'GET', 'uri' => '/laporan', 'route_file' => 'app/Http/Controllers/LaporanController.php'],
+            ['kind' => 'validation', 'method' => 'POST', 'uri' => '/usulan', 'validation' => ['Tanggal salah.']],
+        ]];
+        $branch = ['results' => [
+            ['kind' => 'validation', 'method' => 'PATCH', 'uri' => '/profile', 'validation' => ['Password lama salah.'], 'route_file' => 'app/Http/Controllers/ProfileController.php'],
+            ['kind' => 'ok', 'method' => 'GET', 'uri' => '/users/13/edit'],
+            ['kind' => 'validation', 'method' => 'POST', 'uri' => '/usulan', 'validation' => ['Tanggal salah.']],
+        ]];
+
+        $findings = app(RuntimeSmoke::class)->regressions($base, $branch);
+
+        $this->assertCount(2, $findings);
+        $this->assertSame('app/Http/Controllers/ProfileController.php', $findings[0]['file']);
+        $this->assertStringStartsWith(RuntimeSmoke::REGRESSION_PREFIX, $findings[0]['instruction']);
+        $this->assertStringContainsString('Password lama salah.', $findings[0]['instruction']);
+        $this->assertSame('app/Http/Controllers/LaporanController.php', $findings[1]['file']);
+        $this->assertStringContainsString('rute hilang', $findings[1]['instruction']);
+    }
+
+    public function test_regression_sends_code_back_to_developer_before_qa(): void
+    {
+        Queue::fake();
+        $run = $this->makeRun();
+        $this->directRunGit($run);
+        $this->fakeSmoke(
+            [['kind' => 'validation', 'method' => 'PATCH', 'uri' => '/profile', 'validation' => ['Password lama salah.'], 'route_file' => 'app/Http/Controllers/ProfileController.php']],
+            baseResults: [['kind' => 'ok', 'method' => 'PATCH', 'uri' => '/profile', 'route_file' => 'app/Http/Controllers/ProfileController.php']],
+        );
+        $agents = Mockery::mock(AgentProfileClient::class);
+        // Developer boleh menjawab temuan regresi (negosiasi), tetapi QA tidak dipanggil untuk menilai.
+        $agents->shouldReceive('sendMessage')->withArgs(fn (string $role) => $role !== 'qa-engineer')->andReturn('{}');
+        $agents->shouldNotReceive('sendMessage')->withArgs(fn (string $role) => $role === 'qa-engineer');
+
+        $this->review($run, $agents);
+
+        $finding = ExecutionFinding::query()->where('execution_run_id', $run->id)->sole();
+        $this->assertStringStartsWith(RuntimeSmoke::REGRESSION_PREFIX, $finding->issue);
+        $this->assertSame('EXECUTING', $run->fresh()->status);
+        $this->assertSame('REVISION', $run->tasks()->first()->status);
+        Queue::assertPushed(ExecuteExecutionTaskJob::class);
+    }
+
+    public function test_acceptance_tests_branch_through_worktree_and_refuses_regression(): void
+    {
+        $owner = User::factory()->create();
+        $run = $this->makeRun();
+        $run->forceFill(['status' => 'COMPLETED', 'completed_at' => now(), 'work_branch' => 'scrum/run-'.$run->id, 'base_branch' => 'main'])->save();
+        $demo = Mockery::mock(DemoServerManager::class);
+        $demo->shouldReceive('verify')->andReturn(['ok' => true, 'http' => 200, 'url' => 'http://127.0.0.1:9999/', 'error' => null, 'demo' => null]);
+        $this->app->instance(DemoServerManager::class, $demo);
+        $git = Mockery::mock(WorktreeManager::class);
+        $git->shouldReceive('currentBranch')->andReturn('scrum/run-999');
+        $git->shouldReceive('branchExists')->andReturn(true);
+        $git->shouldReceive('changedFilesBetween')->andReturn(['app/Http/Controllers/ProfileController.php']);
+        $this->app->instance(WorktreeManager::class, $git);
+        $this->fakeSmoke(
+            [],
+            baseResults: [['kind' => 'ok', 'method' => 'PATCH', 'uri' => '/profile', 'route_file' => 'app/Http/Controllers/ProfileController.php']],
+            branchAtRef: [['kind' => 'validation', 'method' => 'PATCH', 'uri' => '/profile', 'validation' => ['Password lama salah.'], 'route_file' => 'app/Http/Controllers/ProfileController.php']],
+        );
+
+        $this->actingAs($owner)
+            ->post('/stories/'.$run->story->id.'/executions/'.$run->id.'/accept', ['status' => 'BERHASIL'])
+            ->assertSessionHasErrors('acceptance');
+
+        $this->assertFalse($run->story->fresh()->isAccepted());
     }
 
     public function test_smoke_test_that_cannot_run_does_not_block_qa(): void

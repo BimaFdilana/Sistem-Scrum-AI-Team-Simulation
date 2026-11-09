@@ -185,7 +185,8 @@ class ExecutionController extends Controller
         $label = $status === 'BERHASIL' ? 'Berhasil' : 'Gagal';
 
         return redirect()->route('stories.executions.show', [$story, $run])
-            ->with('status', 'Story diterima PO dengan status '.$label.'. Eksekusi ulang dikunci.');
+            ->with('status', 'Story diterima PO dengan status '.$label.'.'
+                .($status === 'BERHASIL' ? ' Eksekusi ulang dikunci.' : ' Hasilnya tidak digabung; story bisa dieksekusi ulang dari halaman project.'));
     }
 
     /**
@@ -209,9 +210,6 @@ class ExecutionController extends Controller
 
         try {
             if ($run->work_branch) {
-                if ($git->currentBranch($path) !== $run->work_branch) {
-                    return ['blocking' => [], 'note' => 'Uji jalan dilewati: baseline sedang tidak berada di cabang '.$run->work_branch.'.'];
-                }
                 $start = 'refs/scrumspace/run-'.$run->id.'-start';
                 $changed = $git->changedFilesBetween($path, $git->branchExists($path, $start) ? $start : (string) $run->base_branch, $run->work_branch);
             }
@@ -220,7 +218,8 @@ class ExecutionController extends Controller
         }
 
         $smoke = app(RuntimeSmoke::class);
-        $report = $smoke->run($project, $changed, 'all');
+        $onBranch = ! $run->work_branch || $git->currentBranch($path) === $run->work_branch;
+        $report = $onBranch ? $smoke->run($project, $changed, 'all') : $smoke->runAtRef($project, $run->work_branch, $changed, 'all');
         if (! $report['ran']) {
             return ['blocking' => [], 'note' => $smoke->summary($report)];
         }
@@ -237,8 +236,25 @@ class ExecutionController extends Controller
             }
         }
 
+        // Regresi: bandingkan dengan kode sebelum run ini (titik awal run).
+        $start = 'refs/scrumspace/run-'.$run->id.'-start';
+        $regressions = [];
+        try {
+            if ($run->work_branch && $git->branchExists($path, $start)) {
+                $base = $smoke->runAtRef($project, $start, $changed, 'all');
+                if ($base['ran']) {
+                    $regressions = $smoke->regressions($base, $report);
+                }
+            }
+        } catch (\Throwable) {
+            $regressions = [];
+        }
+        foreach ($regressions as $regression) {
+            $blocking[] = mb_substr($regression['instruction'], 0, 220);
+        }
+
         $total = count($report['results']);
-        $note = 'Uji jalan seluruh halaman: '.$total.' permintaan, '.count($blocking).' error di halaman story ini';
+        $note = 'Uji jalan seluruh halaman: '.$total.' permintaan, '.count($blocking).' error/regresi di halaman story ini';
         if ($warnings !== []) {
             $note .= ', '.count($warnings).' error di halaman lain (regresi atau bug lama): '.implode(' | ', array_slice($warnings, 0, 5));
         }

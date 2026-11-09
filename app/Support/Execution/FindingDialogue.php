@@ -95,7 +95,9 @@ class FindingDialogue
         ExecutionFinding::query()
             ->where('execution_run_id', $run->id)
             ->where('status', ExecutionFinding::OPEN)
-            ->where('issue', 'like', RuntimeSmoke::FINDING_PREFIX.'%')
+            ->where(fn ($query) => $query
+                ->where('issue', 'like', RuntimeSmoke::FINDING_PREFIX.'%')
+                ->orWhere('issue', 'like', RuntimeSmoke::REGRESSION_PREFIX.'%'))
             ->update(['status' => ExecutionFinding::RESOLVED]);
     }
 

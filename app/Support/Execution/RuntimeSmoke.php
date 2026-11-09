@@ -27,6 +27,9 @@ class RuntimeSmoke
     /** Awal teks temuan dari uji jalan (dipakai untuk mengenali dan menutupnya). */
     public const FINDING_PREFIX = 'UJI JALAN GAGAL';
 
+    /** Awal teks temuan regresi: perilaku yang berhasil sebelum run ini kini gagal. */
+    public const REGRESSION_PREFIX = 'REGRESI';
+
     public function __construct(private readonly DemoServerManager $demo) {}
 
     /**
@@ -40,6 +43,116 @@ class RuntimeSmoke
             $root .= '/'.trim($project->profile->subdir, '/');
         }
 
+        return $this->probeAt($project, $root, $changedFiles, $mode);
+    }
+
+    /**
+     * Uji jalan kode pada ref git tertentu (mis. titik awal run, atau cabang run yang
+     * sedang tidak di-checkout) lewat worktree sementara; baseline tidak disentuh.
+     *
+     * @param  array<int, string>  $changedFiles
+     * @return array{ran: bool, error: ?string, roles: array<int, ?string>, results: array<int, array<string, mixed>>}
+     */
+    public function runAtRef(Project $project, string $ref, array $changedFiles, string $mode = 'changed'): array
+    {
+        $baseline = rtrim((string) $project->workspace_path, '/');
+        $subdir = $project->profile?->subdir ? '/'.trim($project->profile->subdir, '/') : '';
+        if ($baseline === '' || ! is_dir($baseline.'/.git') || ! is_file($baseline.$subdir.'/vendor/autoload.php')) {
+            return $this->notRun('Project belum siap dijalankan (git atau vendor/ belum ada).');
+        }
+
+        $tree = storage_path('app/smoke/wt-'.Str::uuid());
+        $add = new Process(['git', 'worktree', 'add', '--detach', $tree, $ref], $baseline, ProjectEnvironment::scrubbed(), null, 60);
+        $add->run();
+        if (! $add->isSuccessful()) {
+            return $this->notRun('Ref '.$ref.' tidak bisa disiapkan: '.Str::limit(trim($add->getErrorOutput()), 200));
+        }
+
+        try {
+            $root = $tree.$subdir;
+            // vendor/ dibagi dengan baseline; probe memuat kelas project dari root ini sendiri.
+            @symlink($baseline.$subdir.'/vendor', $root.'/vendor');
+            if (is_file($baseline.$subdir.'/.env')) {
+                @copy($baseline.$subdir.'/.env', $root.'/.env');
+            }
+            foreach (['storage/framework/views', 'storage/framework/cache', 'storage/framework/sessions', 'storage/logs', 'bootstrap/cache'] as $dir) {
+                File::ensureDirectoryExists($root.'/'.$dir);
+            }
+
+            return $this->probeAt($project, $root, $changedFiles, $mode);
+        } finally {
+            (new Process(['git', 'worktree', 'remove', '--force', $tree], $baseline, ProjectEnvironment::scrubbed(), null, 60))->run();
+            File::deleteDirectory($tree);
+        }
+    }
+
+    /**
+     * Perilaku yang berhasil sebelum perubahan (base) tetapi gagal sesudahnya (branch).
+     * Crash sudah ditangani findings(); di sini yang dicari adalah halaman atau form
+     * yang dulu OK lalu ditolak validasi, ditolak akses, tidak ditemukan, atau hilang.
+     *
+     * @param  array{results: array<int, array<string, mixed>>}  $base
+     * @param  array{results: array<int, array<string, mixed>>}  $branch
+     * @return array<int, array{file: string, line: ?int, severity: string, instruction: string, verify: string}>
+     */
+    public function regressions(array $base, array $branch): array
+    {
+        $index = function (array $report): array {
+            $map = [];
+            foreach ($report['results'] ?? [] as $result) {
+                $key = ($result['method'] ?? 'GET').' '.preg_replace('#/\d+(?=/|$)#', '/{id}', (string) ($result['uri'] ?? ''));
+                $map[$key] ??= $result;
+            }
+
+            return $map;
+        };
+
+        $before = $index($base);
+        $after = $index($branch);
+        $findings = [];
+
+        foreach ($before as $key => $old) {
+            if (($old['kind'] ?? '') !== 'ok') {
+                continue;
+            }
+            $new = $after[$key] ?? null;
+            $kind = $new['kind'] ?? null;
+
+            if ($new === null) {
+                if (! str_starts_with($key, 'GET ')) {
+                    continue; // form bisa saja pindah halaman; hanya halaman GET yang dianggap hilang
+                }
+                $what = 'tidak bisa dibuka lagi (rute hilang)';
+            } elseif (in_array($kind, ['validation', 'denied', 'not_found'], true)) {
+                $what = match ($kind) {
+                    'validation' => 'kini ditolak validasi: '.implode('; ', array_slice((array) ($new['validation'] ?? []), 0, 3)),
+                    'denied' => 'kini ditolak aksesnya (HTTP '.($new['status'] ?? '403').')',
+                    default => 'kini tidak ditemukan (HTTP 404)',
+                };
+            } else {
+                continue;
+            }
+
+            $file = (string) (($new['route_file'] ?? null) ?: ($old['route_file'] ?? null) ?: 'routes/web.php');
+            $findings[] = [
+                'file' => ltrim($file, '/'),
+                'line' => null,
+                'severity' => 'high',
+                'instruction' => Str::limit(self::REGRESSION_PREFIX.' — '.$key.' berhasil sebelum run ini, '.$what
+                    .'. Kembalikan perilaku lama; fitur baru story ini tidak boleh merusak fitur yang sudah ada (pakai rute/method baru bila perlu).', 400),
+                'verify' => Str::limit('Jalankan lagi '.$key.' dengan data yang sama; hasilnya harus sama seperti sebelum run ini.', 200),
+            ];
+        }
+
+        return $findings;
+    }
+
+    /**
+     * @param  array<int, string>  $changedFiles
+     * @return array{ran: bool, error: ?string, roles: array<int, ?string>, results: array<int, array<string, mixed>>}
+     */
+    private function probeAt(Project $project, string $root, array $changedFiles, string $mode): array
+    {
         if ($root === '' || ! is_file($root.'/artisan') || ! is_file($root.'/vendor/autoload.php')) {
             return $this->notRun('Project belum siap dijalankan (artisan atau vendor/ belum ada).');
         }
