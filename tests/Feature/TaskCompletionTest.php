@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Jobs\BatchReviewExecutionJob;
+use App\Jobs\ExecuteExecutionTaskJob;
 use App\Jobs\ReviewExecutionTaskJob;
 use App\Models\ExecutionRun;
 use App\Models\Project;
@@ -75,5 +76,19 @@ class TaskCompletionTest extends TestCase
         }
 
         $this->assertSame([], $offenders, 'kirim ke QA lewat TaskCompletion::submitForQa');
+    }
+
+    public function test_batch_mode_dispatches_the_next_pending_task_after_each_completion(): void
+    {
+        Queue::fake();
+        $run = $this->makeRun('batch');
+        $second = $run->tasks()->create(['title' => 'T2', 'description' => "KERJAKAN: x\nFILE: app/Two.php", 'assignee' => 'frontend-developer', 'status' => 'PENDING', 'sort_order' => 1]);
+        $run->tasks()->where('id', '!=', $second->id)->update(['sort_order' => 0, 'description' => "KERJAKAN: x\nFILE: app/One.php"]);
+
+        app(TaskCompletion::class)->submitForQa($run, $run->tasks()->orderBy('sort_order')->first(), 'diff');
+
+        Queue::assertPushed(ExecuteExecutionTaskJob::class, fn ($job) => $job->taskId === $second->id);
+        Queue::assertNotPushed(BatchReviewExecutionJob::class);
+        $this->assertSame('EXECUTING', $run->fresh()->status);
     }
 }

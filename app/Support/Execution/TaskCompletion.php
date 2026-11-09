@@ -21,6 +21,9 @@ class TaskCompletion
             // QA batch: task berhenti di QA_PENDING, dinilai sekali di akhir.
             $task->forceFill(['diff_snapshot' => $diffSnapshot])->save();
             app(BatchQa::class)->taskReady($run, $task);
+            // Tanpa review per task, tidak ada yang mengirim task berikutnya: kirim di sini.
+            // Dulu run mode langsung macet setelah task pertama dengan sisa task PENDING.
+            app(ExecutionScheduler::class)->dispatchReady($run->fresh());
 
             return;
         }
