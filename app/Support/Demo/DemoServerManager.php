@@ -249,10 +249,22 @@ class DemoServerManager
             $env['npm_config_cache'] = $npmHome.'/.npm';
 
             if (! is_dir($projectRoot.'/node_modules')) {
-                $install = new Process(['npm', 'install', '--no-audit', '--no-fund'], $projectRoot, $env);
+                // `npm install` menulis ulang package-lock.json (mis. field name menjadi nama
+                // folder "baseline"), sehingga baseline menjadi "tidak bersih" dan semua
+                // eksekusi mode langsung berikutnya ditolak. Pakai `npm ci` (tidak menulis
+                // lockfile); tanpa lockfile atau bila tidak sinkron, `--no-package-lock`.
+                $command = is_file($projectRoot.'/package-lock.json')
+                    ? ['npm', 'ci', '--no-audit', '--no-fund']
+                    : ['npm', 'install', '--no-audit', '--no-fund', '--no-package-lock'];
+                $install = new Process($command, $projectRoot, $env);
                 $install->setTimeout(900);
                 $install->run();
-                @file_put_contents($log, "\n[npm install] exit=".$install->getExitCode()."\n".mb_substr($install->getErrorOutput(), -800)."\n", FILE_APPEND);
+                if (! $install->isSuccessful() && $command[1] === 'ci') {
+                    $install = new Process(['npm', 'install', '--no-audit', '--no-fund', '--no-package-lock'], $projectRoot, $env);
+                    $install->setTimeout(900);
+                    $install->run();
+                }
+                @file_put_contents($log, "\n[npm ".$command[1].'] exit='.$install->getExitCode()."\n".mb_substr($install->getErrorOutput(), -800)."\n", FILE_APPEND);
             }
 
             if (is_dir($projectRoot.'/node_modules')) {

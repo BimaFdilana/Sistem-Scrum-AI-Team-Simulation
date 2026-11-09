@@ -28,6 +28,15 @@ class DirectWorkspace
         $path = $this->path($project);
         $dirty = $this->git->dirtyFiles($path);
 
+        // Lockfile yang ditulis ulang alat (npm/yarn/pnpm) adalah noise tooling, bukan
+        // pekerjaan siapa pun. Bila SEMUA yang kotor hanya lockfile, pulihkan; bila ada
+        // perubahan lain, tetap tolak dan jangan sentuh apa pun.
+        $lockfiles = ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml'];
+        if ($dirty !== [] && array_diff($dirty, $lockfiles) === []) {
+            $this->git->restoreFiles($path, $dirty);
+            $dirty = $this->git->dirtyFiles($path);
+        }
+
         if ($dirty !== []) {
             throw new RuntimeException(
                 'Baseline project tidak bersih ('.count($dirty).' file belum di-commit: '

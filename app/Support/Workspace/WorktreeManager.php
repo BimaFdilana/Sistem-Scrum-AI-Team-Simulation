@@ -303,6 +303,18 @@ class WorktreeManager
         return trim($this->git($path, ['rev-parse', '--abbrev-ref', 'HEAD']));
     }
 
+    /**
+     * Kembalikan file tertentu ke versi HEAD (hanya file yang disebut, bukan seluruh repo).
+     *
+     * @param  array<int, string>  $files
+     */
+    public function restoreFiles(string $path, array $files): void
+    {
+        if ($files !== []) {
+            $this->git($path, ['checkout', '--', ...$files]);
+        }
+    }
+
     /** Pindah ke branch yang sudah ada (tanpa force: gagal bila mengorbankan perubahan lokal). */
     public function checkoutBranch(string $path, string $branch): void
     {
