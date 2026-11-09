@@ -230,12 +230,46 @@ class DemoServerManager
     }
 
     /**
-     * Pastikan public/build/manifest.json tersedia untuk demo.
+     * Aset hasil build sudah usang bila ada sumber frontend yang lebih baru dari manifest.
+     * Tailwind memindai file view, jadi view baru memakai kelas yang belum ada di CSS lama;
+     * dulu build hanya berjalan sekali (saat manifest belum ada) sehingga hasil kerja baru
+     * tampil tanpa gaya atau tidak terlihat di demo.
+     */
+    public static function assetsAreStale(string $projectRoot): bool
+    {
+        $manifest = $projectRoot.'/public/build/manifest.json';
+        if (! is_file($manifest)) {
+            return true;
+        }
+        $builtAt = filemtime($manifest);
+
+        foreach (['tailwind.config.js', 'vite.config.js', 'postcss.config.js', 'package.json'] as $file) {
+            if (is_file($projectRoot.'/'.$file) && filemtime($projectRoot.'/'.$file) > $builtAt) {
+                return true;
+            }
+        }
+        foreach (['resources/css', 'resources/js', 'resources/views'] as $dir) {
+            $path = $projectRoot.'/'.$dir;
+            if (! is_dir($path)) {
+                continue;
+            }
+            foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS)) as $file) {
+                if ($file->isFile() && $file->getMTime() > $builtAt) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Pastikan public/build/manifest.json tersedia dan mutakhir untuk demo.
      */
     public function ensureFrontendBuild(string $projectRoot, string $log, bool $force = false): void
     {
         $manifest = $projectRoot.'/public/build/manifest.json';
-        if (is_file($manifest) && ! $force) {
+        if (is_file($manifest) && ! $force && ! self::assetsAreStale($projectRoot)) {
             return;
         }
 
