@@ -3,12 +3,15 @@
 namespace App\Support\Execution;
 
 use App\Jobs\BatchReviewExecutionJob;
+use App\Jobs\MergeExecutionJob;
 use App\Models\ExecutionRun;
 use App\Models\ExecutionTask;
+use App\Support\Workspace\WorktreeManager;
 
 /**
- * Pengatur QA batch: satu penilaian di akhir, perbaikan terarah ke role pemilik
- * file, dan batas putaran yang ditegakkan di kode (bukan di prompt).
+ * Pengatur QA batch: penilaian di akhir, perbaikan terarah ke role pemilik
+ * file, review final setelah perbaikan, dan batas putaran yang ditegakkan di
+ * kode (bukan di prompt). Tidak ada persetujuan otomatis.
  */
 class BatchQa
 {
@@ -67,15 +70,10 @@ class BatchQa
             return;
         }
 
-        // Batas putaran: setelah perbaikan terakhir, tutup tanpa review kedua.
-        // qa_rounds bertambah setiap QA memberi temuan. Bila sudah mencapai
-        // batas, perbaikan berikutnya adalah yang terakhir: tutup tanpa review.
-        if ((int) $run->qa_rounds >= (int) config('execution.qa_max_repair_rounds', 1)) {
-            $this->finalize($run, 'Perbaikan QA sudah diterapkan pada putaran terakhir; run ditutup tanpa review kedua.');
-
-            return;
-        }
-
+        // Setelah perbaikan terakhir QA TETAP menilai ulang (review final).
+        // Dulu run ditutup dan semua task otomatis disetujui tanpa dinilai;
+        // itu "lulus" palsu. Kini bila review final masih menolak, run
+        // berhenti di NEEDS_PO (lihat BatchReviewExecutionJob), bukan lulus.
         if ($run->qa_started_at !== null && $run->status === 'QA_REVIEW') {
             return;
         }
@@ -105,7 +103,7 @@ class BatchQa
             $first = $run->tasks()->whereNotNull('chain_base')->min('chain_base');
             if ($project && $first) {
                 try {
-                    $head = app(\App\Support\Workspace\WorktreeManager::class)->head($project->workspace_path);
+                    $head = app(WorktreeManager::class)->head($project->workspace_path);
                     $range = ' · commit '.substr((string) $first, 0, 8).'..'.substr($head, 0, 8);
                 } catch (\Throwable) {
                     $range = '';
@@ -125,6 +123,6 @@ class BatchQa
         }
 
         $run->forceFill(['status' => 'MERGING'])->save();
-        \App\Jobs\MergeExecutionJob::dispatch($run->id);
+        MergeExecutionJob::dispatch($run->id);
     }
 }

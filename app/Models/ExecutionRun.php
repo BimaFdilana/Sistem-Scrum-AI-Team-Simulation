@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\Execution\BatchQa;
 use App\Support\Execution\ExecutionScheduler;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -142,7 +143,15 @@ class ExecutionRun extends Model
      */
     public function resumeFromPo(): bool
     {
-        if (! $this->transitionTo('EXECUTING', [self::NEEDS_PO], ['error_code' => null, 'summary' => null])) {
+        $qaStop = str_starts_with((string) $this->error_code, 'QA_');
+        $attributes = ['error_code' => null, 'summary' => null];
+        if ($qaStop) {
+            // QA menolak setelah jatah perbaikan habis: beri jatah baru agar
+            // temuan bisa diperbaiki lalu dinilai ulang.
+            $attributes += ['qa_rounds' => 0, 'qa_started_at' => null];
+        }
+
+        if (! $this->transitionTo('EXECUTING', [self::NEEDS_PO], $attributes)) {
             return false;
         }
 
@@ -155,6 +164,10 @@ class ExecutionRun extends Model
             'content' => 'PO melanjutkan eksekusi; task terblokir dijalankan ulang.',
         ]);
         app(ExecutionScheduler::class)->dispatchReady($this);
+
+        if ($qaStop) {
+            app(BatchQa::class)->maybeStart($this);
+        }
 
         return true;
     }

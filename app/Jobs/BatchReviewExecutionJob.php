@@ -6,7 +6,6 @@ use App\Models\ExecutionRun;
 use App\Models\ExecutionTask;
 use App\Services\AgentProfileClient;
 use App\Support\Execution\BatchQa;
-use App\Support\Execution\DirectWorkspace;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -19,9 +18,9 @@ use Illuminate\Support\Str;
 /**
  * Satu penilaian QA di akhir untuk seluruh perubahan run.
  *
- * Keputusan QA bersifat final untuk satu putaran: bila ada temuan, hanya task
- * pemilik file yang dijalankan ulang, dan setelah itu run ditutup tanpa review
- * kedua (lihat BatchQa::maybeStart).
+ * Bila ada temuan, hanya task pemilik file yang dijalankan ulang, lalu QA
+ * menilai ulang (review final). Bila review final masih menolak, run berhenti
+ * di NEEDS_PO; task tidak pernah disetujui tanpa bukti per acceptance criteria.
  */
 class BatchReviewExecutionJob implements ShouldQueue
 {
@@ -82,7 +81,9 @@ class BatchReviewExecutionJob implements ShouldQueue
 
         $prompt = implode("\n\n", [
             'Kamu QA Engineer. Nilai GABUNGAN perubahan seluruh task BE dan FE pada satu run.',
-            'Kembalikan JSON tepat: {"approved":true,"feedback":"..."} bila semua memenuhi kriteria, atau {"approved":false,"findings":[{"file":"path","instruction":"perbaikan konkret","verify":"cara memeriksa"}]} bila ada yang harus diperbaiki.',
+            'Kembalikan JSON tepat: {"approved":true,"feedback":"...","criteria":[{"criterion":"teks kriteria","met":true,"evidence":"file/perilaku yang membuktikan"}]} bila SEMUA acceptance criteria story terpenuhi (satu entri criteria per kriteria, semuanya met:true dengan bukti), atau {"approved":false,"findings":[{"file":"path","instruction":"perbaikan konkret","verify":"cara memeriksa"}]} bila ada yang harus diperbaiki.',
+            'Acceptance criteria story (SUMBER KEBENARAN penilaian):',
+            $run->subjectCriteria(),
             'Aturan: nilai hanya perubahan yang ada di diff/file; jangan menuntut elemen di luar diff; setiap temuan WAJIB menyebut file yang benar-benar berubah; instruksi harus spesifik dan bisa langsung dikerjakan; jangan mengulang temuan yang sama pada putaran berikutnya.',
             'Kriteria seluruh task:',
             $criteria,
@@ -97,7 +98,7 @@ class BatchReviewExecutionJob implements ShouldQueue
             $review = $this->parse($raw);
         } catch (\Throwable $exception) {
             Log::warning('Batch QA gagal memanggil model', ['run' => $run->id, 'error' => $exception->getMessage()]);
-            $this->close($run, 'BLOCKED', 'QA_BATCH_FAILED', 'QA batch gagal dijalankan: '.Str::limit($exception->getMessage(), 300));
+            $this->handOver($run, 'QA_BATCH_FAILED', 'QA batch gagal dijalankan: '.Str::limit($exception->getMessage(), 300));
 
             return;
         }
@@ -107,7 +108,7 @@ class BatchReviewExecutionJob implements ShouldQueue
             try {
                 $raw = $agents->sendMessage(
                     'qa-engineer',
-                    "Jawaban sebelumnya tidak sesuai format. Ulangi HANYA dengan JSON: {\"approved\":true|false,\"feedback\":\"...\",\"findings\":[{\"file\":\"...\",\"instruction\":\"...\",\"verify\":\"...\"}]}",
+                    'Jawaban sebelumnya tidak sesuai format. Ulangi HANYA dengan JSON: {"approved":true|false,"feedback":"...","criteria":[{"criterion":"...","met":true,"evidence":"..."}],"findings":[{"file":"...","instruction":"...","verify":"..."}]}',
                     'execution-'.$run->id.'-batch-qa-'.(int) $run->qa_rounds.'-retry',
                     false,
                     true
@@ -119,7 +120,7 @@ class BatchReviewExecutionJob implements ShouldQueue
         }
 
         if ($review === null) {
-            $this->close($run, 'BLOCKED', 'QA_BATCH_FORMAT', 'Keluaran QA tidak bisa dibaca setelah satu permintaan ulang.');
+            $this->handOver($run, 'QA_BATCH_FORMAT', 'Keluaran QA tidak bisa dibaca atau tidak menyertakan bukti per kriteria setelah satu permintaan ulang.');
 
             return;
         }
@@ -142,7 +143,22 @@ class BatchReviewExecutionJob implements ShouldQueue
 
         $findings = $review['findings'];
         if ($findings === []) {
-            $this->close($run, 'BLOCKED', 'QA_BATCH_NO_FINDINGS', 'QA menolak tanpa menyebut file/instruksi yang bisa dikerjakan.');
+            $this->handOver($run, 'QA_BATCH_NO_FINDINGS', 'QA menolak tanpa menyebut file/instruksi yang bisa dikerjakan.');
+
+            return;
+        }
+
+        // Review final: perbaikan sudah dijatah habis. Jangan setujui diam-diam
+        // dan jangan perbaiki tanpa batas: serahkan ke PO beserta temuan QA.
+        if ((int) $run->qa_rounds >= (int) config('execution.qa_max_repair_rounds', 1)) {
+            $list = collect($findings)->map(fn (array $f) => '- '.$f['file'].': '.$f['instruction'])->implode("\n");
+            $run->messages()->create([
+                'sender_slug' => 'qa-engineer',
+                'recipient_slug' => 'product-owner',
+                'content' => 'QA masih menolak setelah '.(int) $run->qa_rounds." putaran perbaikan. Temuan yang belum selesai:\n".$list,
+                'metadata' => ['batch_qa' => true, 'approved' => false, 'final' => true],
+            ]);
+            $this->handOver($run, 'QA_REJECTED_AFTER_REPAIR', 'QA masih menolak setelah '.(int) $run->qa_rounds.' putaran perbaikan; task tidak disetujui otomatis. Temuan: '.Str::limit(str_replace("\n", ' ', $list), 500));
 
             return;
         }
@@ -212,6 +228,20 @@ class BatchReviewExecutionJob implements ShouldQueue
 
         $approved = (bool) $data['approved'];
 
+        // Persetujuan WAJIB berbukti: satu entri per kriteria, semuanya met:true.
+        // Tanpa itu "approved:true" hanya klaim dan dianggap keluaran tidak sah.
+        if ($approved) {
+            $criteria = (array) ($data['criteria'] ?? []);
+            if ($criteria === []) {
+                return null;
+            }
+            foreach ($criteria as $entry) {
+                if (! is_array($entry) || ($entry['met'] ?? false) !== true || trim((string) ($entry['evidence'] ?? '')) === '') {
+                    return null;
+                }
+            }
+        }
+
         // Menolak tanpa temuan yang bisa dikerjakan = keluaran tidak sah.
         if (! $approved && $findings === []) {
             return null;
@@ -246,6 +276,16 @@ class BatchReviewExecutionJob implements ShouldQueue
         }
 
         return $chunks === [] ? '' : "Isi file yang berubah:\n\n".implode("\n\n", $chunks);
+    }
+
+    /** Kegagalan yang bisa dipulihkan PO (Lanjutkan = QA diulang). */
+    private function handOver(ExecutionRun $run, string $code, string $message): void
+    {
+        $run->transitionTo(ExecutionRun::NEEDS_PO, ['QA_REVIEW', 'EXECUTING', 'REVIEWING'], [
+            'error_code' => $code,
+            'summary' => $message.' Lanjutkan untuk mengulang QA, atau tandai Gagal.',
+            'qa_started_at' => null,
+        ]);
     }
 
     private function close(ExecutionRun $run, string $status, string $code, string $message): void
