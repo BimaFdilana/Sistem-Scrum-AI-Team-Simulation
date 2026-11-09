@@ -200,16 +200,6 @@ class ReviewExecutionTaskJob implements ShouldQueue
         }
     }
 
-    /** Aturan penilaian QA — mencegah penolakan atas hal yang tidak ada di diff. */
-    private function reviewRules(): string
-    {
-        return 'ATURAN MENILAI (wajib): (1) Nilai HANYA task ini, memakai diff di bawah dan kriteria task. '
-            .'(2) Jangan menuntut elemen yang tidak ada di diff: bila file tidak punya baris empty-state/@forelse/colspan, jangan meminta menyesuaikannya; bila tidak diminta menambah kolom lain, jangan meminta. '
-            .'(3) Jangan menuntut bukti di luar diff (screenshot, hasil render, isi file lain) — cukup periksa apakah patch memenuhi kriteria dan tidak merusak kode lama. '
-            .'(4) approved=false hanya bila ada masalah KONKRET yang terlihat di diff atau dapat dibuktikan dari file yang diubah; sebutkan file dan barisnya. '
-            .'(5) Bila patch memenuhi kriteria, approved=true meskipun gaya penulisan masih bisa dirapikan.';
-    }
-
     /**
      * Isi file yang berubah, dibatasi agar konteks tidak meledak.
      *
