@@ -7,6 +7,8 @@ use App\Models\ExecutionTask;
 use App\Services\AgentProfileClient;
 use App\Support\Execution\BatchQa;
 use App\Support\Execution\FindingDialogue;
+use App\Support\Execution\TaskCompletion;
+use App\Support\Execution\TaskFileScope;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -72,6 +74,15 @@ class BatchReviewExecutionJob implements ShouldQueue
                 } catch (\Throwable) {
                     $diff = '';
                 }
+            }
+            if (TaskCompletion::isNoChange($run, $task)) {
+                // Tidak ada diff: sertakan isi file target agar QA bisa memverifikasi sendiri.
+                $diffParts[] = '## Task #'.$task->id.' ('.$task->assignee.'): '.$task->title."\nTANPA PERUBAHAN: agen menyatakan task sudah terpenuhi oleh kode yang ada. Periksa isi file target pada bagian 'Isi file' sebelum menyetujui; tolak bila kriteria sebenarnya belum terpenuhi.";
+                foreach ((new TaskFileScope)->filesFor($run, $task) as $file) {
+                    $changed[$file] = true;
+                }
+
+                continue;
             }
             $diffParts[] = '## Task #'.$task->id.' ('.$task->assignee.'): '.$task->title."\n".Str::limit($diff, 6000);
             foreach ($worktrees->changedFiles($baseline, $task->branch, $task->chain_base ?: 'HEAD') as $file) {

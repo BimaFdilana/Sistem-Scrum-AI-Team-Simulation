@@ -15,6 +15,31 @@ use App\Models\ExecutionTask;
  */
 class TaskCompletion
 {
+    /**
+     * Agen menyatakan selesai tetapi tidak ada file yang berubah. Bisa berarti kodenya
+     * SUDAH memenuhi task (mis. include yang sudah ada), bisa juga agen tidak bekerja.
+     * Run tidak digagalkan: QA memutuskan, dengan isi file target sebagai bukti.
+     */
+    public function submitNoChange(ExecutionRun $run, ExecutionTask $task, string $reason): void
+    {
+        $run->messages()->create([
+            'execution_task_id' => $task->id,
+            'sender_slug' => $task->assignee,
+            'recipient_slug' => 'qa-engineer',
+            'content' => 'Tidak ada perubahan file: '.$reason.' Task dinilai sudah terpenuhi oleh kode yang ada; QA memverifikasi isi file target.',
+            'metadata' => ['no_change' => true, 'revision' => $task->revision_count],
+        ]);
+
+        $this->submitForQa($run, $task, '');
+    }
+
+    /** Apakah task ini diserahkan ke QA tanpa perubahan file? */
+    public static function isNoChange(ExecutionRun $run, ExecutionTask $task): bool
+    {
+        return $run->messages()->where('execution_task_id', $task->id)->get()
+            ->contains(fn ($message) => data_get($message->metadata, 'no_change') === true);
+    }
+
     public function submitForQa(ExecutionRun $run, ExecutionTask $task, string $diffSnapshot): void
     {
         if (($run->qa_mode ?: 'per_task') === 'batch') {

@@ -134,7 +134,7 @@ class KanbanExecutionPollJob implements ShouldQueue
         // bersih, bukan masuk QA dengan diff kosong.
         $files = $this->changedFiles($worktree);
         if ($files === []) {
-            $this->failRun($run, $task, 'KANBAN_NO_CHANGES', $worktrees, $baseline, 'Worker kanban menandai selesai tanpa mengubah file apa pun di worktree.');
+            app(TaskCompletion::class)->submitNoChange($run, $task, 'worker kanban menandai selesai tanpa mengubah file apa pun.');
 
             return;
         }
