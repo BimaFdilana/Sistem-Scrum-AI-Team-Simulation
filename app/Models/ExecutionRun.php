@@ -148,6 +148,11 @@ class ExecutionRun extends Model
      */
     public function resumeFromPo(): bool
     {
+        // Story/perintah yang sudah diputuskan PO (Berhasil/Gagal) terkunci dari eksekusi ulang.
+        if ($this->story?->isAccepted() || $this->repairOrder?->isAccepted()) {
+            return false;
+        }
+
         $qaStop = str_starts_with((string) $this->error_code, 'QA_');
         $attributes = ['error_code' => null, 'summary' => null];
         if ($qaStop) {
