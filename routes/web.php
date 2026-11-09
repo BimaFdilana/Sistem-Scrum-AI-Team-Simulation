@@ -12,7 +12,6 @@ use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\PermissionRequestController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ProjectDownloadController;
-use App\Http\Controllers\RepairOrderController;
 use App\Http\Controllers\SprintController;
 use App\Http\Controllers\StoryController;
 use App\Http\Controllers\StoryEstimationController;
@@ -80,18 +79,9 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/workspace/activity/active', [ActivityController::class, 'active'])->middleware('throttle:activity')->name('activity.active');
     Route::post('/stories/{story}/executions/{run}/resume', [ExecutionController::class, 'resume'])->middleware('throttle:6,1')->name('stories.executions.resume');
     Route::post('/stories/{story}/executions/{run}/accept', [ExecutionController::class, 'accept'])->name('stories.executions.accept');
-    Route::get('/repair-orders', [RepairOrderController::class, 'index'])->name('repair-orders.index');
     Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead'])->name('notifications.read-all');
     Route::post('/notifications/{notification}/read', [NotificationController::class, 'markAsRead'])->name('notifications.read');
-    Route::get('/repair-orders/{repairOrder}', [RepairOrderController::class, 'show'])->name('repair-orders.show');
-    Route::post('/repair-orders/{repairOrder}/confirm', [RepairOrderController::class, 'confirm'])->middleware('throttle:20,1')->name('repair-orders.confirm');
-    Route::post('/repair-orders/{repairOrder}/cancel', [RepairOrderController::class, 'cancel'])->middleware('throttle:20,1')->name('repair-orders.cancel');
-    Route::post('/repair-orders/{repairOrder}/run', [RepairOrderController::class, 'run'])->middleware('throttle:6,1')->name('repair-orders.run');
-    Route::post('/repair-orders/{repairOrder}/retry', [RepairOrderController::class, 'retry'])->middleware('throttle:6,1')->name('repair-orders.retry');
-    Route::get('/repair-orders/{repairOrder}/executions/{run}', [RepairOrderController::class, 'showExecution'])->name('repair-orders.executions.show');
-    Route::post('/repair-orders/{repairOrder}/executions/{run}/resume', [RepairOrderController::class, 'resume'])->middleware('throttle:6,1')->name('repair-orders.executions.resume');
-    Route::post('/repair-orders/{repairOrder}/executions/{run}/accept', [RepairOrderController::class, 'accept'])->name('repair-orders.executions.accept');
     // Halaman "Accepted" dilebur ke halaman eksekusi: izin disetujui di sana.
     Route::get('/accepted', fn () => redirect()->route('dashboard'))->name('accepted.index');
     Route::post('/accepted/{permissionRequest}/approve', [PermissionRequestController::class, 'approve'])->name('accepted.approve');
@@ -101,7 +91,6 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/projects/{project}/demo/stop', [DemoController::class, 'stop'])->name('projects.demo.stop');
     Route::get('/projects/{project}/demo/status', [DemoController::class, 'status'])->name('projects.demo.status');
     Route::post('/projects/{project}/demo/rebuild-assets', [DemoController::class, 'rebuildAssets'])->middleware('throttle:6,1')->name('projects.demo.rebuild');
-    Route::post('/projects/{project}/demo/request-fix', [DemoController::class, 'requestFix'])->middleware('throttle:6,1')->name('projects.demo.request-fix');
     Route::get('/projects/{project}/download', [ProjectDownloadController::class, 'download'])->name('projects.download');
     Route::get('/stories/{story}/tasks', [TaskController::class, 'index'])->name('stories.tasks.index');
     Route::get('/stories/{story}/tasks/create', [TaskController::class, 'create'])->name('stories.tasks.create');

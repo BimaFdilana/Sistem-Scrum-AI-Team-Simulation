@@ -2,8 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use App\Jobs\ExecuteExecutionTaskJob;
 use App\Models\PermissionRequest;
+use App\Support\Execution\ExecutionScheduler;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
 
@@ -15,7 +15,7 @@ class PermissionRequestController extends Controller
         PermissionRequest::expireStale();
 
         $requests = PermissionRequest::query()
-            ->with(['run.story', 'run.repairOrder', 'requester'])
+            ->with(['run.story', 'requester'])
             ->orderByRaw("CASE WHEN status = 'PENDING' THEN 0 ELSE 1 END")
             ->latest()
             ->paginate(20);
@@ -49,7 +49,7 @@ class PermissionRequestController extends Controller
 
         // Paralel terkendali: kirim semua task yang siap (dependensi beres,
         // file tidak beririsan) sampai kuota execution.max_parallel.
-        app(\App\Support\Execution\ExecutionScheduler::class)->dispatchReady($run);
+        app(ExecutionScheduler::class)->dispatchReady($run);
 
         return back()->with('status', 'Izin disetujui. Agen mulai bekerja.');
     }

@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Models\ExecutionRun;
 use App\Models\Project;
-use App\Models\RepairOrder;
 use App\Models\Story;
 use App\Models\User;
 use App\Services\GithubApiClient;
@@ -287,22 +286,6 @@ class GithubPhase3Test extends TestCase
     // ------------------------------------------------------------------
     // 5. Demo request fix
     // ------------------------------------------------------------------
-
-    public function test_demo_request_fix_creates_repair_order(): void
-    {
-        $project = $this->projectWithGithub();
-        $user = User::factory()->create();
-
-        $response = $this->actingAs($user)
-            ->post(route('projects.demo.request-fix', $project));
-
-        $response->assertRedirect(route('repair-orders.show', RepairOrder::query()->latest()->first()));
-
-        $order = RepairOrder::query()->latest()->first();
-        $this->assertSame('integration', $order->target_branch);
-        $this->assertSame('DRAFT', $order->status);
-        $this->assertSame($project->id, $order->project_id);
-    }
 
     protected function tearDown(): void
     {

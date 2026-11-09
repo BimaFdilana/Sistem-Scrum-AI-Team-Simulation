@@ -178,7 +178,6 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             $fileScopeSection = $useHermes ? $this->fileScopeSection($run, $task, $project?->name) : '';
             $prompt = $useHermes ? implode("\n\n", array_filter([
                 "Kamu {$task->assigneeName()}. Kerjakan task berikut pada project Laravel di direktori kerja ini.",
-                ($run->repair_order_id ? 'BATASAN PERINTAH PERBAIKAN: dilarang menghapus file dan dilarang operasi destruktif terhadap data; lakukan hanya perubahan minimal yang aman.' : ''),
                 $originalStatus === 'REVISION' && $task->qa_feedback
                     ? 'REVISI (putaran '.($task->revision_count + 1).'): perbaiki berdasarkan feedback QA berikut: '.$task->qa_feedback
                     : 'Task: '.$task->title.' — '.$task->description,
@@ -188,7 +187,6 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             ])) : implode("\n\n", array_filter([
                 "Kamu {$task->assigneeName()}. Kerjakan task berikut pada project Laravel HANYA lewat tool yang tersedia.",
                 'Langkah: baca file yang relevan dengan read_file, ubah dengan apply_edit (old_text harus cocok persis tepat satu kali), buat file baru dengan create_file, dan akhiri dengan submit_task berisi ringkasan perubahan. Jangan menulis code di teks chat.',
-                ($run->repair_order_id ? 'BATASAN PERINTAH PERBAIKAN: dilarang menghapus file (tool delete_file) dan dilarang operasi destruktif terhadap data; lakukan hanya perubahan minimal yang aman.' : ''),
                 $originalStatus === 'REVISION' && $task->qa_feedback
                     ? 'REVISI (putaran '.($task->revision_count + 1).'): perbaiki berdasarkan feedback QA berikut: '.$task->qa_feedback
                     : 'Task: '.$task->title.' — '.$task->description,
@@ -257,7 +255,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // tiap tool terhadap worktree dan mengembalikan daftar file
             // yang berubah + ringkasan; kegagalan di tengah loop
             // mengembalikan worktree ke kondisi semula.
-            $result = $runner->run($task->assignee, $worktree, $prompt, $run->repair_order_id === null, [
+            $result = $runner->run($task->assignee, $worktree, $prompt, true, [
                 'execution_run_id' => $run->id,
                 'execution_task_id' => $task->id,
                 'source' => 'execution',
@@ -603,8 +601,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             "Patch kamu DITOLAK sistem karena: {$validationError->getMessage()}",
             'Pecah menjadi patch yang LEBIH KECIL: maksimal 2 file saja, kirim ulang hanya file yang paling penting dulu.',
             'Kembalikan JSON tepat: {"files":[{"path":"relatif/ke/file.php","action":"create|update|delete","content":"isi lengkap file"}],"summary":"ringkasan perubahan"}.',
-            'Aturan: path relatif dari root project, tanpa .. atau path absolut; action delete tanpa content; tulis code lengkap yang valid, bukan potongan; JANGAN sertakan penjelasan di luar JSON.'
-                .($run->repair_order_id ? ' BATASAN PERINTAH PERBAIKAN: dilarang menghapus file (action delete) dan dilarang operasi destruktif terhadap data; lakukan hanya perubahan minimal yang aman.' : ''),
+            'Aturan: path relatif dari root project, tanpa .. atau path absolut; action delete tanpa content; tulis code lengkap yang valid, bukan potongan; JANGAN sertakan penjelasan di luar JSON.',
             // Jangan hilangkan konteks QA saat retry di putaran revisi.
             $isQaRevision
                 ? 'REVISI (putaran '.($task->revision_count + 1).'): perbaiki berdasarkan feedback QA berikut, lalu kirim ulang SEMUA file yang berubah: '.$task->qa_feedback
@@ -621,7 +618,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                 true
             );
             $patchRetry = $this->validatedPatch($rawRetry);
-            $applied = $patcher->apply($worktree, $patchRetry['files'], $run->repair_order_id === null);
+            $applied = $patcher->apply($worktree, $patchRetry['files'], true);
 
             return ['applied' => $applied, 'patch' => $patchRetry];
         } catch (Throwable $retryError) {

@@ -14,7 +14,7 @@ class ExecutionRun extends Model
     public const NEEDS_PO = 'NEEDS_PO';
 
     protected $fillable = [
-        'story_id', 'repair_order_id', 'requested_by', 'status', 'executor_policy', 'mode', 'qa_mode', 'qa_rounds', 'qa_started_at', 'qa_finished_at', 'summary', 'error_code', 'completed_at',
+        'story_id', 'requested_by', 'status', 'executor_policy', 'mode', 'qa_mode', 'qa_rounds', 'qa_started_at', 'qa_finished_at', 'summary', 'error_code', 'completed_at',
         'github_branch', 'base_branch', 'work_branch',
     ];
 
@@ -28,15 +28,10 @@ class ExecutionRun extends Model
         return $this->belongsTo(Story::class);
     }
 
-    public function repairOrder(): BelongsTo
-    {
-        return $this->belongsTo(RepairOrder::class);
-    }
-
-    /** Project target eksekusi: dari story atau dari perintah perbaikan. */
+    /** Project target eksekusi: project milik story. */
     public function project(): ?Project
     {
-        return $this->story?->project ?? $this->repairOrder?->project;
+        return $this->story?->project;
     }
 
     /** Label subjek untuk judul/permintaan izin ("US-3 — ..." atau "Perintah #2 — ..."). */
@@ -45,9 +40,6 @@ class ExecutionRun extends Model
         if ($this->story) {
             return $this->story->display_id.' — '.$this->story->effectiveTitle();
         }
-        if ($this->repairOrder) {
-            return 'Perintah #'.$this->repairOrder->id.' — '.$this->repairOrder->title;
-        }
 
         return 'Eksekusi #'.$this->id;
     }
@@ -55,14 +47,12 @@ class ExecutionRun extends Model
     public function subjectTitle(): string
     {
         return $this->story?->effectiveTitle()
-            ?? $this->repairOrder?->title
             ?? 'Eksekusi #'.$this->id;
     }
 
     public function subjectCriteria(): string
     {
         return $this->story?->effectiveAcceptanceCriteria()
-            ?? $this->repairOrder?->summary
             ?? '-';
     }
 
@@ -149,7 +139,7 @@ class ExecutionRun extends Model
     public function resumeFromPo(): bool
     {
         // Story/perintah yang sudah diputuskan PO (Berhasil/Gagal) terkunci dari eksekusi ulang.
-        if ($this->story?->isAccepted() || $this->repairOrder?->isAccepted()) {
+        if ($this->story?->isAccepted()) {
             return false;
         }
 
@@ -202,21 +192,6 @@ class ExecutionRun extends Model
             $current = static::query()->whereKey($run->getKey())->value('status');
             if ($current === self::NEEDS_PO) {
                 $run->status = self::NEEDS_PO;
-            }
-        });
-
-        // Sinkronkan status perintah perbaikan saat execution run-nya terminal.
-        static::updated(function (ExecutionRun $run): void {
-            if (! $run->wasChanged('status') || ! $run->repair_order_id) {
-                return;
-            }
-            $orderStatus = [
-                'COMPLETED' => 'COMPLETED',
-                'BLOCKED' => 'BLOCKED',
-                'FAILED' => 'FAILED',
-            ][$run->status] ?? null;
-            if ($orderStatus !== null) {
-                $run->repairOrder?->forceFill(['status' => $orderStatus])->save();
             }
         });
     }

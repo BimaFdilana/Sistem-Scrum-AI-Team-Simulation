@@ -40,7 +40,7 @@ class MergeExecutionJob implements ShouldQueue
         HermesClient $scrumMaster,
         ChatDisclosurePolicy $disclosure,
     ): void {
-        $run = ExecutionRun::query()->with(['tasks', 'story.project', 'repairOrder.project'])->find($this->runId);
+        $run = ExecutionRun::query()->with(['tasks', 'story.project'])->find($this->runId);
         if (! $run || $run->status !== 'MERGING') {
             return;
         }
@@ -169,20 +169,11 @@ class MergeExecutionJob implements ShouldQueue
     /**
      * Fase 3 GitHub: push hasil merge lokal ke GitHub.
      * - Untuk story: push main lokal → story branch.
-     * - Untuk repair order dengan target_branch: push main lokal → target branch.
      * Graceful: gagal → log saja, tidak menggagalkan eksekusi.
      */
     private function pushStoryBranch(ExecutionRun $run, string $baseline): void
     {
         $targetBranch = $run->github_branch;
-
-        // Repair order untuk demo/integration: target branch dari order.
-        if (! filled($targetBranch) && $run->repair_order_id) {
-            $order = $run->repairOrder;
-            if ($order && filled($order->target_branch)) {
-                $targetBranch = $order->target_branch;
-            }
-        }
 
         if (! filled($targetBranch)) {
             return;

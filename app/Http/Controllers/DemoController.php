@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\DemoServer;
 use App\Models\Project;
 use App\Support\Demo\DemoServerManager;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use RuntimeException;
 
@@ -22,11 +24,11 @@ class DemoController extends Controller
     }
 
     /** Status demo untuk polling UI (tanpa memulai/menghentikan apa pun). */
-    public function status(Project $project, DemoServerManager $demos): \Illuminate\Http\JsonResponse
+    public function status(Project $project, DemoServerManager $demos): JsonResponse
     {
         // Baca record RUNNING terakhir apa adanya: endpoint status tidak boleh
         // memutuskan hidup/mati berdasarkan PID (bisa beda namespace proses).
-        $demo = \App\Models\DemoServer::query()
+        $demo = DemoServer::query()
             ->where('project_id', $project->id)
             ->where('status', 'RUNNING')
             ->latest('id')
@@ -67,25 +69,5 @@ class DemoController extends Controller
         }
 
         return back()->with('status', 'Demo dihentikan.');
-    }
-
-    /**
-     * Fase 3 GitHub: PO minta SM memperbaiki demo yang bermasalah.
-     * Membuat RepairOrder khusus dengan target branch integration.
-     */
-    public function requestFix(Project $project): RedirectResponse
-    {
-        $order = \App\Models\RepairOrder::query()->create([
-            'requested_by' => auth()->id(),
-            'project_id' => $project->id,
-            'title' => 'Perbaiki demo (branch integration)',
-            'summary' => 'Demo project bermasalah. Periksa branch integration, temukan penyebabnya, dan perbaiki agar demo berjalan normal.',
-            'original_message' => 'Minta SM perbaiki demo yang bermasalah di branch integration.',
-            'status' => 'DRAFT',
-            'target_branch' => 'integration',
-        ]);
-
-        return redirect()->route('repair-orders.show', $order)
-            ->with('status', 'Permintaan perbaikan demo dibuat. Konfirmasi detailnya lalu jalankan.');
     }
 }

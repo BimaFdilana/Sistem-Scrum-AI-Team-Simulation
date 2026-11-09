@@ -216,42 +216,6 @@ class PatchRetryNotificationTest extends TestCase
         );
     }
 
-    public function test_tool_loop_membawa_qa_feedback_dan_batasan_repair_order(): void
-    {
-        Queue::fake();
-        [$owner, $baseline, $run, $task] = $this->makeRun([
-            'status' => 'REVISION',
-            'qa_feedback' => 'Tolong perbaiki validasi email',
-            'revision_count' => 1,
-        ]);
-        $repairOrder = \App\Models\RepairOrder::query()->create([
-            'requested_by' => $owner->id,
-            'project_id' => $run->story->project_id,
-            'title' => 'Perbaiki demo',
-            'summary' => 'Test',
-            'original_message' => 'Test message',
-            'status' => 'RUNNING',
-        ]);
-        $run->forceFill(['repair_order_id' => $repairOrder->id])->save();
-
-        $captured = [];
-        $runner = $this->mock(AgentToolRunner::class, function ($mock) use (&$captured): void {
-            $mock->shouldReceive('run')->once()->andReturnUsing(function (string $slug, string $worktree, string $prompt, bool $allowDelete) use (&$captured) {
-                $captured[] = ['prompt' => $prompt, 'allowDelete' => $allowDelete];
-
-                return ['files' => [], 'summary' => 'ok'];
-            });
-        });
-
-        $this->runJob($run, $task, $runner);
-
-        $this->assertCount(1, $captured, 'Runner harus dipanggil sekali');
-        $this->assertStringContainsString('Tolong perbaiki validasi email', $captured[0]['prompt'], 'Prompt harus membawa QA feedback');
-        $this->assertStringContainsString('BATASAN PERINTAH PERBAIKAN', $captured[0]['prompt'], 'Prompt harus membawa batasan repair order');
-        $this->assertFalse($captured[0]['allowDelete'], 'Perintah perbaikan melarang delete');
-        $this->assertEquals('IN_REVIEW', $task->fresh()->status);
-    }
-
     public function test_tidak_ada_duplikasi_notifikasi(): void
     {
         [$owner, $baseline, $run, $task] = $this->makeRun();

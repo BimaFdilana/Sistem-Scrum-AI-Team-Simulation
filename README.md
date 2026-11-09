@@ -23,7 +23,6 @@ Simulasi tim Scrum yang dijalankan agen AI: **Product Owner** (kamu), **Scrum Ma
 **Eksekusi kode oleh agen**
 - Pipeline: breakdown → izin PO (sekali per eksekusi) → FE/BE mengerjakan di git worktree terisolasi → QA review (maks 2 revisi) → merge → final acceptance PO (Berhasil/Gagal mengunci story).
 - Agen mengirim **patch JSON**; sistem yang menerapkannya (path traversal & `.git` diblokir).
-- **Perintah Perbaikan**: PO memerintah dari chat SM ("perbaiki halaman login yang lambat") → SM mengklasifikasikan → kartu konfirmasi → pipeline yang sama.
 
 **Chat dengan Scrum Master**
 - Chat real-time dengan loading indicator; Enter kirim, Shift+Enter baris baru.

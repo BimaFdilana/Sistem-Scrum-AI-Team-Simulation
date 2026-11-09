@@ -71,7 +71,7 @@
             // Markdown mentah diubah jadi heading/tabel/daftar yang rapi.
             // Pesan pengguna tidak disentuh — tetap teks biasa.
             if (window.ScrumChatMarkdown) {
-                document.querySelectorAll('.chat-message-assistant:not(.repair-card)').forEach((article) => {
+                document.querySelectorAll('.chat-message-assistant').forEach((article) => {
                     const p = article.querySelector(':scope > p');
                     if (!p) return;
                     const div = document.createElement('div');
@@ -168,122 +168,6 @@
                     paragraph.textContent = content;
                     article.append(paragraph);
                 }
-                transcript.append(article);
-                article.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            };
-
-            // Kartu konfirmasi perintah perbaikan dari Scrum Master.
-            const addRepairCard = (card) => {
-                const article = document.createElement('article');
-                article.className = 'chat-message chat-message-assistant repair-card';
-                const label = document.createElement('span');
-                label.className = 'chat-message-label';
-                label.textContent = 'Perintah Perbaikan — butuh konfirmasi';
-                article.append(label);
-
-                const title = document.createElement('strong');
-                title.textContent = card.title;
-                article.append(title);
-
-                const summary = document.createElement('p');
-                summary.textContent = card.summary;
-                article.append(summary);
-
-                if (card.risky) {
-                    const warn = document.createElement('p');
-                    warn.className = 'repair-card-warn';
-                    warn.textContent = '⚠️ ' + (card.risk_note || 'Perintah terdeteksi berisiko.');
-                    article.append(warn);
-                }
-
-                let projectSelect = null;
-                if (card.needs_project) {
-                    const wrap = document.createElement('label');
-                    wrap.className = 'repair-card-project';
-                    wrap.append(document.createTextNode('Project: '));
-                    projectSelect = document.createElement('select');
-                    card.projects.forEach((p) => {
-                        const opt = document.createElement('option');
-                        opt.value = p.id;
-                        opt.textContent = p.name;
-                        projectSelect.append(opt);
-                    });
-                    wrap.append(projectSelect);
-                    article.append(wrap);
-                } else if (card.project_name) {
-                    const proj = document.createElement('p');
-                    proj.className = 'repair-card-project-name';
-                    proj.textContent = 'Project: ' + card.project_name;
-                    article.append(proj);
-                }
-
-                const actions = document.createElement('div');
-                actions.className = 'repair-card-actions';
-                const confirmBtn = document.createElement('button');
-                confirmBtn.type = 'button';
-                confirmBtn.className = 'button button-primary';
-                confirmBtn.textContent = 'Konfirmasi';
-                const cancelBtn = document.createElement('button');
-                cancelBtn.type = 'button';
-                cancelBtn.className = 'button';
-                cancelBtn.textContent = 'Batalkan';
-                actions.append(confirmBtn, cancelBtn);
-                article.append(actions);
-
-                const done = (text, link) => {
-                    actions.remove();
-                    if (projectSelect) projectSelect.disabled = true;
-                    const note = document.createElement('p');
-                    note.className = 'repair-card-note';
-                    note.textContent = text;
-                    article.append(note);
-                    if (link) {
-                        const a = document.createElement('a');
-                        a.href = link;
-                        a.className = 'repair-card-link';
-                        a.textContent = 'Buka menu Perintah Perbaikan →';
-                        article.append(a);
-                    }
-                };
-                const postCard = async (url, body) => {
-                    const response = await fetch(url, {
-                        method: 'POST',
-                        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf },
-                        body: JSON.stringify(body || {}),
-                    });
-                    const payload = await response.json();
-                    if (!response.ok) throw new Error(payload.message || 'Gagal memproses perintah.');
-                    return payload;
-                };
-
-                confirmBtn.addEventListener('click', async () => {
-                    confirmBtn.disabled = true;
-                    cancelBtn.disabled = true;
-                    try {
-                        const body = projectSelect ? { project_id: Number(projectSelect.value) } : {};
-                        const payload = await postCard(`/repair-orders/${card.id}/confirm`, body);
-                        done('✓ ' + payload.message, payload.redirect_url);
-                        error.textContent = 'Perintah perbaikan tersimpan di menu.';
-                    } catch (e) {
-                        confirmBtn.disabled = false;
-                        cancelBtn.disabled = false;
-                        error.textContent = e.message || 'Konfirmasi gagal.';
-                    }
-                });
-                cancelBtn.addEventListener('click', async () => {
-                    confirmBtn.disabled = true;
-                    cancelBtn.disabled = true;
-                    try {
-                        await postCard(`/repair-orders/${card.id}/cancel`);
-                        done('Perintah dibatalkan. Klasifikasi saya salah? Tulis ulang perintahnya dengan lebih jelas.');
-                        error.textContent = 'Percakapan tersimpan di workspace.';
-                    } catch (e) {
-                        confirmBtn.disabled = false;
-                        cancelBtn.disabled = false;
-                        error.textContent = e.message || 'Pembatalan gagal.';
-                    }
-                });
-
                 transcript.append(article);
                 article.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             };
@@ -386,7 +270,6 @@
                         if (lastUserMsg) lastUserMsg.src = payload.user_message.image_url;
                     }
                     addMessage('assistant', payload.assistant_message.content);
-                    if (payload.repair_order) addRepairCard(payload.repair_order);
                     error.textContent = 'Percakapan tersimpan di workspace.';
                 } catch (exception) {
                     hideTyping();

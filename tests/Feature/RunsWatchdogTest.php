@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Jobs\ExecuteExecutionTaskJob;
 use App\Models\ExecutionRun;
 use App\Models\Project;
-use App\Models\RepairOrder;
 use App\Models\Story;
 use App\Models\User;
 use App\Services\AgentToolRunner;
@@ -114,33 +113,6 @@ class RunsWatchdogTest extends TestCase
         $stale->forceFill(['status' => 'REVIEWING'])->save();
 
         $this->assertSame('NEEDS_PO', $run->fresh()->status);
-    }
-
-    public function test_po_can_resume_repair_order_run(): void
-    {
-        Queue::fake();
-        $owner = User::factory()->create();
-        $project = Project::query()->create([
-            'name' => 'RO', 'project_type' => 'NEW_PROJECT', 'stack' => 'Laravel', 'status' => 'BASELINE_READY',
-        ]);
-        $order = RepairOrder::query()->create([
-            'requested_by' => $owner->id, 'project_id' => $project->id, 'title' => 'Perbaiki', 'summary' => 'x', 'original_message' => 'x', 'status' => 'EXECUTING',
-        ]);
-        $run = ExecutionRun::query()->create([
-            'repair_order_id' => $order->id, 'requested_by' => $owner->id, 'status' => 'EXECUTING',
-        ]);
-        $task = $run->tasks()->create([
-            'title' => 'T', 'description' => 'D', 'assignee' => 'backend-developer', 'status' => 'IN_PROGRESS',
-            'stall_count' => 2, 'last_progress_at' => now()->subHour(),
-        ]);
-        $this->artisan('runs:watchdog');
-        $this->assertSame('NEEDS_PO', $run->fresh()->status);
-
-        $this->actingAs($owner)->post(route('repair-orders.executions.resume', [$order, $run]))->assertRedirect();
-
-        $this->assertSame('EXECUTING', $run->fresh()->status);
-        $this->assertSame('PENDING', $task->fresh()->status);
-        Queue::assertPushed(ExecuteExecutionTaskJob::class);
     }
 
     public function test_duplicate_job_for_already_claimed_task_does_nothing(): void

@@ -27,7 +27,7 @@ class ActivityController extends Controller
     public function active(Request $request): JsonResponse
     {
         $runs = ExecutionRun::query()
-            ->with(['story', 'repairOrder', 'tasks' => fn ($q) => $q->orderBy('sort_order')->orderBy('id')])
+            ->with(['story', 'tasks' => fn ($q) => $q->orderBy('sort_order')->orderBy('id')])
             ->where(function ($q) {
                 $q->whereIn('status', [...self::ACTIVE, ExecutionRun::NEEDS_PO])
                     ->orWhere(fn ($q) => $q->whereIn('status', ['COMPLETED', 'FAILED', 'BLOCKED'])
@@ -69,9 +69,7 @@ class ActivityController extends Controller
         };
 
         $tasks = $run->tasks;
-        $detailUrl = $run->story
-            ? route('stories.executions.show', [$run->story, $run])
-            : ($run->repairOrder ? route('repair-orders.executions.show', [$run->repairOrder, $run]) : null);
+        $detailUrl = $run->story ? route('stories.executions.show', [$run->story, $run]) : null;
 
         $actions = [];
         if ($run->isWaitingForPo()) {
@@ -79,9 +77,7 @@ class ActivityController extends Controller
                 'key' => 'resume',
                 'label' => 'Lanjutkan',
                 'method' => 'post',
-                'url' => $run->story
-                    ? route('stories.executions.resume', [$run->story, $run])
-                    : route('repair-orders.executions.resume', [$run->repairOrder, $run]),
+                'url' => route('stories.executions.resume', [$run->story, $run]),
             ];
         }
 
