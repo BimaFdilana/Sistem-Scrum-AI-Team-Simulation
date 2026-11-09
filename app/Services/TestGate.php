@@ -49,6 +49,18 @@ class TestGate
             return 'Gerbang php -l gagal: '.implode(' | ', $failures);
         }
 
+        // Blade yang salah tidak tertangkap `php -l` tapi meledak saat render
+        // (penyebab umum HTTP 500 di demo). Compile view sebagai bagian gerbang.
+        $touchedBlade = collect($changedFiles)->contains(fn (string $f) => str_ends_with($f, '.blade.php'));
+        if ($touchedBlade && is_file($worktree.'/artisan')) {
+            $compile = new Process([PHP_BINARY, 'artisan', 'view:cache', '--no-interaction'], $worktree);
+            $compile->setTimeout(120);
+            $compile->run();
+            if (! $compile->isSuccessful()) {
+                return 'Gerbang Blade gagal (view:cache): '.mb_substr(trim($compile->getErrorOutput() ?: $compile->getOutput()), 0, 1000);
+            }
+        }
+
         $testCommand = $testCommand !== null ? trim($testCommand) : '';
         if ($testCommand === '') {
             return null;

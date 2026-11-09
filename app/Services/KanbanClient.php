@@ -6,6 +6,7 @@ use App\Models\Project;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Symfony\Component\Process\Process;
+use Throwable;
 
 /**
  * Klien board kanban Hermes (multi-agent), lewat CLI hermes yang sama
@@ -141,13 +142,37 @@ class KanbanClient
             $task = $data['task'] ?? $data;
             $status = $task['status'] ?? $task['state'] ?? null;
             if (is_string($status) && $status !== '') {
-                return ['status' => strtolower($status), 'raw' => is_array($task) ? $task : []];
+                // `raw` sengaja memuat SELURUH payload (task + runs +
+                // latest_summary), bukan hanya task: pemanggil butuh alasan
+                // blokir dan ringkasan run terakhir.
+                return [
+                    'status' => strtolower($status),
+                    'raw' => $data,
+                    'task' => is_array($task) ? $task : [],
+                ];
             }
         }
         if (preg_match('/"status"\s*:\s*"([^"]+)"/', $output, $m) === 1) {
             return ['status' => strtolower($m[1]), 'raw' => []];
         }
         throw new RuntimeException('Status kartu kanban '.$taskId.' tidak bisa dibaca dari output: '.mb_substr($output, 0, 500));
+    }
+
+    /**
+     * Blokir kartu agar worker berhenti (dipakai watchdog).
+     * Best-effort: kegagalan CLI tidak boleh melempar ke pemanggil.
+     */
+    public function blockTask(string $board, string $taskId, string $reason): bool
+    {
+        $command = [$this->binary(), 'kanban', '--board', $board, 'block', $taskId];
+
+        try {
+            $process = $this->run($command);
+
+            return $process->isSuccessful();
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     private function extractId(string $output): ?string

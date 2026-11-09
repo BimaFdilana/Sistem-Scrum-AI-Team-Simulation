@@ -88,12 +88,15 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/repair-orders/{repairOrder}/retry', [RepairOrderController::class, 'retry'])->middleware('throttle:6,1')->name('repair-orders.retry');
     Route::get('/repair-orders/{repairOrder}/executions/{run}', [RepairOrderController::class, 'showExecution'])->name('repair-orders.executions.show');
     Route::post('/repair-orders/{repairOrder}/executions/{run}/accept', [RepairOrderController::class, 'accept'])->name('repair-orders.executions.accept');
-    Route::get('/accepted', [PermissionRequestController::class, 'index'])->name('accepted.index');
+    // Halaman "Accepted" dilebur ke halaman eksekusi: izin disetujui di sana.
+    Route::get('/accepted', fn () => redirect()->route('dashboard'))->name('accepted.index');
     Route::post('/accepted/{permissionRequest}/approve', [PermissionRequestController::class, 'approve'])->name('accepted.approve');
     Route::post('/accepted/{permissionRequest}/reject', [PermissionRequestController::class, 'reject'])->name('accepted.reject');
     Route::post('/accepted/{permissionRequest}/cancel', [PermissionRequestController::class, 'cancel'])->name('accepted.cancel');
     Route::post('/projects/{project}/demo/start', [DemoController::class, 'start'])->middleware('throttle:6,1')->name('projects.demo.start');
     Route::post('/projects/{project}/demo/stop', [DemoController::class, 'stop'])->name('projects.demo.stop');
+    Route::get('/projects/{project}/demo/status', [DemoController::class, 'status'])->name('projects.demo.status');
+    Route::post('/projects/{project}/demo/rebuild-assets', [DemoController::class, 'rebuildAssets'])->middleware('throttle:6,1')->name('projects.demo.rebuild');
     Route::post('/projects/{project}/demo/request-fix', [DemoController::class, 'requestFix'])->middleware('throttle:6,1')->name('projects.demo.request-fix');
     Route::get('/projects/{project}/download', [ProjectDownloadController::class, 'download'])->name('projects.download');
     Route::get('/stories/{story}/tasks', [TaskController::class, 'index'])->name('stories.tasks.index');

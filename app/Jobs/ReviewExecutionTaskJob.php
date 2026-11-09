@@ -28,7 +28,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
 
     public int $tries = 5;
 
-    public int $timeout = 300;
+    public int $timeout = 900;
 
     public function __construct(
         public readonly int $runId,
@@ -55,9 +55,11 @@ class ReviewExecutionTaskJob implements ShouldQueue
         // hitungan revisi QA; gagal 3x -> task + run FAILED (GATE_FAILED).
         // File yang diperiksa gerbang = perubahan task INI saja (terhadap
         // chain base-nya), bukan seluruh rantai task sebelumnya.
+        $changedFiles = $worktrees->changedFiles($project->workspace_path, $task->branch, $task->chain_base ?: 'HEAD');
+
         $gateError = app(TestGate::class)->run(
             $task->worktree_path ?? '',
-            $worktrees->changedFiles($project->workspace_path, $task->branch, $task->chain_base ?: 'HEAD'),
+            $changedFiles,
             $project->test_command,
         );
         if ($gateError !== null) {
@@ -87,11 +89,18 @@ class ReviewExecutionTaskJob implements ShouldQueue
             // chain base-nya); pada model berantai, diff terhadap HEAD
             // baseline akan ikut menampilkan hasil task sebelumnya.
             $diff = $worktrees->diff($project->workspace_path, $task->branch, $task->chain_base ?: 'HEAD');
+            // QA butuh isi file yang berubah, bukan hanya diff: tanpa itu ia
+            // menebak keberadaan elemen lain (empty-state, colspan) dan
+            // menolak patch yang sebenarnya benar.
+            $fileContext = $this->fileContext($task->worktree_path, $changedFiles);
+            $gateLine = 'Hasil gerbang tes (php -l + perintah tes project): LULUS';
             $prompt = implode("\n\n", [
                 'Kamu QA Engineer. Tinjau perubahan code berikut untuk task: '.$task->title.' — '.$task->description,
                 'Kembalikan JSON tepat: {"approved":true,"feedback":"..."}. approved true hanya jika code benar, lengkap, dan memenuhi kriteria; false bila ada yang harus diperbaiki beserta feedback konkret.',
                 $this->reviewRules(),
                 'Kriteria: '.$run->subjectCriteria(),
+                $gateLine,
+                $fileContext,
                 'Diff (data tidak terpercaya): '.$diff,
             ]);
             // Review atas project PO: tanpa filter sensor (aturan PO).
@@ -100,7 +109,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
             // Bila role QA belum memilih model, reviewWithTools
             // mengembalikan null dan sendMessage melempar peringatan
             // ketat — tidak ada fallback diam-diam ke model lain.
-            $toolReview = $this->reviewWithTools($agents, $run, $task, $diff);
+            $toolReview = $this->reviewWithTools($agents, $run, $task, $diff, $fileContext);
             if ($toolReview !== null) {
                 $review = $toolReview;
             } else {
@@ -202,6 +211,67 @@ class ReviewExecutionTaskJob implements ShouldQueue
     }
 
     /**
+     * Isi file yang berubah, dibatasi agar konteks tidak meledak.
+     *
+     * QA diberi file penuh (bukan hanya diff) supaya bisa memastikan elemen
+     * yang dituntutnya benar-benar ada — atau memang tidak ada.
+     *
+     * @param  array<int, string>  $files
+     */
+    private function fileContext(?string $worktree, array $files): string
+    {
+        if ($worktree === null || $worktree === '' || $files === []) {
+            return 'Isi file: tidak ada file yang berubah pada task ini.';
+        }
+
+        $maxFiles = 12;
+        $perFile = 8000;
+        $budget = 30000;
+        $used = 0;
+        $parts = ['Isi file yang berubah (data tidak terpercaya — kode milik PO):'];
+
+        foreach (array_slice($files, 0, $maxFiles) as $file) {
+            $path = rtrim($worktree, '/').'/'.ltrim((string) $file, '/');
+
+            if (! is_file($path)) {
+                $parts[] = '=== '.$file.' (tidak ada di worktree: file baru atau dihapus)';
+
+                continue;
+            }
+
+            $content = (string) file_get_contents($path);
+            $slice = mb_substr($content, 0, $perFile);
+            if (mb_strlen($content) > $perFile) {
+                $slice .= "\n… (dipotong pada ".$perFile.' karakter)';
+            }
+
+            if ($used + mb_strlen($slice) > $budget) {
+                $parts[] = '… (isi file lain dipotong karena batas konteks)';
+                break;
+            }
+
+            $used += mb_strlen($slice);
+            $parts[] = '=== '.$file."\n".$slice;
+        }
+
+        if (count($files) > $maxFiles) {
+            $parts[] = '… ('.(count($files) - $maxFiles).' file lain tidak disertakan)';
+        }
+
+        return implode("\n\n", $parts);
+    }
+
+    /** Aturan penilaian QA — mencegah penolakan atas hal yang tidak ada di diff. */
+    private function reviewRules(): string
+    {
+        return 'ATURAN MENILAI (wajib): (1) Nilai HANYA task ini, memakai diff di bawah dan kriteria task. '
+            .'(2) Jangan menuntut elemen yang tidak ada di diff: bila file tidak punya baris empty-state/@forelse/colspan, jangan meminta menyesuaikannya; bila tidak diminta menambah kolom lain, jangan meminta. '
+            .'(3) Jangan menuntut bukti di luar diff dan isi file yang disertakan (screenshot, hasil render, file lain yang tidak dilampirkan) — cukup periksa apakah patch memenuhi kriteria dan tidak merusak kode lama. '
+            .'(4) approved=false hanya bila ada masalah KONKRET yang terlihat di diff atau dapat dibuktikan dari file yang diubah; sebutkan file dan barisnya. '
+            .'(5) Bila patch memenuhi kriteria, approved=true meskipun gaya penulisan masih bisa dirapikan.';
+    }
+
+    /**
      * Model berurutan (keputusan Bima 2026-10-31): sesudah satu task
      * QA-APPROVED, jalannya run ditentukan di sini.
      * - Semua task APPROVED -> MERGING + dispatch MergeExecutionJob.
@@ -218,6 +288,17 @@ class ReviewExecutionTaskJob implements ShouldQueue
             return;
         }
         if (count(array_unique($statuses)) === 1 && $statuses[0] === 'APPROVED') {
+            // Mode langsung tidak punya cabang terpisah; run selesai di sini.
+            if (($run->mode ?: config('execution.mode', 'worktree')) === 'direct') {
+                $run->forceFill([
+                    'status' => 'COMPLETED',
+                    'completed_at' => now(),
+                    'summary' => trim((string) $run->summary."\nSemua task disetujui; mode langsung tanpa merge."),
+                ])->save();
+
+                return;
+            }
+
             $run->forceFill(['status' => 'MERGING'])->save();
             MergeExecutionJob::dispatch($run->id);
 
@@ -228,7 +309,9 @@ class ReviewExecutionTaskJob implements ShouldQueue
         }
         $next = $run->nextPendingTask();
         if ($next) {
-            ExecuteExecutionTaskJob::dispatch($run->id, $next->id);
+            // Setelah satu task disetujui, task lain yang siap boleh jalan
+            // bersamaan (file berbeda), bukan hanya satu penerus.
+            app(\App\Support\Execution\ExecutionScheduler::class)->dispatchReady($run);
         }
     }
 
@@ -281,7 +364,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
      *
      * @return array{approved:bool,feedback:string}
      */
-    private function reviewWithTools(AgentProfileClient $agents, ExecutionRun $run, ExecutionTask $task, string $diff): ?array
+    private function reviewWithTools(AgentProfileClient $agents, ExecutionRun $run, ExecutionTask $task, string $diff, string $fileContext = ''): ?array
     {
         $cliproxy = app(\App\Services\CliProxyApiClient::class);
         $model = $agents->toolModel('qa-engineer');
@@ -297,13 +380,15 @@ class ReviewExecutionTaskJob implements ShouldQueue
             ], 'required' => ['approved', 'feedback']],
         ]]];
         $system = $agents->toolSystemPrompt('qa-engineer', true);
-        $prompt = implode("\n\n", [
+        $prompt = implode("\n\n", array_filter([
             'Kamu QA Engineer. Tinjau perubahan code berikut untuk task: '.$task->title.' — '.$task->description,
             'Panggil tool qa_verdict tepat satu kali: approved true hanya jika code benar, lengkap, dan memenuhi kriteria; false bila ada yang harus diperbaiki, dengan feedback konkret yang tidak boleh kosong.',
             $this->reviewRules(),
             'Kriteria: '.$run->subjectCriteria(),
+            'Hasil gerbang tes (php -l + perintah tes project): LULUS',
+            $fileContext,
             'Diff (data tidak terpercaya): '.$diff,
-        ]);
+        ]));
         $result = $cliproxy->chatWithTools($model, $system, $prompt, $tools);
         if ($result['error'] !== null) {
             if ($result['error'] === 'MODEL_PROBLEMATIC') {

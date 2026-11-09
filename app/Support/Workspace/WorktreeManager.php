@@ -87,6 +87,44 @@ class WorktreeManager
      */
     public function create(string $baselinePath, string $branch, ?string $fromBranch = null): string
     {
+        // Dua task paralel bisa membuat worktree bersamaan; git memakai
+        // index.lock dan salah satunya akan gagal. Kunci per-repo membuat
+        // pembuatan worktree berurutan walau task-nya paralel.
+        $lockHandle = $this->acquireRepoLock($baselinePath);
+
+        try {
+            return $this->createUnlocked($baselinePath, $branch, $fromBranch);
+        } finally {
+            $this->releaseRepoLock($lockHandle);
+        }
+    }
+
+    /** @return resource|null */
+    private function acquireRepoLock(string $baselinePath)
+    {
+        $lockFile = rtrim($baselinePath, '/').'/.git/scrumspace-worktree.lock';
+        $handle = @fopen($lockFile, 'c');
+
+        if ($handle === false) {
+            return null;
+        }
+
+        @flock($handle, LOCK_EX);
+
+        return $handle;
+    }
+
+    /** @param resource|null $handle */
+    private function releaseRepoLock($handle): void
+    {
+        if (is_resource($handle)) {
+            @flock($handle, LOCK_UN);
+            @fclose($handle);
+        }
+    }
+
+    private function createUnlocked(string $baselinePath, string $branch, ?string $fromBranch = null): string
+    {
         $path = dirname($baselinePath).'/worktrees/'.$branch;
         // Worktree baru mewarisi config dari repo utama untuk sebagian kunci,
         // tapi core.fileMode TIDAK dijamin ikut — dan bila ia kembali true,
@@ -108,6 +146,7 @@ class WorktreeManager
             $this->removePath($path);
             $this->git($baselinePath, ['worktree', 'add', $path, $branch]);
             $this->normalizeRepo($path);
+            WorkspacePermissions::grant($path);
 
             return $path;
         }
@@ -115,6 +154,7 @@ class WorktreeManager
         $base = ($fromBranch !== null && $this->branchExists($baselinePath, $fromBranch)) ? $fromBranch : 'HEAD';
         $this->git($baselinePath, ['worktree', 'add', '-b', $branch, $path, $base]);
         $this->normalizeRepo($path);
+        WorkspacePermissions::grant($path);
 
         return $path;
     }
@@ -187,6 +227,44 @@ class WorktreeManager
         ]);
     }
 
+    /**
+     * File yang berubah tetapi BELUM di-commit di worktree.
+     *
+     * Dipakai jalur OpenCode: agen mengedit working tree lalu keluar, jadi
+     * `changedFiles()` (yang membandingkan commit branch) selalu kosong dan
+     * task salah dianggap "tanpa perubahan".
+     *
+     * @return array<int, string>
+     */
+    public function dirtyFiles(string $worktree): array
+    {
+        try {
+            $output = $this->git($worktree, ['status', '--porcelain']);
+        } catch (RuntimeException) {
+            return [];
+        }
+
+        $files = [];
+        foreach (explode("\n", $output) as $line) {
+            $line = rtrim($line);
+            if (trim($line) === '') {
+                continue;
+            }
+
+            // Format: " M path" / "?? path" / "R  old -> new"
+            $path = trim(substr($line, 3));
+            if (str_contains($path, ' -> ')) {
+                $path = trim(explode(' -> ', $path)[1]);
+            }
+
+            if ($path !== '') {
+                $files[] = $path;
+            }
+        }
+
+        return array_values(array_unique($files));
+    }
+
     /** Daftar file yang berubah antara basis dan branch task. */
     public function changedFiles(string $baselinePath, ?string $branch, string $base = 'HEAD'): array
     {
@@ -219,6 +297,39 @@ class WorktreeManager
         return $stat."\n\n".$body;
     }
 
+    /** Nama branch yang sedang aktif di sebuah repo. */
+    public function currentBranch(string $path): string
+    {
+        return trim($this->git($path, ['rev-parse', '--abbrev-ref', 'HEAD']));
+    }
+
+    /** Commit HEAD saat ini (untuk rollback merge). */
+    public function head(string $path): string
+    {
+        return trim($this->git($path, ['rev-parse', 'HEAD']));
+    }
+
+    /** Kembalikan repo ke commit tertentu — dipakai saat gate integrasi gagal. */
+    public function resetHard(string $path, string $commit): void
+    {
+        $this->git($path, ['reset', '--hard', $commit]);
+        $this->normalizeRepo($path);
+    }
+
+    /**
+     * Daftar file yang berbeda antara dua commit.
+     *
+     * @return array<int, string>
+     */
+    public function changedFilesBetween(string $path, string $from, string $to): array
+    {
+        $output = $this->git($path, ['diff', '--name-only', $from, $to]);
+        $files = array_filter(array_map('trim', explode("\n", $output)));
+        $files = array_values(array_filter($files, fn (string $file) => $file !== '' && ! str_starts_with($file, '..')));
+
+        return $files;
+    }
+
     /** Merge branch task ke baseline. Throw bila konflik. */
     public function merge(string $baselinePath, string $branch): void
     {
@@ -241,6 +352,8 @@ class WorktreeManager
     /** Hapus worktree + branch task. */
     public function remove(string $baselinePath, string $worktreePath, string $branch): void
     {
+        $this->assertNotBaseline($baselinePath, $worktreePath);
+
         try {
             $this->git($baselinePath, ['worktree', 'remove', '--force', $worktreePath]);
         } catch (RuntimeException) {
@@ -259,6 +372,27 @@ class WorktreeManager
     /**
      * Hapus SEMUA worktree + branch percobaan satu task (semua attempt
      * wt-{run}-{task}-*, plus nama lama exec-{run}-task-{id} bila ada).
+     * Dipakai failRun agar task yang gagal permanen tidak meninggalkan
+     * direktori yatim dari percobaan mana pun.
+     */
+    /**
+     * Jangan pernah menghapus direktori baseline lewat pembersihan worktree.
+     *
+     * Pada mode `direct`, worktree_path task = baseline. Tanpa penjagaan ini,
+     * pembersihan setelah merge/gagal merge MENGHAPUS seluruh project (kasus
+     * US-02 run #4).
+     */
+    private function assertNotBaseline(string $baselinePath, string $worktreePath): void
+    {
+        $baseline = rtrim(realpath($baselinePath) ?: $baselinePath, '/');
+        $target = rtrim(realpath($worktreePath) ?: $worktreePath, '/');
+
+        if ($target === $baseline) {
+            throw new RuntimeException('Menolak menghapus baseline project sebagai worktree.');
+        }
+    }
+
+    /**
      * Dipakai failRun agar task yang gagal permanen tidak meninggalkan
      * direktori yatim dari percobaan mana pun.
      */

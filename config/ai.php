@@ -40,6 +40,33 @@ return [
     'execution_driver' => env('EXECUTION_DRIVER', 'internal'),
 
     /*
+    | Eksekusi task lewat OpenCode CLI untuk peran tertentu (mis. backend dan
+    | frontend). Kosong = semua peran tetap lewat worker Hermes/kanban.
+    | Contoh: OPENCODE_ROLES=backend-developer,frontend-developer
+    */
+    'opencode' => [
+        // Kill-switch global: OPENCODE_ENABLED=false memaksa semua peran
+        // kembali ke Hermes tanpa mengubah kebijakan run.
+        'enabled' => (bool) env('OPENCODE_ENABLED', true),
+        'binary' => env('OPENCODE_BINARY', '/usr/bin/opencode'),
+        // Sumber tunggal model = menu AI Providers. Set false hanya bila
+        // kamu sengaja ingin OpenCode memakai model berbeda.
+        'follow_active_model' => (bool) env('OPENCODE_FOLLOW_ACTIVE_MODEL', true),
+        // Gemini flash-lite sempat diblokir content filter provider saat
+        // mengerjakan task view (run #4), sehingga task jatuh ke fallback.
+        // DeepSeek dipakai sebagai default karena tool-use-nya lebih stabil.
+        'model' => env('OPENCODE_MODEL', 'scrumgateway/deepseek-v4.1-flash-1017'),
+        // Peran yang boleh dikerjakan OpenCode pada kebijakan "auto".
+        'roles' => array_values(array_filter(array_map('trim', explode(',', (string) env('OPENCODE_ROLES', 'backend-developer,frontend-developer'))))),
+        // Dipakai sekali bila model utama diblokir content filter provider.
+        'fallback_model' => env('OPENCODE_FALLBACK_MODEL', 'scrumgateway/gemini-3.5-flash-lite'),
+        // hermes = kegagalan OpenCode dialihkan ke Hermes (run tetap selesai)
+        // never  = fail fast: task diblokir dan run berhenti untuk keputusan PO
+        'fallback' => env('OPENCODE_FALLBACK', 'hermes'),
+        'timeout' => (int) env('OPENCODE_TIMEOUT', 1500),
+    ],
+
+    /*
     |--------------------------------------------------------------------------
     | Driver estimasi story
     |--------------------------------------------------------------------------

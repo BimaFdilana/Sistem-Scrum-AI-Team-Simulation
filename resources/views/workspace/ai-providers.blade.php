@@ -84,7 +84,7 @@
                             <span class="ap-model-pill is-empty">Belum dipilih</span>
                         @endif
                     </div>
-                    <p class="ap-note">Scrum Master, Backend Developer, Frontend Developer, dan QA Engineer memakai model yang sama. Satu pilihan di sini langsung berlaku untuk estimasi, breakdown, eksekusi, dan QA review — termasuk worker kanban.</p>
+                    <p class="ap-note">Scrum Master, Backend Developer, Frontend Developer, dan QA Engineer memakai model yang sama. Satu pilihan di sini langsung berlaku untuk estimasi, breakdown, eksekusi, dan QA review — termasuk worker kanban dan <strong>agen coding OpenCode</strong> (BE/FE) yang membaca model aktif ini secara otomatis.</p>
 
                     @unless ($activeModel)
                         <p class="form-alert" style="margin-top:14px;">Belum ada model dipilih. Semua alur agent akan menolak berjalan sampai Anda memilih satu model di bawah.</p>

@@ -24,14 +24,25 @@
     @if (($activePage ?? '') === 'ai-providers')
         <link rel="stylesheet" href="{{ asset('css/ai-providers.css') }}?v={{ filemtime(public_path('css/ai-providers.css')) }}">
     @endif
+    @if (request()->routeIs('projects.show', 'projects.index', 'projects.create'))
+        <link rel="stylesheet" href="{{ asset('css/project-tabs.css') }}?v={{ filemtime(public_path('css/project-tabs.css')) }}">
+    @endif
+    @if (request()->routeIs('stories.executions.show', 'repair-orders.executions.show'))
+        <link rel="stylesheet" href="{{ asset('css/execution.css') }}?v={{ filemtime(public_path('css/execution.css')) }}">
+    @endif
     @if (in_array(($activePage ?? ''), ['chat', 'agent-chat', 'discussion'], true))
         <link rel="stylesheet" href="{{ asset('css/chat.css') }}?v=3">
     @endif
     @if (($activePage ?? '') === 'discussion')
         <link rel="stylesheet" href="{{ asset('css/discussion.css') }}">
     @endif
+    @if (route('dashboard') === url()->current())
+        <link rel="stylesheet" href="{{ asset('css/dashboard.css') }}?v={{ filemtime(public_path('css/dashboard.css')) }}">
+        <link rel="stylesheet" href="{{ asset('css/backlog-board.css') }}?v={{ filemtime(public_path('css/backlog-board.css')) }}">
+    @endif
     @if (in_array(($activePage ?? ''), ['backlog', 'sprints'], true))
         <link rel="stylesheet" href="{{ asset('css/sprints.css') }}">
+        <link rel="stylesheet" href="{{ asset('css/backlog-board.css') }}?v={{ filemtime(public_path('css/backlog-board.css')) }}">
     @endif
     @if (($activePage ?? '') === 'actors')
         <link rel="stylesheet" href="{{ asset('css/actors.css') }}">
@@ -60,7 +71,6 @@
                 <a class="nav-link {{ $activePage === 'actors' ? 'is-active' : '' }}" href="{{ route('actors.index') }}"><span class="nav-dot"></span>Aktor</a>
                 <a class="nav-link {{ in_array(($activePage ?? ''), ['backlog', 'sprints', 'discussion'], true) ? 'is-active' : '' }}" href="{{ route('projects.index', ['section' => 'sprint-backlog']) }}"><span class="nav-dot"></span>Sprint Backlog</a>
                 <a class="nav-link {{ $activePage === 'repair-orders' ? 'is-active' : '' }}" href="{{ route('repair-orders.index') }}"><span class="nav-dot"></span>Perintah Perbaikan</a>
-                <a class="nav-link {{ $activePage === 'accepted' ? 'is-active' : '' }}" href="{{ route('accepted.index') }}"><span class="nav-dot"></span>Accepted</a>
                 <a class="nav-link {{ $activePage === 'github-settings' ? 'is-active' : '' }}" href="{{ route('settings.github.edit') }}"><span class="nav-dot"></span>GitHub</a>
                 <a class="nav-link {{ $activePage === 'notifications' ? 'is-active' : '' }}" href="{{ route('notifications.index') }}"><span class="nav-dot"></span>Notifikasi
                     @if (! empty($unreadNotificationsCount))

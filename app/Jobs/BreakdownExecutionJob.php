@@ -52,23 +52,26 @@ class BreakdownExecutionJob implements ShouldQueue
             $raw = $scrumMaster->sendMessage($prompt, 'execution-breakdown-'.$run->id);
             $inspection = $this->inspectTasks($raw, $inventory);
 
-            // Satu kesempatan perbaikan: baik untuk JSON yang strukturnya
-            // cacat (field assignee/files hilang) maupun path yang dikarang.
-            if ($inspection['violations'] !== []) {
+            // Dua kesempatan perbaikan: JSON cacat (field hilang) maupun path
+            // yang dikarang. Jawaban perbaikan yang hanya memuat sebagian
+            // objek dilengkapi dari percobaan sebelumnya, bukan langsung gagal.
+            for ($repair = 1; $repair <= 2 && $inspection['violations'] !== []; $repair++) {
                 \Illuminate\Support\Facades\Log::warning('Breakdown ditolak validator — minta perbaikan SM', [
                     'run_id' => $run->id,
+                    'repair' => $repair,
                     'violations' => $inspection['violations'],
                 ]);
 
+                $previous = is_array($inspection['tasks']) ? $inspection['tasks'] : [];
                 $raw = $scrumMaster->sendMessage(
                     $this->repairPrompt($prompt, $inspection['violations']),
-                    'execution-breakdown-'.$run->id.'-repair'
+                    'execution-breakdown-'.$run->id.'-repair-'.$repair
                 );
-                $inspection = $this->inspectTasks($raw, $inventory);
+                $inspection = $this->inspectTasks($raw, $inventory, $previous);
+            }
 
-                if ($inspection['violations'] !== []) {
-                    throw new RuntimeException('Breakdown masih tidak valid: '.implode(' | ', array_slice($inspection['violations'], 0, 4)));
-                }
+            if ($inspection['violations'] !== []) {
+                throw new RuntimeException('Breakdown masih tidak valid: '.implode(' | ', array_slice($inspection['violations'], 0, 4)));
             }
 
             $tasks = $inspection['tasks'];
@@ -120,7 +123,13 @@ class BreakdownExecutionJob implements ShouldQueue
                     ? '[redacted: possible secret]'
                     : $excerpt,
             ]);
-            $run->forceFill(['status' => 'FAILED', 'error_code' => 'BREAKDOWN_FAILED', 'completed_at' => now()])->save();
+            $run->forceFill([
+                'status' => 'FAILED',
+                'error_code' => 'BREAKDOWN_FAILED',
+                // PO harus melihat SEBABNYA, bukan hanya status FAILED kosong.
+                'summary' => 'Scrum Master gagal memecah story setelah 2 kali perbaikan: '.mb_substr($exception->getMessage(), 0, 500),
+                'completed_at' => now(),
+            ])->save();
             // Kegagalan pemilihan model harus terlihat PO di summary run
             // (pesan aksi: pilih di halaman Konfigurasi Agent), bukan
             // hanya status FAILED tanpa penjelasan.
@@ -241,16 +250,22 @@ class BreakdownExecutionJob implements ShouldQueue
     /**
      * @return array{tasks: ?array<int, array<string, mixed>>, violations: array<int, string>}
      */
-    private function inspectTasks(string $raw, ?ProjectFileInventory $inventory): array
+    private function inspectTasks(string $raw, ?ProjectFileInventory $inventory, array $fallback = []): array
     {
         try {
-            $tasks = $this->validatedTasks($raw);
+            $tasks = $this->validatedTasks($raw, $fallback);
         } catch (Throwable $exception) {
             return [
                 'tasks' => null,
                 'violations' => [$exception->getMessage().' Setiap objek task WAJIB memuat keempat field: title, description, assignee, files (array berisi path).'],
             ];
         }
+
+        // Lengkapi file view yang lupa dicantumkan SM: deskripsi yang menuntut
+        // perubahan tampilan tetapi `files` hanya berisi controller membuat
+        // validasi gagal berulang (kasus US-02 run #5). Sistem menambahkan
+        // blade yang paling cocok dari inventaris nyata.
+        $tasks = $inventory !== null ? $this->autofillViewFiles($tasks, $inventory) : $tasks;
 
         return [
             'tasks' => $tasks,
@@ -259,6 +274,57 @@ class BreakdownExecutionJob implements ShouldQueue
     }
 
     /** Prompt perbaikan: kirim ulang aturan + daftar pelanggaran yang harus dibetulkan. */
+    /**
+     * Tambahkan file blade paling relevan bila task menyebut tampilan tetapi
+     * tidak mencantumkan satu pun .blade.php (kasus US-02 run #5).
+     */
+    private function autofillViewFiles(array $tasks, ProjectFileInventory $inventory): array
+    {
+        $views = array_values(array_filter($inventory->all(), fn (string $f) => str_ends_with($f, '.blade.php')));
+        if ($views === []) {
+            return $tasks;
+        }
+
+        foreach ($tasks as $i => $task) {
+            $text = mb_strtolower($task['title'].' '.$task['description']);
+            $mentionsView = preg_match('/(tampil|menampilkan|ditampilkan|render|blade|layout)/u', $text) === 1;
+            $files = array_map(fn ($f) => ltrim((string) $f, '/'), (array) ($task['files'] ?? []));
+            $hasBlade = array_filter($files, fn ($f) => str_ends_with($f, '.blade.php')) !== [];
+
+            if (! $mentionsView || $hasBlade) {
+                continue;
+            }
+
+            $stop = ['yang', 'untuk', 'dengan', 'pada', 'dari', 'agar', 'dapat', 'harus', 'tidak', 'sebuah', 'serta', 'dalam', 'akan', 'atau', 'juga', 'adalah'];
+            $tokens = array_values(array_filter(
+                preg_split('/[^a-z0-9]+/u', $text) ?: [],
+                fn (string $t) => mb_strlen($t) >= 4 && ! in_array($t, $stop, true)
+            ));
+
+            $best = null;
+            $bestScore = 0;
+            foreach ($views as $view) {
+                $score = 0;
+                foreach ($tokens as $token) {
+                    if (str_contains(mb_strtolower($view), $token)) {
+                        $score++;
+                    }
+                }
+                if ($score > $bestScore) {
+                    $bestScore = $score;
+                    $best = $view;
+                }
+            }
+
+            if ($best !== null) {
+                $files[] = $best;
+                $tasks[$i]['files'] = array_values(array_unique($files));
+            }
+        }
+
+        return $tasks;
+    }
+
     private function repairPrompt(string $originalPrompt, array $violations): string
     {
         $list = implode("\n", array_map(fn (string $violation) => '- '.$violation, array_slice($violations, 0, 8)));
@@ -267,7 +333,8 @@ class BreakdownExecutionJob implements ShouldQueue
             $originalPrompt,
             'JAWABAN SEBELUMNYA DITOLAK validator breakdown:',
             $list,
-            'Perbaiki dan balas HANYA JSON dengan format yang sama. Gunakan path yang ada di STRUKTUR PROJECT NYATA (atau file baru di direktori yang ada, dengan menyebut "buat file baru" di KERJAKAN), dan sertakan file .blade.php pada task yang kriterianya menyebut tampilan.',
+            'Perbaiki dan balas HANYA JSON dengan format yang sama. WAJIB: setiap objek task memuat title, description, assignee, dan files — jangan menghilangkan field apa pun; salin objek sebelumnya lalu ubah hanya bagian yang salah.',
+            'Gunakan path yang ada di STRUKTUR PROJECT NYATA (atau file baru di direktori yang ada, dengan menyebut "buat file baru" di KERJAKAN), dan sertakan file .blade.php pada task yang kriterianya menyebut tampilan.',
         ]);
     }
 
@@ -294,7 +361,12 @@ class BreakdownExecutionJob implements ShouldQueue
     }
 
     /** @return array<int, array{title:string,description:string,assignee:string,files:array}> */
-    private function validatedTasks(string $raw): array
+    /**
+     * @param  array<int, array<string, mixed>>  $fallback  task percobaan sebelumnya;
+     *         dipakai mengisi field yang hilang pada jawaban perbaikan (SM kadang
+     *         hanya mengirim sebagian objek, dan run sebelumnya mati karenanya).
+     */
+    private function validatedTasks(string $raw, array $fallback = []): array
     {
         $candidate = $this->extractJsonObject($raw);
         if ($candidate === null) {
@@ -306,6 +378,19 @@ class BreakdownExecutionJob implements ShouldQueue
             throw new RuntimeException('Breakdown tasks tidak valid.');
         }
         foreach ($tasks as $i => $task) {
+            // Lengkapi field yang hilang dari percobaan sebelumnya, asal
+            // posisinya sama dan judulnya cocok/absen.
+            if (is_array($task) && isset($fallback[$i]) && is_array($fallback[$i])) {
+                foreach (['title', 'description', 'assignee', 'files'] as $field) {
+                    if (! array_key_exists($field, $task) || $task[$field] === null || $task[$field] === '' || $task[$field] === []) {
+                        if (array_key_exists($field, $fallback[$i])) {
+                            $task[$field] = $fallback[$i][$field];
+                        }
+                    }
+                }
+                $tasks[$i] = $task;
+            }
+
             if (! is_array($task)
                 || ! is_string($task['title'] ?? null) || trim($task['title']) === ''
                 || ! is_string($task['description'] ?? null) || trim($task['description']) === ''

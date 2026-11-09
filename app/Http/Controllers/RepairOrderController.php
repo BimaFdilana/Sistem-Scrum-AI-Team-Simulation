@@ -99,7 +99,7 @@ class RepairOrderController extends Controller
             return back()->withErrors(['execution' => 'Baseline project belum siap (tunggu scaffold/clone selesai).']);
         }
         $active = ExecutionRun::query()->where('repair_order_id', $repairOrder->id)
-            ->whereIn('status', ['QUEUED', 'BREAKDOWN', 'AWAITING_PERMISSION', 'EXECUTING', 'REVIEWING', 'MERGING'])
+            ->whereIn('status', ['QUEUED', 'BREAKDOWN', 'AWAITING_PERMISSION', 'EXECUTING', 'REVIEWING', 'QA_REVIEW', 'MERGING'])
             ->exists();
         if ($active) {
             return back()->withErrors(['execution' => 'Sudah ada eksekusi yang berjalan untuk perintah ini.']);
@@ -110,6 +110,8 @@ class RepairOrderController extends Controller
             'repair_order_id' => $repairOrder->id,
             'requested_by' => auth()->id(),
             'status' => 'QUEUED',
+            'mode' => config('execution.mode', 'worktree'),
+            'qa_mode' => config('execution.qa_mode', 'per_task'),
         ]);
         $repairOrder->forceFill(['status' => 'RUNNING'])->save();
         BreakdownExecutionJob::dispatch($run->id);
@@ -128,7 +130,7 @@ class RepairOrderController extends Controller
             return back()->withErrors(['execution' => 'Perintah sudah diterima PO ('.$repairOrder->acceptanceLabel().') dan tidak bisa diulang.']);
         }
         $active = ExecutionRun::query()->where('repair_order_id', $repairOrder->id)
-            ->whereIn('status', ['QUEUED', 'BREAKDOWN', 'AWAITING_PERMISSION', 'EXECUTING', 'REVIEWING', 'MERGING'])
+            ->whereIn('status', ['QUEUED', 'BREAKDOWN', 'AWAITING_PERMISSION', 'EXECUTING', 'REVIEWING', 'QA_REVIEW', 'MERGING'])
             ->exists();
         if ($active) {
             return back()->withErrors(['execution' => 'Masih ada eksekusi yang berjalan untuk perintah ini.']);

@@ -29,7 +29,9 @@ class StoryController extends Controller
             $storyRelations[] = 'stories.estimationRuns.agentRuns';
         }
         if (Schema::hasTable('execution_runs')) {
-            $storyRelations[] = 'stories.executionRuns';
+            // tasks ikut dimuat agar kartu papan bisa menampilkan progres
+            // tanpa query tambahan per story (N+1).
+            $storyRelations[] = 'stories.executionRuns.tasks';
         }
 
         return view('stories.index', [
@@ -130,6 +132,7 @@ class StoryController extends Controller
         return view('stories.edit', [
             'story' => $story,
             'project' => $story->project,
+            'actors' => Actor::query()->where('is_active', true)->orderBy('name')->get(),
             'activePage' => 'backlog',
         ]);
     }

@@ -27,7 +27,7 @@ class MergeExecutionJob implements ShouldQueue
 
     public int $tries = 1;
 
-    public int $timeout = 300;
+    public int $timeout = 1200;
 
     public function __construct(public readonly int $runId) {}
 
@@ -40,6 +40,19 @@ class MergeExecutionJob implements ShouldQueue
         if (! $run || $run->status !== 'MERGING') {
             return;
         }
+        // Mode langsung: setiap task sudah di-commit ke baseline, tidak ada
+        // worktree/cabang untuk di-merge. Menjalankan merge di sini adalah
+        // bug yang membuat run #4 berakhir MERGE_CONFLICT.
+        if (($run->mode ?: config('execution.mode', 'worktree')) === 'direct') {
+            $run->forceFill([
+                'status' => 'COMPLETED',
+                'completed_at' => now(),
+                'summary' => trim((string) $run->summary."\nMode langsung: tidak ada merge — semua perubahan sudah berada di baseline lewat commit per task."),
+            ])->save();
+
+            return;
+        }
+
         $baseline = $run->project()?->workspace_path;
         if (! $baseline) {
             $run->forceFill(['status' => 'BLOCKED', 'error_code' => 'WORKSPACE_MISSING', 'completed_at' => now()])->save();
@@ -48,6 +61,8 @@ class MergeExecutionJob implements ShouldQueue
         }
 
         try {
+            $before = $worktrees->head($baseline);
+
             // Merge SESUAI URUTAN task: pada model berantai, cabang task
             // ke-N sudah mengandung commit task sebelumnya, sehingga git
             // menganggap commit yang sudah ter-merge sebagai no-op dan
@@ -61,6 +76,37 @@ class MergeExecutionJob implements ShouldQueue
                     throw new RuntimeException('Task #'.$task->id.' belum disetujui QA.');
                 }
                 $worktrees->merge($baseline, $task->branch);
+            }
+
+            // Gate integrasi: setelah semua task digabung, jalankan php -l dan
+            // perintah tes project pada baseline. Gagal = baseline dikembalikan
+            // ke kondisi sebelum merge, run ditandai, dan tidak ada yang
+            // dianggap selesai. Sebelumnya merge langsung dianggap sukses.
+            $after = $worktrees->head($baseline);
+            $changed = $worktrees->changedFilesBetween($baseline, $before, $after);
+            $integrationError = app(\App\Services\TestGate::class)->run(
+                $baseline,
+                $changed,
+                $run->project()?->test_command,
+            );
+
+            if ($integrationError !== null) {
+                $worktrees->resetHard($baseline, $before);
+
+                $run->forceFill([
+                    'status' => 'BLOCKED',
+                    'error_code' => 'INTEGRATION_FAILED',
+                    'summary' => 'Hasil gabungan task gagal diverifikasi: '.$integrationError,
+                    'completed_at' => now(),
+                ])->save();
+
+                $run->messages()->create([
+                    'sender_slug' => 'qa-engineer',
+                    'recipient_slug' => 'po',
+                    'content' => 'Gate integrasi gagal setelah merge, baseline dikembalikan ke kondisi sebelumnya: '.$integrationError,
+                ]);
+
+                return;
             }
             foreach ($tasks as $task) {
                 if ($task->worktree_path && $task->branch) {

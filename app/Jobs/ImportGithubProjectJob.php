@@ -18,6 +18,9 @@ class ImportGithubProjectJob implements ShouldBeUnique, ShouldQueue
 
     public int $tries = 1;
 
+    /** Clone + composer + migrate bisa beberapa menit. */
+    public int $timeout = 1800;
+
     public int $uniqueFor = 86400;
 
     public function __construct(public readonly int $projectId) {}
@@ -35,7 +38,8 @@ class ImportGithubProjectJob implements ShouldBeUnique, ShouldQueue
         }
 
         try {
-            $importer->import($project);
+            $project = $importer->import($project);
+            $this->provision($project);
             $this->syncToGithub($project->fresh());
         } catch (Throwable $exception) {
             $project->forceFill([
@@ -43,6 +47,24 @@ class ImportGithubProjectJob implements ShouldBeUnique, ShouldQueue
                 'source_error' => mb_substr($exception->getMessage(), 0, 255),
             ])->save();
             throw $exception;
+        }
+    }
+
+    /**
+     * Deteksi runtime lalu siapkan project (composer, .env, key, migrate).
+     * Kegagalan provisioning TIDAK menggagalkan import: baseline tetap sah,
+     * dan penyebabnya dicatat di project_profiles untuk ditampilkan/retry.
+     */
+    protected function provision(Project $project): void
+    {
+        try {
+            $profile = app(\App\Support\Projects\ProjectProfiler::class)->profile($project);
+            app(\App\Support\Projects\ProjectProvisioner::class)->provision($project, $profile);
+        } catch (Throwable $exception) {
+            \Illuminate\Support\Facades\Log::warning('Provisioning project gagal (baseline tetap dipakai)', [
+                'project_id' => $project->id,
+                'error' => mb_substr($exception->getMessage(), 0, 500),
+            ]);
         }
     }
 

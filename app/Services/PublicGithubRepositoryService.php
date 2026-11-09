@@ -58,6 +58,9 @@ class PublicGithubRepositoryService
 
         $this->assertLaravelProject($root);
 
+        // Baseline harus bisa dibaca/ditulis worker Hermes (user berbeda).
+        \App\Support\Workspace\WorkspacePermissions::grant($root);
+
         return tap($project->fresh(), function (Project $project) use ($url, $branch, $commit, $root): void {
             $project->forceFill([
                 'source_repository_url' => $url,

@@ -106,6 +106,17 @@ class ProjectFileInventory
     }
 
     /** Apakah project punya file blade (dasar cek "task tampilan wajib blade"). */
+    /**
+     * Daftar file nyata project (dipakai untuk melengkapi scope task view).
+     *
+     * @return array<int, string>
+     */
+    public function all(): array
+    {
+        // files() memakai path sebagai key.
+        return array_keys($this->files());
+    }
+
     public function hasViews(): bool
     {
         foreach (array_keys($this->files()) as $file) {

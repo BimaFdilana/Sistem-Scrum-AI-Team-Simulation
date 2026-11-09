@@ -29,7 +29,7 @@ class ExecutionController extends Controller
         PermissionRequest::expireStale();
 
         $active = ExecutionRun::query()->where('story_id', $story->id)
-            ->whereIn('status', ['QUEUED', 'BREAKDOWN', 'AWAITING_PERMISSION', 'EXECUTING', 'REVIEWING', 'MERGING'])
+            ->whereIn('status', ['QUEUED', 'BREAKDOWN', 'AWAITING_PERMISSION', 'EXECUTING', 'REVIEWING', 'QA_REVIEW', 'MERGING'])
             ->exists();
         if ($active) {
             return back()->withErrors(['execution' => 'Sudah ada eksekusi yang berjalan untuk story ini.']);
@@ -39,7 +39,18 @@ class ExecutionController extends Controller
             'story_id' => $story->id,
             'requested_by' => auth()->id(),
             'status' => 'QUEUED',
+            'mode' => config('execution.mode', 'worktree'),
+            'qa_mode' => config('execution.qa_mode', 'per_task'),
         ]);
+
+        // Snapshot baseline sebelum agent menyentuh kode (mode langsung).
+        if (($run->mode ?: config('execution.mode', 'worktree')) === 'direct' && $story->project) {
+            try {
+                app(\App\Support\Workspace\BaselineSnapshot::class)->backup($story->project, 'run-'.$run->id);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Snapshot baseline gagal', ['run' => $run->id, 'error' => $e->getMessage()]);
+            }
+        }
 
         // Fase 3 GitHub: buat story branch di GitHub (graceful bila gagal/tidak terhubung).
         $this->createStoryBranch($story, $run);
@@ -76,6 +87,24 @@ class ExecutionController extends Controller
             return back()->withErrors(['acceptance' => 'Keputusan final hanya untuk eksekusi yang sudah selesai atau diblokir.']);
         }
 
+        // Gate: keputusan BERHASIL menuntut demo yang benar-benar sehat.
+        // Sebelumnya tombol ini hanya klik — story bisa diterima walau
+        // halamannya 500, tanpa satu pun bukti.
+        $demoEvidence = null;
+        if ($status === 'BERHASIL' && $story->project !== null) {
+            $check = app(\App\Support\Demo\DemoServerManager::class)->verify($story->project);
+
+            if (! $check['ok']) {
+                return back()->withErrors([
+                    'acceptance' => 'Demo belum sehat, keputusan BERHASIL ditolak: '.($check['error'] ?? 'tidak diketahui')
+                        .' Perbaiki demo (atau minta SM memperbaiki) lalu coba lagi.',
+                ]);
+            }
+
+            $demoEvidence = 'Demo terverifikasi '.($check['url'] ?? '-')
+                .' HTTP '.($check['http'] ?? '-').' pada '.now()->format('d M Y H:i');
+        }
+
         // Fase 3 GitHub: bila BERHASIL dan ada story branch, merge ke integration.
         // Konflik → tolak, story TIDAK ditandai Berhasil.
         if ($status === 'BERHASIL' && filled($run->github_branch)) {
@@ -89,6 +118,17 @@ class ExecutionController extends Controller
             'acceptance_status' => $status,
             'accepted_at' => now(),
         ])->save();
+
+        if ($demoEvidence !== null) {
+            // Simpan bukti verifikasi pada run supaya keputusan PO bisa
+            // ditelusuri (URL, status HTTP, waktu pemeriksaan).
+            $run->forceFill(['summary' => trim(((string) $run->summary)."\n".$demoEvidence)])->save();
+            $run->messages()->create([
+                'sender_slug' => 'po',
+                'recipient_slug' => 'team',
+                'content' => $demoEvidence,
+            ]);
+        }
 
         $label = $status === 'BERHASIL' ? 'Berhasil' : 'Gagal';
 
