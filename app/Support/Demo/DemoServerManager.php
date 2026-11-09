@@ -36,6 +36,29 @@ class DemoServerManager
         return $demo;
     }
 
+    /**
+     * Segarkan demo yang SEDANG berjalan setelah kode project berubah (story diterima):
+     * pasang dependensi bila perlu, jalankan migrasi database demo, dan bangun ulang aset
+     * yang usang. Server demo membaca file langsung dari baseline sehingga tidak perlu restart.
+     * Tanpa demo yang berjalan, tidak ada yang dilakukan (start() akan menyiapkan semuanya).
+     */
+    public function refresh(Project $project): void
+    {
+        $demo = $this->runningFor($project);
+        if ($demo === null) {
+            return;
+        }
+
+        $baseRoot = $demo->worktree_path ? rtrim($demo->worktree_path, '/') : rtrim((string) $project->workspace_path, '/');
+        $profile = $project->profile;
+        $projectRoot = $profile?->subdir ? $baseRoot.'/'.$profile->subdir : $baseRoot;
+        $log = storage_path('logs/demo-project-'.$project->id.'.log');
+
+        app(ProjectProvisioner::class)->ensure($project);
+        $this->demoEnvironment($projectRoot, $project, $log);
+        $this->ensureFrontendBuild($projectRoot, $log);
+    }
+
     public function start(Project $project): DemoServer
     {
         if ($this->runningFor($project)) {

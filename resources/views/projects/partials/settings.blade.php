@@ -60,6 +60,27 @@
             <p>Jalankan project di server demo sementara (port unik per project).</p>
             <form method="POST" action="{{ route('projects.demo.start', $project) }}">@csrf<button class="button button-primary" type="submit">Jalankan demo</button></form>
         @endif
+        @php($contents = $demoContents ?? ['branch' => null, 'accepted' => [], 'pending' => []])
+        <div class="bk-demo-contents" aria-label="Isi demo">
+            <h3>Isi demo</h3>
+            <p class="field-help">Demo menyajikan cabang <code>{{ $contents['branch'] ?? '—' }}</code>. Story yang sudah Anda terima harus ada di sini.</p>
+            <ul class="bk-contents-list">
+                @forelse ($contents['accepted'] as $item)
+                    <li>
+                        <span class="bk-chip {{ $item['included'] ? 'is-ok' : 'is-bad' }}">{{ $item['included'] ? 'ada di demo' : 'belum ada di demo' }}</span>
+                        <span>{{ $item['label'] }}@if (! $item['included'])<small>Diterima, tetapi cabang {{ $item['branch'] }} belum tergabung ke kode demo.</small>@endif</span>
+                    </li>
+                @empty
+                    <li><span class="field-help">Belum ada story yang diterima.</span></li>
+                @endforelse
+                @foreach ($contents['pending'] as $item)
+                    <li>
+                        <span class="bk-chip {{ $item['shown'] ? 'is-warn' : '' }}">{{ $item['shown'] ? 'tampil sementara' : 'belum tampil' }}</span>
+                        <span>{{ $item['label'] }}<small>Selesai dikerjakan tetapi belum Anda terima; masuk demo setelah diterima.</small></span>
+                    </li>
+                @endforeach
+            </ul>
+        </div>
         <p class="demo-live" id="demo-live" data-status-url="{{ route('projects.demo.status', $project) }}">Status: <strong>memuat…</strong></p>
         <div class="bk-actions-row">
             <a class="button button-ghost" href="{{ route('projects.download', $project) }}">Download project (ZIP)</a>

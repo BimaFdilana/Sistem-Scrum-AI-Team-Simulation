@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\BreakdownExecutionJob;
+use App\Jobs\RefreshDemoJob;
 use App\Models\ExecutionRun;
 use App\Models\PermissionRequest;
 use App\Models\Story;
@@ -156,6 +157,11 @@ class ExecutionController extends Controller
                 'recipient_slug' => 'team',
                 'content' => $demoEvidence,
             ]);
+        }
+
+        // Hasil yang baru disetujui harus langsung tampil di demo yang sedang berjalan.
+        if ($status === 'BERHASIL' && $story->project_id !== null) {
+            RefreshDemoJob::dispatch($story->project_id);
         }
 
         $label = $status === 'BERHASIL' ? 'Berhasil' : 'Gagal';

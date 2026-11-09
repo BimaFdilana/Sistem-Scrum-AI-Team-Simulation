@@ -7,6 +7,7 @@ use App\Jobs\ImportGithubProjectJob;
 use App\Jobs\ScaffoldLaravelProjectJob;
 use App\Models\Project;
 use App\Services\PublicGithubRepositoryService;
+use App\Support\Demo\DemoContents;
 use App\Support\Demo\DemoServerManager;
 use App\Support\Projects\ProjectBoard;
 use Illuminate\Http\RedirectResponse;
@@ -74,6 +75,7 @@ class ProjectController extends Controller
             'demo' => $demo,
             'demoUrl' => $demo ? $demos->url($demo, request()->getHost()) : null,
             'activePage' => 'projects',
+            'demoContents' => DemoContents::for($project),
             ...ProjectBoard::for($project),
         ]);
     }

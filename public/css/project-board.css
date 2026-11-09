@@ -88,4 +88,11 @@
 .bk-account-list span{color:var(--muted);font-size:11px;overflow-wrap:anywhere}
 .bk-account-list strong{color:var(--accent-strong);font-weight:600}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.bk-demo-contents{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.bk-demo-contents h3{margin:0 0 4px;font-size:12px}
+.bk-contents-list{display:grid;gap:6px;margin:10px 0 0;padding:0;list-style:none}
+.bk-contents-list li{display:flex;align-items:flex-start;gap:9px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);font-size:12px}
+.bk-contents-list li>span:last-child{display:grid;gap:2px;min-width:0;overflow-wrap:anywhere}
+.bk-contents-list small{color:var(--muted);font-size:10px}
+.bk-contents-list .bk-chip{flex:0 0 auto}
 

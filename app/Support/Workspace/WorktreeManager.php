@@ -315,6 +315,18 @@ class WorktreeManager
         }
     }
 
+    /** Apakah $ancestor sudah termasuk dalam riwayat $of (mis. HEAD)? */
+    public function isAncestor(string $path, string $ancestor, string $of = 'HEAD'): bool
+    {
+        try {
+            $this->git($path, ['merge-base', '--is-ancestor', $ancestor, $of]);
+
+            return true;
+        } catch (RuntimeException) {
+            return false;
+        }
+    }
+
     /** Pindah ke branch yang sudah ada (tanpa force: gagal bila mengorbankan perubahan lokal). */
     public function checkoutBranch(string $path, string $branch): void
     {
@@ -374,8 +386,15 @@ class WorktreeManager
                 'merge', '--no-ff', '--no-verify', '-m', 'Merge '.$branch, $branch,
             ]);
         } catch (RuntimeException $exception) {
+            // Catat file yang bentrok SEBELUM membatalkan: pesan galat git tidak memuat namanya.
+            $conflicts = [];
+            try {
+                $conflicts = array_values(array_filter(array_map('trim', explode("\n", $this->git($baselinePath, ['diff', '--name-only', '--diff-filter=U'])))));
+            } catch (RuntimeException) {
+                // lanjut membatalkan penggabungan
+            }
             $this->git($baselinePath, ['merge', '--abort']);
-            throw new RuntimeException('Merge konflik pada '.$branch.': '.$exception->getMessage());
+            throw new RuntimeException('Merge konflik pada '.$branch.($conflicts !== [] ? ' (file: '.implode(', ', $conflicts).')' : '').': '.$exception->getMessage());
         }
     }
 

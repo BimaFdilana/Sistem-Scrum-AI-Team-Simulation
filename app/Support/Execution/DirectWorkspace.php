@@ -103,6 +103,15 @@ class DirectWorkspace
                 $this->git->merge($path, $run->work_branch);
             }
         } catch (RuntimeException $exception) {
+            if (str_contains(mb_strtolower($exception->getMessage()), 'konflik')) {
+                preg_match('/\(file: ([^)]*)\)/', $exception->getMessage(), $matches);
+                $files = isset($matches[1]) && $matches[1] !== '' ? explode(', ', $matches[1]) : [];
+
+                return 'Story belum bisa diterima: hasilnya bentrok dengan kode yang sudah diterima'
+                    .($files !== [] ? ' (file: '.implode(', ', $files).')' : '')
+                    .'. Selesaikan konflik itu di cabang '.$run->work_branch.' lalu terima lagi; story tidak ditandai Berhasil.';
+            }
+
             return 'Baseline tidak bisa dikembalikan ke branch utama: '.mb_substr($exception->getMessage(), 0, 300);
         }
 
