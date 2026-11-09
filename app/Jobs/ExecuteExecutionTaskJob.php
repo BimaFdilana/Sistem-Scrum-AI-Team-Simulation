@@ -25,6 +25,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
+use Symfony\Component\Process\Exception\ProcessSignaledException;
 use Throwable;
 
 /**
@@ -298,9 +299,30 @@ class ExecuteExecutionTaskJob implements ShouldQueue
 
                 return;
             }
+            // Proses agen dimatikan oleh restart layanan (deploy/systemctl): bukan kegagalan
+            // agen. Kembalikan task ke antrean; jangan menggagalkan run yang sedang dikerjakan.
+            if (self::wasKilledByRestart($exception) && $this->attempts() < 3) {
+                $task->forceFill(['status' => $originalStatus, 'last_error' => 'PROCESS_SIGNALED', 'last_progress_at' => now()])->save();
+                $run->messages()->create([
+                    'execution_task_id' => $task->id,
+                    'sender_slug' => 'scrum-master',
+                    'recipient_slug' => $task->assignee ?: 'product-owner',
+                    'content' => 'Proses agen dihentikan oleh restart layanan; task diulang otomatis (percobaan '.($this->attempts() + 1).').',
+                ]);
+                $this->release(30);
+
+                return;
+            }
             $this->failRun($run, $task, 'EXECUTION_FAILED', $worktrees, $baseline, $exception->getMessage());
             throw $exception;
         }
+    }
+
+    /** SIGTERM/SIGKILL pada proses anak = layanan di-restart, bukan agen yang gagal. */
+    public static function wasKilledByRestart(Throwable $exception): bool
+    {
+        return $exception instanceof ProcessSignaledException
+            && in_array($exception->getProcess()->getTermSignal(), [9, 15], true);
     }
 
     /**

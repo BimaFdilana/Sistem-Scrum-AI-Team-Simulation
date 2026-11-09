@@ -20,7 +20,7 @@ class ExecutionRun extends Model
 
     protected function casts(): array
     {
-        return ['completed_at' => 'datetime'];
+        return ['completed_at' => 'datetime', 'qa_started_at' => 'datetime', 'qa_finished_at' => 'datetime'];
     }
 
     public function story(): BelongsTo
