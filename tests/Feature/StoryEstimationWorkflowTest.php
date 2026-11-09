@@ -52,7 +52,7 @@ class StoryEstimationWorkflowTest extends TestCase
         $this->actingAs($owner)->get('/projects/'.$project->id)
             ->assertOk()->assertSee('Lihat Diskusi Tim')->assertSee('/stories/'.$story->id.'/discussion', false)
             ->assertDontSee('Poin final pilihan PO');
-        $this->get('/stories/'.$story->id.'/discussion')->assertOk()->assertSee('Diskusi Fibonacci')->assertSee('Eksekusi & Revisi QA')
+        $this->get('/stories/'.$story->id.'/discussion')->assertOk()->assertSee('Diskusi Fibonacci')->assertSee('Eksekusi & revisi QA')
             ->assertDontSee('name="content"', false);
         $this->post('/stories/'.$story->id.'/discussion', ['content' => 'Saya pilih 13'])->assertStatus(405);
         auth()->logout();
@@ -111,9 +111,9 @@ class StoryEstimationWorkflowTest extends TestCase
 
         $page = $this->actingAs($owner)->get('/stories/'.$story->id.'/discussion')->assertOk();
         $page->assertSee('css/discussion.css', false)
-            ->assertSee('team-message--backend', false)
-            ->assertSee('team-message--frontend', false)
-            ->assertSee('team-message--qa', false)
+            ->assertSee('dc-msg--be', false)
+            ->assertSee('dc-msg--fe', false)
+            ->assertSee('dc-msg--qa', false)
             ->assertDontSee('background:#fff;', false)
             ->assertDontSee('background:#eef6ff;', false);
     }

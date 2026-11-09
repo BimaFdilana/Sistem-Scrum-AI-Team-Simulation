@@ -1,195 +1,132 @@
 @extends('layouts.workspace', ['title' => 'Diskusi Tim · '.$story->display_id, 'breadcrumb' => 'Projects / '.$story->project->name.' / Diskusi Tim'])
 
 @section('content')
-    <section class="page-heading chat-heading">
-        <div>
-            <p class="eyebrow"><span class="eyebrow-line"></span>TEAM CHAT · BACA SAJA</p>
-            <h1>{{ $story->display_id }} — Diskusi Tim</h1>
-            <p class="page-subtitle">{{ $story->title }} · Revisi story {{ $story->revision }}</p>
+    @php
+        $finalRun = $runs->first(fn ($r) => $r->status === 'COMPLETED' && $r->consensus_points && (int) $r->story_revision === (int) $story->revision);
+        $statusLabel = fn (?string $status) => match ($status) {
+            'COMPLETED' => ['selesai', 'is-ok'],
+            'RUNNING', 'QUEUED', 'REPORT_PENDING' => ['berjalan', 'is-run'],
+            'FAILED', 'PARTIAL', 'NO_CONSENSUS' => ['perlu tindakan', 'is-warn'],
+            default => [strtolower((string) $status), ''],
+        };
+    @endphp
+
+    <section class="dc-head">
+        <div class="dc-head-main">
+            <a class="text-link" href="{{ route('projects.show', $story->project_id) }}">← Kembali ke project</a>
+            <h1><span class="dc-id">{{ $story->display_id }}</span> Diskusi Tim</h1>
+            <p class="page-subtitle">{{ $story->title }}</p>
+            <div class="dc-chips">
+                <span class="dc-chip">Revisi story {{ $story->revision }}</span>
+                @if ($story->sprint)<span class="dc-chip">{{ $story->sprint->name }}</span>@endif
+                @if ($currentRun)
+                    @php([$label, $class] = $statusLabel($currentRun->status))
+                    <span class="dc-chip {{ $class }}">Diskusi terakhir: {{ $label }}</span>
+                @endif
+                @if ($finalRun)
+                    <span class="dc-chip is-ok">Poin final {{ $finalRun->consensus_points }} ({{ \App\Services\StoryEstimationService::category($finalRun->consensus_points) }})</span>
+                @endif
+            </div>
         </div>
-        <a class="button button-ghost" href="{{ route('projects.show', $story->project_id) }}">← Kembali ke project</a>
     </section>
+
+    @if (session('status'))<div class="success-banner" role="status">{{ session('status') }}</div>@endif
+    @error('estimation')<div class="form-alert" role="alert">{{ $message }}</div>@enderror
 
     @if (! $schemaReady)
         <p class="notice-bar" role="status">Diskusi tim menunggu migrasi database estimasi. Tidak ada pesan yang dibuat-buat.</p>
     @else
-        <section class="story-version" aria-labelledby="story-version-heading">
-            <style>
-                .story-tab-buttons { display: flex; gap: .5rem; }
-                .story-tab-button { padding: .45rem 1rem; border-radius: 999px; border: 1px solid var(--border, #d7dbe3); background: transparent; cursor: pointer; font: inherit; }
-                .story-tab-button.is-active { background: var(--accent, #1a73e8); color: #fff; border-color: transparent; }
-                .story-field { margin: .9rem 0; }
-                .story-field > dt { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; opacity: .65; margin-bottom: .25rem; }
-                .story-field > dd { margin: 0; white-space: pre-line; }
-            </style>
-            <div class="team-discussion-toolbar">
-                <div>
-                    <p class="section-kicker">USER STORY</p>
-                    <h2 id="story-version-heading">Versi User Story</h2>
-                    <p class="section-description">Bandingkan data asli dengan hasil akhir diskusi dari Scrum Master. Eksekusi memakai versi <strong>{{ $story->hasRefinement() ? 'Hasil Diskusi SM' : 'Data Asli' }}</strong>.</p>
-                </div>
-                <div class="story-tab-buttons" role="tablist" aria-label="Versi user story">
-                    <button type="button" role="tab" class="story-tab-button is-active" data-story-tab="original" aria-selected="true">Data Asli</button>
-                    <button type="button" role="tab" class="story-tab-button" data-story-tab="refined" aria-selected="false">Hasil Diskusi SM</button>
-                </div>
-            </div>
-            <div data-story-panel="original" role="tabpanel">
-                <dl>
-                    <div class="story-field"><dt>Saya Ingin (Fitur)</dt><dd>{{ $story->title }}</dd></div>
-                    <div class="story-field"><dt>Agar (Tujuan)</dt><dd>{{ $story->sprint_purpose ?? '—' }}</dd></div>
-                    <div class="story-field"><dt>Acceptance Criteria</dt><dd>{{ $story->acceptance_criteria ?? '—' }}</dd></div>
-                    <div class="story-field"><dt>Aktor</dt><dd>{{ $story->actor?->name ?? '—' }}</dd></div>
-                </dl>
-            </div>
-            <div data-story-panel="refined" role="tabpanel" hidden>
-                @if ($story->hasRefinement())
-                    <p class="notice-bar">Disempurnakan Scrum Master dari Run #{{ $story->refined_from_run_id }} · {{ $story->refined_at?->format('d M Y H:i') }}</p>
-                    <dl>
-                        <div class="story-field"><dt>Saya Ingin (Fitur)</dt><dd>{{ $story->refined_title }}</dd></div>
-                        <div class="story-field"><dt>Agar (Tujuan)</dt><dd>{{ $story->refined_purpose ?? '—' }}</dd></div>
-                        <div class="story-field"><dt>Acceptance Criteria</dt><dd>{{ $story->refined_acceptance_criteria ?? '—' }}</dd></div>
-                    </dl>
-                @else
-                    <p class="notice-bar">Belum ada hasil diskusi. Versi final dari Scrum Master akan muncul di sini setelah laporan kesepakatan tersimpan.</p>
-                @endif
-            </div>
-            <script>
-                (function () {
-                    const buttons = document.querySelectorAll('[data-story-tab]');
-                    const panels = document.querySelectorAll('[data-story-panel]');
-                    buttons.forEach(function (button) {
-                        button.addEventListener('click', function () {
-                            buttons.forEach(function (b) { b.classList.remove('is-active'); b.setAttribute('aria-selected', 'false'); });
-                            panels.forEach(function (p) { p.hidden = true; });
-                            button.classList.add('is-active');
-                            button.setAttribute('aria-selected', 'true');
-                            const panel = document.querySelector('[data-story-panel="' + button.dataset.storyTab + '"]');
-                            if (panel) panel.hidden = false;
-                        });
-                    });
-                })();
-            </script>
-        </section>
-
-        <section class="team-discussion-shell" aria-labelledby="fibonacci-heading">
-            <div class="team-discussion-toolbar">
-                <div>
-                    <p class="section-kicker">FIBONACCI TEAM CHAT</p>
-                    <h2 id="fibonacci-heading">Diskusi Fibonacci</h2>
-                    <p class="section-description">Percakapan nyata Backend, Frontend, dan QA. Product Owner hanya dapat membaca.</p>
-                </div>
-                @if ($currentRun)
-                    <span class="chat-connection {{ $currentRun->status === 'COMPLETED' ? 'is-connected' : '' }}">{{ $currentRun->status }} · Maks. 2 putaran</span>
-                @endif
-            </div>
-
-            @forelse ($runs as $run)
-                <article class="team-run" aria-label="Run {{ $run->id }}">
-                    <div class="team-run-header">
-                        <div><span class="chat-message-label">RUN #{{ $run->id }}</span><strong>Revisi {{ $run->story_revision }}</strong></div>
-                        <span class="scope-pill">{{ $run->status }}</span>
-                    </div>
-                    @if ($run->story_revision !== $story->revision)
-                        <p class="estimation-stale">Run kedaluwarsa karena User Story telah berubah.</p>
-                    @endif
-
-                    @php
-                        $failedAgent = $run->agentRuns->where('status', 'FAILED')->sortByDesc('id')->first();
-                    @endphp
-                    @if ($failedAgent)
-                        @php
-                            $failureText = match ($failedAgent->error_code) {
-                                'PROVIDER_OVERLOADED' => 'Provider sedang sibuk.',
-                                'PROVIDER_RATE_LIMITED' => 'Provider sedang dibatasi (rate limit, coba lagi nanti).',
-                                'PROVIDER_TIMEOUT' => 'Provider melewati batas waktu.',
-                                'PROVIDER_CONNECTION' => 'Provider tidak dapat dihubungi.',
-                                'INVALID_JSON_SCHEMA' => 'Jawaban agent tidak mengikuti format yang diminta.',
-                                'SAFETY_REJECTION' => 'Jawaban ditolak oleh kebijakan keamanan.',
-                                'LENGTH_REJECTION' => 'Jawaban agent melebihi batas panjang yang diizinkan.',
-                                'EMPTY_RESPONSE' => 'Jawaban agent kosong.',
-                                'STALE_OR_CANCELLED' => 'Run menjadi kedaluwarsa atau dibatalkan.',
-                                'WORKER_FAILED' => 'Worker diskusi berhenti sebelum proses selesai.',
-                                'WORKER_TIMEOUT' => 'Worker diskusi melewati batas waktu.',
-                                'WORKER_STALE' => 'Worker diskusi tidak mengirim heartbeat.',
-                                default => 'Permintaan agent gagal.',
-                            };
-                        @endphp
-                        <p class="discussion-banner discussion-banner--danger"><strong>{{ strtoupper($failedAgent->profile_slug) }} · Putaran {{ $failedAgent->round }}:</strong> {{ $failureText }}</p>
-                        @if ($run->status === 'FAILED' && (int) $run->requested_by === (int) auth()->id() && (int) $run->story_revision === (int) $story->revision)
-                            <form method="POST" action="{{ route('stories.estimations.agents.retry', [$story, $run, $failedAgent]) }}">
-                                @csrf
-                                <button class="button button-ghost" type="submit">Retry {{ strtoupper($failedAgent->profile_slug) }} saja</button>
-                            </form>
-                        @endif
-                    @endif
-
-                    @if ($run->status === 'COMPLETED' && $run->consensus_points)
-                        <p class="discussion-banner"><strong>Poin Fibonacci final: {{ $run->consensus_points }}</strong> · {{ $run->consensus_method === 'deadlock_max' ? 'Deadlock — Scrum Master menerapkan nilai maksimum.' : 'Mufakat bulat tim.' }} Laporan Scrum Master tersimpan.</p>
-                    @elseif ($run->status === 'NO_CONSENSUS')
-                        <p class="discussion-banner discussion-banner--danger"><strong>NO_CONSENSUS</strong> · Bukti final tidak lengkap; run lama ini tidak menghasilkan poin.</p>
-                    @elseif (in_array($run->status, ['FAILED', 'PARTIAL'], true))
-                        <p class="discussion-banner discussion-banner--danger">Diskusi berhenti sebelum selesai. Gunakan Retry untuk membuat run baru.</p>
+        <div class="dc-layout">
+            <main class="dc-main" aria-label="Percakapan tim">
+                @forelse ($runs as $run)
+                    @if ($loop->first)
+                        @include('stories.partials.discussion-run', ['run' => $run, 'story' => $story])
                     @else
-                        <p class="discussion-banner">Diskusi sedang menunggu atau belum memiliki poin final.</p>
+                        @if ($loop->index === 1)
+                            <h2 class="dc-older-title">Diskusi sebelumnya</h2>
+                        @endif
+                        <details class="dc-older">
+                            <summary>
+                                <span>Run #{{ $run->id }} · revisi {{ $run->story_revision }} · {{ $run->created_at?->format('d M Y H:i') }}</span>
+                                @php([$label, $class] = $statusLabel($run->status))
+                                <span class="dc-chip {{ $class }}">{{ $label }}@if ($run->consensus_points) · {{ $run->consensus_points }} poin @endif</span>
+                            </summary>
+                            @include('stories.partials.discussion-run', ['run' => $run, 'story' => $story])
+                        </details>
                     @endif
-
-                    @if (in_array($run->status, ['FAILED', 'PARTIAL', 'NO_CONSENSUS'], true) && (int) $run->requested_by === (int) auth()->id() && (int) $run->story_revision === (int) $story->revision)
-                        <form method="POST" action="{{ route('stories.estimations.retry', [$story, $run]) }}">@csrf<button class="button button-ghost" type="submit">Retry diskusi (run baru)</button></form>
-                    @endif
-
-                    <div class="chat-panel team-chat-panel" aria-label="Pesan Run {{ $run->id }}">
-                        <div class="chat-transcript">
-                            @forelse ($run->messages as $message)
-                                @php
-                                    $payload = json_decode($message->content, true);
-                                    $roleClass = match ($message->sender_slug) {
-                                        'backend-developer' => 'team-message--backend',
-                                        'frontend-developer' => 'team-message--frontend',
-                                        'qa-engineer' => 'team-message--qa',
-                                        default => '',
-                                    };
-                                    $roleName = match ($message->sender_slug) {
-                                        'backend-developer' => 'Backend Developer',
-                                        'frontend-developer' => 'Frontend Developer',
-                                        'qa-engineer' => 'QA Engineer',
-                                        default => strtoupper($message->sender_slug),
-                                    };
-                                    $content = is_array($payload)
-                                        ? ($payload['response'] ?? $payload['rationale'] ?? '')
-                                        : 'Pesan terstruktur agent tidak dapat ditampilkan.';
-                                @endphp
-                                <article class="chat-message chat-message-assistant {{ $roleClass }}">
-                                    <span class="chat-message-label">{{ $roleName }}</span>
-                                    <div class="team-message-meta"><span>Putaran {{ $message->round }}</span>@if ($message->estimate_points)<span>{{ $message->estimate_points }} poin</span>@endif @if ($message->explicit_agree === true)<span class="agreement-badge agreement-badge--yes">Setuju eksplisit</span>@elseif ($message->explicit_agree === false)<span class="agreement-badge agreement-badge--no">Belum setuju</span>@endif <time datetime="{{ $message->created_at?->toIso8601String() }}">{{ $message->created_at?->format('d M Y H:i') }}</time></div>
-                                    <p>{{ \Illuminate\Support\Str::limit($content, 500) }}</p>
-                                </article>
-                            @empty
-                                <div class="chat-empty"><span class="chat-empty-mark">✦</span><h2>Belum ada pesan</h2><p>Pesan akan muncul setelah worker memproses agent.</p></div>
-                            @endforelse
-                        </div>
-                        <div class="chat-composer team-readonly-composer"><span>Diskusi Tim · baca saja</span><span>PO tidak dapat mengirim pesan ke agent</span></div>
+                @empty
+                    <div class="dc-empty">
+                        <span class="dc-empty-mark">✦</span>
+                        <h2>Belum ada diskusi</h2>
+                        <p>Mulai Diskusi Fibonacci dari halaman project. Percakapan Backend, Frontend, dan QA muncul di sini.</p>
+                        <a class="button button-primary" href="{{ route('projects.show', $story->project_id) }}">Buka project</a>
                     </div>
-                    @if ($run->summary)<p class="sm-summary"><strong>Ringkasan Scrum Master:</strong> {{ \Illuminate\Support\Str::limit($run->summary, 600) }}</p>@endif
-                </article>
-            @empty
-                <div class="chat-empty"><span class="chat-empty-mark">✦</span><h2>Belum ada diskusi</h2><p>Mulai Diskusi Fibonacci dari Sprint Backlog.</p></div>
-            @endforelse
-        </section>
+                @endforelse
+            </main>
 
-        <section aria-labelledby="execution-heading" class="team-execution-empty">
-            <h2 id="execution-heading">Eksekusi &amp; Revisi QA</h2>
-            @forelse ($executions as $execution)
-                <div class="task-row">
-                    <div>
-                        <strong>Eksekusi #{{ $execution->id }}</strong>
-                        <small>{{ str_replace('_', ' ', $execution->status) }} · {{ $execution->tasks_count }} task · {{ $execution->created_at->format('d M Y H:i') }}</small>
-                        @if ($execution->summary)<p>{{ \Illuminate\Support\Str::limit($execution->summary, 200) }}</p>@endif
+            <aside class="dc-side" aria-label="Rincian story dan eksekusi">
+                <details class="dc-card dc-story" open data-collapse-on-small>
+                    <summary>User story</summary>
+                    <div class="dc-tabs" role="tablist" aria-label="Versi user story">
+                        <button type="button" role="tab" class="dc-tab is-active" data-story-tab="original" aria-selected="true">Data asli</button>
+                        <button type="button" role="tab" class="dc-tab" data-story-tab="refined" aria-selected="false">Hasil diskusi SM</button>
                     </div>
-                    <a class="button button-ghost" href="{{ route('stories.executions.show', [$story, $execution]) }}">Lihat</a>
-                </div>
-            @empty
-                <p class="notice-bar">Belum ada eksekusi. Mulai dari Sprint Backlog setelah estimasi disepakati.</p>
-            @endforelse
-        </section>
+                    <p class="dc-hint">Eksekusi memakai versi <strong>{{ $story->hasRefinement() ? 'Hasil Diskusi SM' : 'Data Asli' }}</strong>.</p>
+
+                    <dl class="dc-fields" data-story-panel="original" role="tabpanel">
+                        <div><dt>Saya ingin (fitur)</dt><dd>{{ $story->title }}</dd></div>
+                        <div><dt>Agar (tujuan)</dt><dd>{{ $story->sprint_purpose ?? '—' }}</dd></div>
+                        <div><dt>Acceptance criteria</dt><dd>{{ $story->acceptance_criteria ?? '—' }}</dd></div>
+                        <div><dt>Aktor</dt><dd>{{ $story->actor?->name ?? '—' }}</dd></div>
+                    </dl>
+                    <div data-story-panel="refined" role="tabpanel" hidden>
+                        @if ($story->hasRefinement())
+                            <p class="dc-hint">Disempurnakan Scrum Master dari Run #{{ $story->refined_from_run_id }} · {{ $story->refined_at?->format('d M Y H:i') }}</p>
+                            <dl class="dc-fields">
+                                <div><dt>Saya ingin (fitur)</dt><dd>{{ $story->refined_title }}</dd></div>
+                                <div><dt>Agar (tujuan)</dt><dd>{{ $story->refined_purpose ?? '—' }}</dd></div>
+                                <div><dt>Acceptance criteria</dt><dd>{{ $story->refined_acceptance_criteria ?? '—' }}</dd></div>
+                            </dl>
+                        @else
+                            <p class="dc-hint">Belum ada hasil diskusi. Versi final Scrum Master muncul di sini setelah laporan kesepakatan tersimpan.</p>
+                        @endif
+                    </div>
+                </details>
+
+                <section class="dc-card" aria-labelledby="execution-heading">
+                    <h2 id="execution-heading" class="dc-card-title">Eksekusi &amp; revisi QA</h2>
+                    @forelse ($executions as $execution)
+                        <a class="dc-exec" href="{{ route('stories.executions.show', [$story, $execution]) }}">
+                            <span><strong>Eksekusi #{{ $execution->id }}</strong><small>{{ $execution->created_at->format('d M Y H:i') }} · {{ $execution->tasks_count }} task</small></span>
+                            <span class="dc-chip">{{ str_replace('_', ' ', $execution->status) }}</span>
+                            @if ($execution->summary)<em>{{ $execution->summary }}</em>@endif
+                        </a>
+                    @empty
+                        <p class="dc-hint">Belum ada eksekusi. Mulai dari halaman project setelah estimasi disepakati.</p>
+                    @endforelse
+                </section>
+            </aside>
+        </div>
+
+        <script>
+            (function () {
+                var buttons = document.querySelectorAll('[data-story-tab]');
+                var panels = document.querySelectorAll('[data-story-panel]');
+                buttons.forEach(function (button) {
+                    button.addEventListener('click', function () {
+                        buttons.forEach(function (b) { b.classList.remove('is-active'); b.setAttribute('aria-selected', 'false'); });
+                        panels.forEach(function (p) { p.hidden = true; });
+                        button.classList.add('is-active');
+                        button.setAttribute('aria-selected', 'true');
+                        var panel = document.querySelector('[data-story-panel="' + button.dataset.storyTab + '"]');
+                        if (panel) panel.hidden = false;
+                    });
+                });
+                // Layar kecil: kartu story dilipat agar percakapan langsung terlihat.
+                if (window.matchMedia('(max-width: 900px)').matches) {
+                    document.querySelectorAll('[data-collapse-on-small]').forEach(function (d) { d.removeAttribute('open'); });
+                }
+            })();
+        </script>
     @endif
 @endsection

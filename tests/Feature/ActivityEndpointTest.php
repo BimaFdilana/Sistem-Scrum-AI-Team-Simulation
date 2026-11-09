@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\ExecutionRun;
 use App\Models\Project;
 use App\Models\Story;
+use App\Models\StoryEstimationRun;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -87,5 +88,57 @@ class ActivityEndpointTest extends TestCase
         $this->actingAs($user)->post(route('stories.executions.resume', [$run->story, $run]))
             ->assertRedirect();
         $this->assertSame('EXECUTING', $run->fresh()->status);
+    }
+
+    private function makeEstimation(User $owner, string $status, array $agents = []): StoryEstimationRun
+    {
+        $project = Project::query()->firstOrCreate(['name' => 'AE'], ['project_type' => 'NEW_PROJECT', 'stack' => 'Laravel', 'status' => 'BASELINE_READY']);
+        $story = Story::query()->create(['project_id' => $project->id, 'title' => 'Fitur estimasi', 'estimate_points' => 3, 'revision' => 1]);
+        $run = StoryEstimationRun::query()->create([
+            'story_id' => $story->id, 'requested_by' => $owner->id, 'story_revision' => 1, 'status' => $status,
+            'consensus_points' => $status === 'COMPLETED' ? 5 : null,
+        ]);
+        foreach ($agents as $slug => $agentStatus) {
+            $run->agentRuns()->create(['profile_slug' => $slug, 'round' => 1, 'status' => $agentStatus]);
+        }
+
+        return $run;
+    }
+
+    public function test_running_fibonacci_discussion_is_listed_with_agents_and_progress(): void
+    {
+        $user = User::factory()->create();
+        $run = $this->makeEstimation($user, 'RUNNING', ['backend-developer' => 'COMPLETED', 'frontend-developer' => 'RUNNING', 'qa-engineer' => 'QUEUED']);
+
+        $json = $this->actingAs($user)->getJson(route('activity.active'))->assertOk();
+
+        $json->assertJsonPath('running', 1)->assertJsonCount(1, 'estimations');
+        $estimation = $json->json('estimations.0');
+        $this->assertSame('estimation', $estimation['kind']);
+        $this->assertSame('Putaran 1/2 · Frontend menjawab', $estimation['headline']);
+        $this->assertSame(['COMPLETED', 'RUNNING', 'QUEUED'], array_column($estimation['agents'], 'status'));
+        $this->assertSame(route('stories.discussion.show', $run->story), $estimation['detail_url']);
+    }
+
+    public function test_completed_discussion_shows_the_final_points_and_failed_one_offers_retry(): void
+    {
+        $user = User::factory()->create();
+        $this->makeEstimation($user, 'COMPLETED');
+        $failed = $this->makeEstimation($user, 'FAILED', ['backend-developer' => 'FAILED']);
+
+        $estimations = collect($this->actingAs($user)->getJson(route('activity.active'))->json('estimations'));
+
+        $this->assertStringContainsString('Selesai · 5 poin', $estimations->firstWhere('state', 'done')['headline']);
+        $attention = $estimations->firstWhere('state', 'attention');
+        $this->assertSame('retry', $attention['actions'][0]['key']);
+        $this->assertSame(route('stories.estimations.retry', [$failed->story, $failed]), $attention['actions'][0]['url']);
+    }
+
+    public function test_other_users_discussions_are_not_listed(): void
+    {
+        $owner = User::factory()->create();
+        $this->makeEstimation($owner, 'RUNNING', ['backend-developer' => 'RUNNING']);
+
+        $this->actingAs(User::factory()->create())->getJson(route('activity.active'))->assertJsonCount(0, 'estimations');
     }
 }

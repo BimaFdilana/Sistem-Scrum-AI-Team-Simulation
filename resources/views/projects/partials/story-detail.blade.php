@@ -28,6 +28,7 @@
                                                 @csrf
                                                 <button class="button button-ghost" type="submit" @disabled($latestEstimationRun?->status === 'RUNNING')>Diskusi Fibonacci via Scrum Master</button>
                                                 <p class="field-help">FE, BE dan QA memberi usulan keseluruhan story, saling menanggapi, lalu secara eksplisit menyepakati poin yang sama dalam maksimal dua putaran. Tanpa kesepakatan, tidak ada poin final.</p>
+                                            <p class="field-help" data-fibonacci-note role="status" hidden></p>
                                             </form>
                                             @if ($latestEstimationRun)
                                                 @if ($latestEstimationRun->story_revision !== $story->revision)

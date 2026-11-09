@@ -278,3 +278,5 @@
 }
 
 .exec-permission-list small { color: var(--muted, #94a3b8); font-size: .72rem; }
+.discussion-banner{border:1px solid rgba(var(--accent-rgb),.22);border-radius:var(--radius);padding:.75rem 1rem;margin:.25rem 0;background:rgba(var(--accent-rgb),.08);color:var(--text)}
+.discussion-banner--danger{border-color:rgba(var(--danger-rgb),.24);background:rgba(var(--danger-rgb),.09);color:var(--danger)}

@@ -52,3 +52,9 @@
 .dock-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 @media (max-width:600px){.activity-dock{right:8px;bottom:8px;left:8px;align-items:stretch}.dock-panel{width:auto;max-height:75vh}.dock-pill{align-self:flex-end}}
 @media (prefers-reduced-motion:reduce){.dock-state-running .dock-dot{animation:none}}
+.dock-bar{height:5px;margin:12px 0 2px;border-radius:3px;background:var(--line-strong);overflow:hidden}
+.dock-bar span{display:block;height:100%;border-radius:3px;background:var(--accent);transition:width .4s}
+.dock-run.is-attention .dock-bar span{background:var(--amber)}
+.dock-agents{display:flex;flex-wrap:wrap;gap:6px 14px;margin:10px 0 0;padding:0;list-style:none}
+.dock-agents li{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px}
+@media (prefers-reduced-motion:reduce){.dock-bar span{transition:none}}

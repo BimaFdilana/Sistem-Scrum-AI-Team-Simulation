@@ -167,11 +167,10 @@ class StoryEstimationTest extends TestCase
         $this->actingAs($owner)->get('/projects/'.$project->id)
             ->assertOk()->assertSee('Diskusi Fibonacci via Scrum Master')
             ->assertSee('Lihat Diskusi Tim')->assertDontSee('Poin final pilihan PO')
-            ->assertSee('fibonacci-progress-dialog', false)
-            ->assertSee('data-fibonacci-form', false)
-            ->assertSee('data-fibonacci-progress-bar', false);
+            ->assertDontSee('fibonacci-progress-dialog', false)
+            ->assertSee('data-fibonacci-form', false);
         $this->get('/stories/'.$story->id.'/discussion')->assertOk()
-            ->assertSee('Diskusi Fibonacci')->assertSee('Eksekusi &amp; Revisi QA', false);
+            ->assertSee('Diskusi Fibonacci')->assertSee('Eksekusi &amp; revisi QA', false);
     }
 
     private function configureEstimationProfiles(): void

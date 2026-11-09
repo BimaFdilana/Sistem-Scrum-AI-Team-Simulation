@@ -12,7 +12,8 @@
     var KEY_DISMISSED = 'scrumspace-dock-dismissed';
 
     var runs = [];
-    var open = read(KEY_OPEN) === '1';
+    // Di layar kecil panel menutupi halaman: selalu mulai terlipat walau terakhir terbuka.
+    var open = read(KEY_OPEN) === '1' && !(window.matchMedia && window.matchMedia('(max-width: 600px)').matches);
     var dismissed = parse(read(KEY_DISMISSED), []);
     var lastStatus = {};
     var errors = 0;
@@ -27,7 +28,7 @@
     var panel = el('div', 'dock-panel');
     panel.id = 'activity-dock-panel';
     panel.setAttribute('role', 'region');
-    panel.setAttribute('aria-label', 'Aktivitas eksekusi');
+    panel.setAttribute('aria-label', 'Aktivitas proses');
     panel.hidden = true;
     var live = el('div', 'dock-sr');
     live.setAttribute('aria-live', 'polite');
@@ -61,7 +62,7 @@
     }
 
     function visibleRuns() {
-        return runs.filter(function (r) { return !(r.state === 'done' && dismissed.indexOf(r.id) !== -1); });
+        return runs.filter(function (r) { return !(r.state === 'done' && dismissed.indexOf(keyOf(r)) !== -1); });
     }
 
     function overall(list) {
@@ -89,19 +90,23 @@
         updateTitle(active);
     }
 
+    /** Kunci unik lintas jenis (eksekusi dan diskusi Fibonacci bisa berbagi id yang sama). */
+    function keyOf(run) { return (run.kind || 'execution') + ':' + run.id; }
+
     function pillText(list, state) {
         var focus = list.find(function (r) { return r.state === state; }) || list[0];
         if (list.length > 1) {
             var attention = list.filter(function (r) { return r.state === 'attention'; }).length;
-            return attention > 0 ? attention + ' perlu tindakan' : list.length + ' eksekusi';
+            return attention > 0 ? attention + ' perlu tindakan' : list.length + ' proses';
         }
+        if (focus.kind === 'estimation') { return 'Fibonacci · ' + focus.headline; }
         var progress = focus.progress.total > 0 ? ' · ' + focus.progress.done + '/' + focus.progress.total + ' task' : '';
         return focus.headline + progress;
     }
 
     function renderPanel(list) {
         var head = el('div', 'dock-head');
-        head.append(el('strong', '', 'Aktivitas eksekusi'));
+        head.append(el('strong', '', 'Aktivitas proses'));
         var close = el('button', 'dock-close', 'Perkecil');
         close.type = 'button';
         close.addEventListener('click', function () { setOpen(false); pill.focus(); });
@@ -112,7 +117,68 @@
         panel.replaceChildren.apply(panel, nodes);
     }
 
+    function renderEstimation(run) {
+        var card = el('article', 'dock-run is-' + run.state);
+        var top = el('div', 'dock-run-top');
+        var titleWrap = el('div');
+        titleWrap.append(el('h3', 'dock-run-title', 'Diskusi Fibonacci · ' + run.label), el('p', 'dock-run-headline', run.headline));
+        var badgeText = run.state === 'running' ? 'BERJALAN' : (run.state === 'attention' ? 'PERLU TINDAKAN' : 'SELESAI');
+        top.append(titleWrap, el('span', 'dock-badge is-' + run.state, badgeText));
+        card.append(top);
+
+        var percent = run.state === 'done' ? 100 : Math.min(95, Math.max(6, Math.round((run.progress.done / run.progress.total) * 100)));
+        var bar = el('div', 'dock-bar');
+        bar.setAttribute('role', 'progressbar');
+        bar.setAttribute('aria-valuenow', String(percent));
+        bar.setAttribute('aria-valuemin', '0');
+        bar.setAttribute('aria-valuemax', '100');
+        bar.setAttribute('aria-label', 'Progres diskusi Fibonacci');
+        var fill = el('span');
+        fill.style.width = percent + '%';
+        bar.append(fill);
+        card.append(bar);
+
+        var agents = el('ul', 'dock-agents');
+        run.agents.forEach(function (a) {
+            var cls = a.status === 'COMPLETED' ? 'is-ok' : (a.status === 'RUNNING' ? 'is-live' : (a.status === 'FAILED' ? 'is-warn' : ''));
+            var li = el('li', cls);
+            var mark = el('span', 'dock-task-mark ' + cls);
+            mark.setAttribute('aria-hidden', 'true');
+            li.append(mark, el('span', '', a.name));
+            agents.append(li);
+        });
+        card.append(agents);
+
+        var actions = el('div', 'dock-actions');
+        (run.actions || []).forEach(function (action) {
+            var btn = el('button', 'dock-btn is-primary', action.label);
+            btn.type = 'button';
+            btn.disabled = !!busy[keyOf(run)];
+            btn.addEventListener('click', function () { runAction(run, action, btn); });
+            actions.append(btn);
+        });
+        if (run.detail_url) {
+            var link = el('a', 'dock-btn', 'Buka diskusi');
+            link.href = run.detail_url;
+            actions.append(link);
+        }
+        if (run.state === 'done') {
+            var dismiss = el('button', 'dock-btn', 'Tutup');
+            dismiss.type = 'button';
+            dismiss.addEventListener('click', function () {
+                dismissed.push(keyOf(run));
+                write(KEY_DISMISSED, JSON.stringify(dismissed.slice(-50)));
+                render();
+            });
+            actions.append(dismiss);
+        }
+        card.append(actions);
+
+        return card;
+    }
+
     function renderRun(run) {
+        if (run.kind === 'estimation') { return renderEstimation(run); }
         var card = el('article', 'dock-run is-' + run.state);
         var top = el('div', 'dock-run-top');
         var titleWrap = el('div');
@@ -155,7 +221,7 @@
         (run.actions || []).forEach(function (action) {
             var btn = el('button', 'dock-btn is-primary', action.label);
             btn.type = 'button';
-            btn.disabled = !!busy[run.id];
+            btn.disabled = !!busy[keyOf(run)];
             btn.addEventListener('click', function () { runAction(run, action, btn); });
             actions.append(btn);
         });
@@ -168,7 +234,7 @@
             var dismiss = el('button', 'dock-btn', 'Tutup');
             dismiss.type = 'button';
             dismiss.addEventListener('click', function () {
-                dismissed.push(run.id);
+                dismissed.push(keyOf(run));
                 write(KEY_DISMISSED, JSON.stringify(dismissed.slice(-50)));
                 render();
             });
@@ -187,7 +253,7 @@
     }
 
     function runAction(run, action, btn) {
-        busy[run.id] = true;
+        busy[keyOf(run)] = true;
         btn.disabled = true;
         fetch(action.url, {
             method: 'POST',
@@ -202,7 +268,7 @@
         }).catch(function () {
             announce(run.label + ': aksi gagal dikirim, coba lagi.');
         }).finally(function () {
-            busy[run.id] = false;
+            busy[keyOf(run)] = false;
             btn.disabled = false;
             lastSignature = '';
             poll();
@@ -215,10 +281,11 @@
 
     function detectChanges(next) {
         next.forEach(function (run) {
-            if (lastStatus[run.id] !== undefined && lastStatus[run.id] !== run.status) {
+            var key = keyOf(run);
+            if (lastStatus[key] !== undefined && lastStatus[key] !== run.status) {
                 announce(run.label + ': ' + run.headline);
             }
-            lastStatus[run.id] = run.status;
+            lastStatus[key] = run.status;
         });
     }
 
@@ -238,8 +305,10 @@
             var signature = JSON.stringify(data);
             if (signature === lastSignature) { return; }
             lastSignature = signature;
-            detectChanges(data.runs);
-            runs = data.runs;
+            var combined = (data.runs || []).map(function (r) { r.kind = r.kind || 'execution'; return r; })
+                .concat(data.estimations || []);
+            detectChanges(combined);
+            runs = combined;
             render();
         }).catch(function () {
             errors += 1;
@@ -252,6 +321,11 @@
         var delay = errors > 0 ? Math.min(30000, 3000 * Math.pow(2, errors)) : (open ? 3000 : 10000);
         timer = setTimeout(poll, delay);
     }
+
+    window.scrumDock = {
+        open: function () { setOpen(true); },
+        refresh: function () { lastSignature = ''; poll(); }
+    };
 
     poll();
 })();

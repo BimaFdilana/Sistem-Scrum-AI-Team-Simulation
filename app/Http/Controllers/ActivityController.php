@@ -3,8 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\ExecutionRun;
+use App\Models\StoryEstimationRun;
+use App\Services\StoryEstimationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 /**
@@ -39,15 +42,100 @@ class ActivityController extends Controller
 
         $payload = [
             'runs' => $runs->map(fn (ExecutionRun $run) => $this->present($run))->values()->all(),
+            'estimations' => $this->estimations($request),
         ];
-        $payload['attention'] = collect($payload['runs'])->where('state', 'attention')->count();
-        $payload['running'] = collect($payload['runs'])->where('state', 'running')->count();
+        $all = collect($payload['runs'])->concat($payload['estimations']);
+        $payload['attention'] = $all->where('state', 'attention')->count();
+        $payload['running'] = $all->where('state', 'running')->count();
 
         $response = response()->json($payload)->setEtag(md5(json_encode($payload)));
         $response->headers->set('Cache-Control', 'private, no-cache');
         $response->isNotModified($request);
 
         return $response;
+    }
+
+    /**
+     * Diskusi Fibonacci milik pengguna: yang sedang berjalan atau baru selesai (30 menit).
+     * Menggantikan dialog progres lama; tampil di dock yang sama dengan eksekusi.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function estimations(Request $request): array
+    {
+        if (! Schema::hasTable('story_estimation_runs') || ! $request->user()) {
+            return [];
+        }
+
+        return StoryEstimationRun::query()
+            ->with(['story', 'agentRuns'])
+            ->where('requested_by', $request->user()->id)
+            ->where(function ($q) {
+                $q->whereIn('status', ['QUEUED', 'RUNNING', 'REPORT_PENDING'])
+                    ->orWhere(fn ($q) => $q->whereIn('status', ['COMPLETED', 'FAILED', 'PARTIAL', 'NO_CONSENSUS'])
+                        ->where('updated_at', '>=', now()->subMinutes(30)));
+            })
+            ->latest('updated_at')
+            ->limit(5)
+            ->get()
+            ->filter(fn (StoryEstimationRun $run) => $run->story !== null)
+            ->map(fn (StoryEstimationRun $run) => $this->presentEstimation($run))
+            ->values()
+            ->all();
+    }
+
+    /** @return array<string, mixed> */
+    private function presentEstimation(StoryEstimationRun $run): array
+    {
+        $names = ['backend-developer' => 'Backend', 'frontend-developer' => 'Frontend', 'qa-engineer' => 'QA'];
+        $round = min(2, max(1, (int) $run->agentRuns->max('round')));
+        $current = $run->agentRuns->where('round', $round);
+        $completed = $run->agentRuns->where('status', 'COMPLETED')->count();
+        $running = $current->where('status', 'RUNNING')->sortByDesc('id')->first();
+        $failed = $run->agentRuns->where('status', 'FAILED')->sortByDesc('id')->first();
+
+        $state = match ($run->status) {
+            'COMPLETED' => 'done',
+            'FAILED', 'PARTIAL', 'NO_CONSENSUS' => 'attention',
+            default => 'running',
+        };
+        $headline = match ($run->status) {
+            'QUEUED' => 'Menunggu worker',
+            'RUNNING' => 'Putaran '.$round.'/2 · '.($running ? ($names[$running->profile_slug] ?? $running->profile_slug).' menjawab' : 'agen berdiskusi'),
+            'REPORT_PENDING' => 'Scrum Master menyusun laporan',
+            'COMPLETED' => 'Selesai · '.$run->consensus_points.' poin ('.StoryEstimationService::category((int) $run->consensus_points).')',
+            'NO_CONSENSUS' => 'Tanpa konsensus',
+            default => $failed ? ($names[$failed->profile_slug] ?? $failed->profile_slug).' gagal pada putaran '.$failed->round : 'Berhenti sebelum selesai',
+        };
+
+        $actions = [];
+        if (in_array($run->status, ['FAILED', 'PARTIAL', 'NO_CONSENSUS'], true)) {
+            $actions[] = [
+                'key' => 'retry',
+                'label' => 'Ulangi diskusi',
+                'method' => 'post',
+                'url' => route('stories.estimations.retry', [$run->story, $run]),
+            ];
+        }
+
+        return [
+            'id' => $run->id,
+            'kind' => 'estimation',
+            'label' => Str::limit($run->story->display_id.' — '.$run->story->effectiveTitle(), 70),
+            'status' => $run->status,
+            'state' => $state,
+            'headline' => $headline,
+            'round' => $round,
+            'total_rounds' => 2,
+            'progress' => ['done' => min(6, $completed), 'total' => 6],
+            'agents' => collect($names)->map(fn (string $name, string $slug) => [
+                'name' => $name,
+                'status' => (string) ($current->firstWhere('profile_slug', $slug)?->status ?? 'PENDING'),
+            ])->values()->all(),
+            'points' => $run->consensus_points,
+            'detail_url' => route('stories.discussion.show', $run->story),
+            'actions' => $actions,
+        ];
     }
 
     /** @return array<string, mixed> */

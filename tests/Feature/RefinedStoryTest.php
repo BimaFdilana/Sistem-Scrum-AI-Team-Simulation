@@ -85,8 +85,8 @@ class RefinedStoryTest extends TestCase
 
         $this->actingAs($owner)->get('/stories/'.$story->id.'/discussion')
             ->assertOk()
-            ->assertSee('Data Asli')
-            ->assertSee('Hasil Diskusi SM')
+            ->assertSee('Data asli')
+            ->assertSee('Hasil diskusi SM')
             ->assertSee('Kelola pengajuan')
             ->assertSee('Saya Ingin login dengan Google yang aman');
     }
