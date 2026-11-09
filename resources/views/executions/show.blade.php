@@ -6,7 +6,7 @@
     $total = $tasks->count();
     $done = $tasks->whereIn('status', ['APPROVED', 'QA_PENDING'])->count();
     $running = $tasks->where('status', 'IN_PROGRESS')->count();
-    $failed = in_array($run->status, ['FAILED', 'BLOCKED'], true);
+    $failed = in_array($run->status, ['FAILED', 'BLOCKED', 'NEEDS_PO'], true);
     $summaryText = (string) $run->summary;
 
     $s1 = $total > 0 || $run->status !== 'QUEUED';
@@ -131,6 +131,18 @@
     @include('executions.partials.permission-approval', ['run' => $run])
 @elseif ($run->status === 'COMPLETED')
     <p class="discussion-banner"><strong>Eksekusi selesai.</strong> {{ $run->summary }}</p>
+@elseif ($run->status === 'NEEDS_PO')
+    <div class="discussion-banner discussion-banner--danger">
+        <p><strong>Eksekusi berhenti, menunggu keputusan Anda.</strong> {{ $run->summary }}</p>
+        <form method="POST" action="{{ route('stories.executions.resume', [$story, $run]) }}">
+            @csrf
+            <button class="button button-primary" type="submit">Lanjutkan eksekusi</button>
+        </form>
+        <form method="POST" action="{{ route('stories.executions.accept', [$story, $run]) }}">
+            @csrf
+            <button class="button button-danger" type="submit" name="status" value="GAGAL" onclick="return handleConfirm(event, {title: 'Tandai sebagai Gagal?', message: 'Tandai story ini sebagai GAGAL? Story akan terkunci dari eksekusi ulang.', confirmLabel: 'Ya, tandai gagal', danger: true})">Tandai Gagal</button>
+        </form>
+    </div>
 @elseif ($run->status === 'BLOCKED')
     <p class="discussion-banner discussion-banner--danger"><strong>Eksekusi diblokir.</strong> {{ $run->summary }}</p>
 @elseif ($run->status === 'FAILED')

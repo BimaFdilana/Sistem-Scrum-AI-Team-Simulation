@@ -11,7 +11,7 @@ class ExecutionTask extends Model
     protected $fillable = [
         'execution_run_id', 'title', 'description', 'assignee', 'executor', 'executor_override', 'status',
         'sort_order', 'depends_on', 'worktree_path', 'branch', 'chain_base', 'revision_count', 'qa_feedback', 'patch_retry_count',
-        'diff_snapshot', 'gate_output', 'gate_fail_count', 'last_error', 'attempt_seq', 'last_progress_at',
+        'diff_snapshot', 'gate_output', 'gate_fail_count', 'last_error', 'attempt_seq', 'last_progress_at', 'stall_count',
     ];
 
     protected function casts(): array

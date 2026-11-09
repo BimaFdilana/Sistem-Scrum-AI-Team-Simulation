@@ -76,6 +76,7 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/stories/{story}/estimation-runs/{run}/cancel', [StoryEstimationController::class, 'cancel'])->name('stories.estimations.cancel');
     Route::post('/stories/{story}/executions', [ExecutionController::class, 'store'])->middleware('throttle:6,1')->name('stories.executions.store');
     Route::get('/stories/{story}/executions/{run}', [ExecutionController::class, 'show'])->name('stories.executions.show');
+    Route::post('/stories/{story}/executions/{run}/resume', [ExecutionController::class, 'resume'])->middleware('throttle:6,1')->name('stories.executions.resume');
     Route::post('/stories/{story}/executions/{run}/accept', [ExecutionController::class, 'accept'])->name('stories.executions.accept');
     Route::get('/repair-orders', [RepairOrderController::class, 'index'])->name('repair-orders.index');
     Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');

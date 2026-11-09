@@ -6,8 +6,14 @@ use App\Jobs\BreakdownExecutionJob;
 use App\Models\ExecutionRun;
 use App\Models\PermissionRequest;
 use App\Models\Story;
+use App\Services\GithubApiClient;
+use App\Services\GithubProjectService;
+use App\Support\Demo\DemoServerManager;
+use App\Support\Execution\ExecutionScheduler;
+use App\Support\Workspace\BaselineSnapshot;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
 
 class ExecutionController extends Controller
@@ -46,9 +52,9 @@ class ExecutionController extends Controller
         // Snapshot baseline sebelum agent menyentuh kode (mode langsung).
         if (($run->mode ?: config('execution.mode', 'worktree')) === 'direct' && $story->project) {
             try {
-                app(\App\Support\Workspace\BaselineSnapshot::class)->backup($story->project, 'run-'.$run->id);
+                app(BaselineSnapshot::class)->backup($story->project, 'run-'.$run->id);
             } catch (\Throwable $e) {
-                \Illuminate\Support\Facades\Log::warning('Snapshot baseline gagal', ['run' => $run->id, 'error' => $e->getMessage()]);
+                Log::warning('Snapshot baseline gagal', ['run' => $run->id, 'error' => $e->getMessage()]);
             }
         }
 
@@ -72,6 +78,28 @@ class ExecutionController extends Controller
         ]);
     }
 
+    /** PO melanjutkan run yang dihentikan watchdog (NEEDS_PO): task terblokir dijalankan ulang. */
+    public function resume(Story $story, ExecutionRun $run): RedirectResponse
+    {
+        abort_unless((int) $run->story_id === (int) $story->id, 404);
+
+        if (! $run->transitionTo('EXECUTING', [ExecutionRun::NEEDS_PO], ['error_code' => null, 'summary' => null])) {
+            return back()->withErrors(['acceptance' => 'Eksekusi ini tidak sedang menunggu keputusan PO.']);
+        }
+
+        $run->tasks()->where('status', 'BLOCKED')->update([
+            'status' => 'PENDING', 'stall_count' => 0, 'last_error' => null, 'last_progress_at' => now(),
+        ]);
+        $run->messages()->create([
+            'sender_slug' => 'product-owner',
+            'recipient_slug' => 'scrum-master',
+            'content' => 'PO melanjutkan eksekusi; task terblokir dijalankan ulang.',
+        ]);
+        app(ExecutionScheduler::class)->dispatchReady($run);
+
+        return back()->with('status', 'Eksekusi dilanjutkan.');
+    }
+
     /** Keputusan final PO: Berhasil / Gagal. Mengunci story dari eksekusi ulang. */
     public function accept(Request $request, Story $story, ExecutionRun $run): RedirectResponse
     {
@@ -83,7 +111,9 @@ class ExecutionController extends Controller
         if ($story->isAccepted()) {
             return back()->withErrors(['acceptance' => 'Story sudah diterima sebelumnya.']);
         }
-        if (! $run->isTerminal()) {
+        // Run yang menunggu PO (NEEDS_PO) boleh ditutup sebagai GAGAL, tidak sebagai BERHASIL.
+        $closableByPo = $run->isTerminal() || ($run->isWaitingForPo() && $status === 'GAGAL');
+        if (! $closableByPo) {
             return back()->withErrors(['acceptance' => 'Keputusan final hanya untuk eksekusi yang sudah selesai atau diblokir.']);
         }
 
@@ -92,7 +122,7 @@ class ExecutionController extends Controller
         // halamannya 500, tanpa satu pun bukti.
         $demoEvidence = null;
         if ($status === 'BERHASIL' && $story->project !== null) {
-            $check = app(\App\Support\Demo\DemoServerManager::class)->verify($story->project);
+            $check = app(DemoServerManager::class)->verify($story->project);
 
             if (! $check['ok']) {
                 return back()->withErrors([
@@ -148,7 +178,7 @@ class ExecutionController extends Controller
                 return;
             }
 
-            $service = app(\App\Services\GithubProjectService::class);
+            $service = app(GithubProjectService::class);
             if (! $service->isConnected()) {
                 return;
             }
@@ -164,7 +194,7 @@ class ExecutionController extends Controller
                 $run->forceFill(['github_branch' => $branch])->save();
             }
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('Story branch GitHub gagal dibuat', [
+            Log::warning('Story branch GitHub gagal dibuat', [
                 'story_id' => $story->id,
                 'error' => $e->getMessage(),
             ]);
@@ -183,7 +213,7 @@ class ExecutionController extends Controller
                 return null; // Flow lokal — tidak ada yang di-merge.
             }
 
-            $service = app(\App\Services\GithubProjectService::class);
+            $service = app(GithubProjectService::class);
             if (! $service->isConnected()) {
                 return null;
             }
@@ -199,7 +229,7 @@ class ExecutionController extends Controller
             }
 
             // Merge via GitHub API.
-            $github = app(\App\Services\GithubApiClient::class);
+            $github = app(GithubApiClient::class);
             $result = $github->mergeBranch($owner, $repo, 'integration', $run->github_branch);
 
             if ($result === null || ! ($result['merged'] ?? false)) {
@@ -214,7 +244,7 @@ class ExecutionController extends Controller
                 try {
                     $service->syncBranchFromRemote($workspace, 'integration');
                 } catch (\Throwable $e) {
-                    \Illuminate\Support\Facades\Log::warning('Sync integration ke lokal gagal', [
+                    Log::warning('Sync integration ke lokal gagal', [
                         'error' => $e->getMessage(),
                     ]);
                     // Tidak fatal — merge GitHub sudah sukses.
@@ -223,7 +253,7 @@ class ExecutionController extends Controller
 
             return null;
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('Merge story ke integration gagal', [
+            Log::warning('Merge story ke integration gagal', [
                 'story_id' => $story->id,
                 'error' => $e->getMessage(),
             ]);

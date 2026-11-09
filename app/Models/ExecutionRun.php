@@ -9,6 +9,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class ExecutionRun extends Model
 {
+    public const NEEDS_PO = 'NEEDS_PO';
+
     protected $fillable = [
         'story_id', 'repair_order_id', 'requested_by', 'status', 'executor_policy', 'mode', 'qa_mode', 'qa_rounds', 'qa_started_at', 'qa_finished_at', 'summary', 'error_code', 'completed_at',
         'github_branch',
@@ -103,6 +105,34 @@ class ExecutionRun extends Model
         return in_array($this->status, [
             'QUEUED', 'BREAKDOWN', 'AWAITING_PERMISSION', 'EXECUTING', 'REVIEWING', 'MERGING',
         ], true);
+    }
+
+    /** Run berhenti menunggu keputusan PO (lanjutkan atau tandai gagal). */
+    public function isWaitingForPo(): bool
+    {
+        return $this->status === self::NEEDS_PO;
+    }
+
+    /**
+     * Pindah status secara atomik (compare-and-set): hanya berhasil bila
+     * status saat ini masih salah satu dari $from. Mencegah dua proses
+     * (watchdog, job, PO) saling menimpa status yang sudah berubah.
+     *
+     * @param  array<int, string>  $from
+     * @param  array<string, mixed>  $attributes
+     */
+    public function transitionTo(string $to, array $from, array $attributes = []): bool
+    {
+        $updated = static::query()
+            ->whereKey($this->getKey())
+            ->whereIn('status', $from)
+            ->update(array_merge($attributes, ['status' => $to, 'updated_at' => now()]));
+
+        if ($updated > 0) {
+            $this->refresh();
+        }
+
+        return $updated > 0;
     }
 
     public function isTerminal(): bool
