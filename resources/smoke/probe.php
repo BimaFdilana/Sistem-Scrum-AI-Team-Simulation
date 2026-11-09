@@ -12,7 +12,6 @@ use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 use Illuminate\Support\ViewErrorBag;
 use Illuminate\Validation\ValidationException;
-use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 /**
  * Uji jalan nyata untuk project Laravel yang dikerjakan tim AI.
@@ -475,13 +474,24 @@ $bind = function (array $item): ?string {
             if ($class && is_subclass_of($class, Model::class)) {
                 $model = new $class;
                 $key = $route->bindingFieldFor($name) ?? $model->getRouteKeyName();
-                $value = $class::query()->orderByDesc($model->getKeyName())->value($key);
+                if (! Schema::hasColumn($model->getTable(), $key)) {
+                    $key = $model->getKeyName();
+                }
+                $value = Schema::hasColumn($model->getTable(), $key)
+                    ? $class::query()->orderByDesc($key)->value($key)
+                    : null;
             } else {
-                $table = Str::plural(Str::snake($name));
-                if (Schema::hasTable($table)) {
-                    $value = DB::table($table)->orderByDesc('id')->value('id');
-                } elseif (Schema::hasTable(Str::snake($name))) {
-                    $value = DB::table(Str::snake($name))->orderByDesc('id')->value('id');
+                $table = null;
+                foreach ([Str::plural(Str::snake($name)), Str::snake($name)] as $candidate) {
+                    if (Schema::hasTable($candidate)) {
+                        $table = $candidate;
+                        break;
+                    }
+                }
+                if ($table !== null) {
+                    $columns = Schema::getColumnListing($table);
+                    $key = in_array('id', $columns, true) ? 'id' : ($columns[0] ?? null);
+                    $value = $key !== null ? DB::table($table)->orderByDesc($key)->value($key) : null;
                 }
             }
         } catch (Throwable) {
@@ -520,7 +530,7 @@ $record = function (string $kind, string $method, string $uri, array $response, 
 $classify = function (array $response): string {
     if ($response['exception'] instanceof Throwable && ! ($response['exception'] instanceof ValidationException)) {
         $status = $response['status'];
-        if ($response['exception'] instanceof HttpExceptionInterface && $status < 500) {
+        if ($status < 500) {
             return $status === 404 ? 'not_found' : 'denied';
         }
         if ($response['exception'] instanceof AuthorizationException || $response['exception'] instanceof AuthenticationException) {
@@ -610,6 +620,7 @@ foreach ($routes as $item) {
                 $text = strtolower(implode(' ', (array) $messages));
                 $lower = strtolower((string) $field);
                 $value = match (true) {
+                    (bool) preg_match('/(\d+)\s*digit/', $text, $digits) => substr(str_repeat((string) random_int(100000000, 999999999), 3), 0, (int) $digits[1]),
                     str_contains($text, 'number') || str_contains($text, 'numeric') || str_contains($text, 'integer') || str_contains($text, 'angka') || str_contains($text, 'digits') => (str_contains($lower, 'tahun') || str_contains($lower, 'year') ? date('Y') : '10'),
                     str_contains($text, 'date') || str_contains($text, 'tanggal') => date('Y-m-d'),
                     str_contains($text, 'email') => 'uji'.random_int(100000, 999999).'@example.com',
