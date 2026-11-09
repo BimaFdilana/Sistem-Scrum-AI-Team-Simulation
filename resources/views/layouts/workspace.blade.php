@@ -27,6 +27,9 @@
     @if (request()->routeIs('projects.show', 'projects.index', 'projects.create'))
         <link rel="stylesheet" href="{{ asset('css/project-tabs.css') }}?v={{ filemtime(public_path('css/project-tabs.css')) }}">
     @endif
+    @if (request()->routeIs('projects.show'))
+        <link rel="stylesheet" href="{{ asset('css/project-board.css') }}?v={{ filemtime(public_path('css/project-board.css')) }}">
+    @endif
     @if (request()->routeIs('stories.executions.show', 'repair-orders.executions.show'))
         <link rel="stylesheet" href="{{ asset('css/execution.css') }}?v={{ filemtime(public_path('css/execution.css')) }}">
     @endif
@@ -67,9 +70,8 @@
                 <a class="nav-link {{ $activePage === 'dashboard' ? 'is-active' : '' }}" href="{{ route('dashboard') }}"><span class="nav-dot"></span>Ringkasan</a>
                 <a class="nav-link {{ in_array(($activePage ?? ''), ['agents', 'agent-chat', 'agent-activity', 'chat'], true) ? 'is-active' : '' }}" href="{{ route('agents.index') }}"><span class="nav-dot"></span>Agent</a>
                 <a class="nav-link {{ $activePage === 'ai-providers' ? 'is-active' : '' }}" href="{{ route('ai-providers.index') }}"><span class="nav-dot"></span>AI Providers</a>
-                <a class="nav-link {{ $activePage === 'projects' ? 'is-active' : '' }}" href="{{ route('projects.index') }}"><span class="nav-dot"></span>Projects</a>
+                <a class="nav-link {{ in_array(($activePage ?? ''), ['projects', 'backlog', 'sprints', 'discussion'], true) ? 'is-active' : '' }}" href="{{ route('projects.index') }}"><span class="nav-dot"></span>Projects</a>
                 <a class="nav-link {{ $activePage === 'actors' ? 'is-active' : '' }}" href="{{ route('actors.index') }}"><span class="nav-dot"></span>Aktor</a>
-                <a class="nav-link {{ in_array(($activePage ?? ''), ['backlog', 'sprints', 'discussion'], true) ? 'is-active' : '' }}" href="{{ route('projects.index', ['section' => 'sprint-backlog']) }}"><span class="nav-dot"></span>Sprint Backlog</a>
                 <a class="nav-link {{ $activePage === 'repair-orders' ? 'is-active' : '' }}" href="{{ route('repair-orders.index') }}"><span class="nav-dot"></span>Perintah Perbaikan</a>
                 <a class="nav-link {{ $activePage === 'github-settings' ? 'is-active' : '' }}" href="{{ route('settings.github.edit') }}"><span class="nav-dot"></span>GitHub</a>
                 <a class="nav-link {{ $activePage === 'notifications' ? 'is-active' : '' }}" href="{{ route('notifications.index') }}"><span class="nav-dot"></span>Notifikasi

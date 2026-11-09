@@ -8,7 +8,7 @@
             <p class="page-subtitle">Task diikat ke revision story {{ $story->revision }} dan acceptance criteria yang disetujui.</p>
         </div>
         <div class="heading-actions">
-            <a class="button button-ghost" href="{{ route('projects.stories.index', $story->project) }}">Backlog</a>
+            <a class="button button-ghost" href="{{ route('projects.show', $story->project) }}">Backlog</a>
             @if ($scopeApproved)
                 <a class="button button-primary" href="{{ route('stories.tasks.create', $story) }}">＋ Tambah task</a>
             @endif

@@ -9,6 +9,7 @@ use App\Models\Sprint;
 use App\Models\Story;
 use App\Models\StoryEstimationRun;
 use App\Models\User;
+use App\Support\Demo\DemoServerManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -19,11 +20,12 @@ class StoryAcceptanceTest extends TestCase
         parent::setUp();
 
         // Gerbang demo diuji terpisah; di sini demo dianggap sehat.
-        $demo = \Mockery::mock(\App\Support\Demo\DemoServerManager::class);
+        $demo = \Mockery::mock(DemoServerManager::class);
+        $demo->shouldReceive('runningFor')->andReturn(null);
         $demo->shouldReceive('verify')->andReturn([
             'ok' => true, 'http' => 200, 'url' => 'http://127.0.0.1:9999/', 'error' => null, 'demo' => null,
         ]);
-        $this->app->instance(\App\Support\Demo\DemoServerManager::class, $demo);
+        $this->app->instance(DemoServerManager::class, $demo);
     }
 
     use RefreshDatabase;
@@ -106,7 +108,7 @@ class StoryAcceptanceTest extends TestCase
         [$owner, $project, $story, $run] = $this->makeExecutedStory('COMPLETED');
         $story->forceFill(['acceptance_status' => 'GAGAL', 'accepted_at' => now()])->save();
 
-        $this->actingAs($owner)->get('/projects/'.$project->id.'/sprint-backlog')
+        $this->actingAs($owner)->get('/projects/'.$project->id)
             ->assertOk()
             ->assertSee('Keputusan final PO:')
             ->assertSee('Gagal')

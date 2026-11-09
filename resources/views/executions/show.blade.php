@@ -70,7 +70,7 @@
             <div class="notice-bar"><span class="notice-icon">!</span><p>QA sudah memberi perbaikan sekali dan run ditutup tanpa review kedua. Periksa demo sebelum menerima.</p></div>
         @endif
     </div>
-    <a class="button button-ghost" href="{{ route('projects.sprint-backlog.index', $story->project) }}">← Kembali</a>
+    <a class="button button-ghost" href="{{ route('projects.show', $story->project) }}">← Kembali</a>
 </div>
 
 @if (session('status'))

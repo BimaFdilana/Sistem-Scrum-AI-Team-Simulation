@@ -15,40 +15,16 @@ use Illuminate\View\View;
 
 class StoryController extends Controller
 {
-    public function index(Project $project): View
+    /** Papan Sprint Backlog kini bagian dari halaman Project. */
+    public function index(Project $project): RedirectResponse
     {
-        if (! Schema::hasTable('backlogs') || ! Schema::hasColumn('sprints', 'backlog_id') || ! Schema::hasColumn('stories', 'user_story_key')) {
-            return view('stories.migration-pending', ['project' => $project, 'activePage' => 'backlog']);
-        }
-        $backlog = $project->backlog;
-        $estimationSchemaReady = Schema::hasTable('story_estimation_runs')
-            && Schema::hasTable('story_estimation_agent_runs')
-            && Schema::hasTable('story_estimation_messages');
-        $storyRelations = ['stories.actor'];
-        if ($estimationSchemaReady) {
-            $storyRelations[] = 'stories.estimationRuns.agentRuns';
-        }
-        if (Schema::hasTable('execution_runs')) {
-            // tasks ikut dimuat agar kartu papan bisa menampilkan progres
-            // tanpa query tambahan per story (N+1).
-            $storyRelations[] = 'stories.executionRuns.tasks';
-        }
-
-        return view('stories.index', [
-            'project' => $project->load('backlog'),
-            'backlog' => $backlog,
-            'sprints' => $backlog->sprints()->withCount('stories')->with($storyRelations)->latest()->get(),
-            'actors' => Actor::query()->where('is_active', true)->orderBy('name')->get(),
-            'sprintSchemaReady' => DB::table('migrations')->where('migration', '2026_10_08_000001_make_sprint_goal_and_legacy_dates_optional')->exists(),
-            'estimationSchemaReady' => $estimationSchemaReady,
-            'activePage' => 'backlog',
-        ]);
+        return redirect()->route('projects.show', $project);
     }
 
     public function updateBacklog(Request $request, Project $project): RedirectResponse
     {
         if (! Schema::hasTable('backlogs')) {
-            return redirect()->route('projects.sprint-backlog.index', $project)
+            return redirect()->route('projects.show', $project)
                 ->withErrors(['database' => 'Perubahan menunggu migrasi database backlog yang belum dijalankan. Tidak ada data yang diubah.']);
         }
 
@@ -61,18 +37,18 @@ class StoryController extends Controller
 
         $project->backlog()->updateOrCreate([], $data);
 
-        return redirect()->route('projects.sprint-backlog.index', $project)->with('status', 'Backlog project diperbarui.');
+        return redirect()->route('projects.show', $project)->with('status', 'Backlog project diperbarui.');
     }
 
     public function createForSprint(Sprint $sprint): View|RedirectResponse
     {
         if (! Schema::hasTable('backlogs') || ! Schema::hasColumn('sprints', 'backlog_id') || ! Schema::hasColumn('stories', 'user_story_key')) {
-            return redirect()->route('projects.sprint-backlog.index', $sprint->project_id)
+            return redirect()->route('projects.show', $sprint->project_id)
                 ->withErrors(['database' => 'Penambahan user story menunggu migrasi backlog yang belum dijalankan. Tidak ada data yang diubah.']);
         }
 
         if ($sprint->status !== 'PLANNING') {
-            return redirect()->route('sprints.show', $sprint)->withErrors(['story' => 'User story hanya dapat ditambahkan saat Sprint berstatus PLANNING.']);
+            return redirect()->route('projects.show', $sprint->project_id)->withErrors(['story' => 'User story hanya dapat ditambahkan saat Sprint berstatus PLANNING.']);
         }
 
         return view('stories.create', [
@@ -86,12 +62,12 @@ class StoryController extends Controller
     public function storeForSprint(StoreStoryRequest $request, Sprint $sprint): RedirectResponse
     {
         if (! Schema::hasTable('backlogs') || ! Schema::hasColumn('sprints', 'backlog_id') || ! Schema::hasColumn('stories', 'user_story_key')) {
-            return redirect()->route('projects.sprint-backlog.index', $sprint->project_id)
+            return redirect()->route('projects.show', $sprint->project_id)
                 ->withErrors(['database' => 'Penyimpanan user story menunggu migrasi backlog yang belum dijalankan. Tidak ada data yang diubah.']);
         }
 
         if ($sprint->status !== 'PLANNING') {
-            return redirect()->route('sprints.show', $sprint)->withErrors(['story' => 'User story hanya dapat ditambahkan saat Sprint berstatus PLANNING.']);
+            return redirect()->route('projects.show', $sprint->project_id)->withErrors(['story' => 'User story hanya dapat ditambahkan saat Sprint berstatus PLANNING.']);
         }
 
         if (! Schema::hasTable('actors') || ! Schema::hasColumn('stories', 'actor_id')) {
@@ -119,13 +95,13 @@ class StoryController extends Controller
             ])->save();
         });
 
-        return redirect()->route('projects.sprint-backlog.index', $sprint->project_id)->with('status', 'User story ditambahkan ke '.$sprint->name.'.');
+        return redirect()->route('projects.show', $sprint->project_id)->with('status', 'User story ditambahkan ke '.$sprint->name.'.');
     }
 
     public function edit(Story $story): View|RedirectResponse
     {
         if ($story->sprint()->where('status', 'ACTIVE')->exists()) {
-            return redirect()->route('projects.sprint-backlog.index', $story->project_id)
+            return redirect()->route('projects.show', $story->project_id)
                 ->withErrors(['story' => 'Story dalam sprint aktif dikunci sampai ada workflow perubahan scope.']);
         }
 
@@ -140,12 +116,12 @@ class StoryController extends Controller
     public function update(StoreStoryRequest $request, Story $story): RedirectResponse
     {
         if ($story->sprint()->where('status', 'ACTIVE')->exists()) {
-            return redirect()->route('projects.sprint-backlog.index', $story->project_id)
+            return redirect()->route('projects.show', $story->project_id)
                 ->withErrors(['story' => 'Story dalam sprint aktif dikunci sampai ada workflow perubahan scope.']);
         }
 
         if (! $story->sprint_id) {
-            return redirect()->route('projects.sprint-backlog.index', $story->project_id)
+            return redirect()->route('projects.show', $story->project_id)
                 ->withErrors(['story' => 'User Story harus berada di dalam Sprint.']);
         }
 
@@ -167,10 +143,10 @@ class StoryController extends Controller
                 'scope_approved_at' => null,
             ]);
 
-            return redirect()->route('projects.sprint-backlog.index', $story->project_id)
+            return redirect()->route('projects.show', $story->project_id)
                 ->with('status', 'Story diperbarui. Approval scope sebelumnya sudah tidak berlaku.');
         }
 
-        return redirect()->route('projects.sprint-backlog.index', $story->project_id)->with('status', 'Tidak ada perubahan pada story.');
+        return redirect()->route('projects.show', $story->project_id)->with('status', 'Tidak ada perubahan pada story.');
     }
 }

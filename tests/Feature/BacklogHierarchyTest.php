@@ -20,16 +20,16 @@ class BacklogHierarchyTest extends TestCase
         $owner = User::factory()->create();
         $project = $this->createProject();
 
-        $this->actingAs($owner)->get('/projects/'.$project->id.'/sprint-backlog')
+        $this->actingAs($owner)->get('/projects/'.$project->id)
             ->assertOk()->assertSee('Nama Sprint Backlog')->assertSee('Deskripsi Sprint Backlog')
             ->assertSee('Nama Sprint')->assertSee('<dialog', false)->assertSee('Buat Sprint', false)
-            ->assertSee('sprint-backlog-sprints-heading', false)
+            ->assertSee('data-sprint-dialog-open', false)->assertSee('bk-stats', false)
             ->assertDontSee('name="start_date"', false)->assertDontSee('name="end_date"', false);
 
         $this->actingAs($owner)->put('/projects/'.$project->id.'/backlog', [
             'name' => 'Sprint Backlog Produk',
             'description' => 'Daftar seluruh sprint dan kebutuhan project.',
-        ])->assertRedirect('/projects/'.$project->id.'/sprint-backlog');
+        ])->assertRedirect('/projects/'.$project->id);
 
         $backlog = Backlog::query()->sole();
         $this->assertSame($project->id, $backlog->project_id);
@@ -47,7 +47,7 @@ class BacklogHierarchyTest extends TestCase
         $backlog = $project->backlog;
 
         $this->actingAs($owner)->post('/projects/'.$project->id.'/sprints', ['name' => 'Sprint 1'])
-            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog');
+            ->assertRedirect('/projects/'.$project->id);
         $sprint = Sprint::query()->sole();
         $this->assertSame($backlog->id, $sprint->backlog_id);
         $this->assertNull($sprint->start_date);
@@ -62,7 +62,7 @@ class BacklogHierarchyTest extends TestCase
                 'actor_id' => $actor->id,
                 'sprint_purpose' => 'Sistem mengenali data pengusul anggaran.',
                 'acceptance_criteria' => 'Data dapat dibuat, diperbarui, dan dicari.',
-            ])->assertRedirect('/projects/'.$project->id.'/sprint-backlog');
+            ])->assertRedirect('/projects/'.$project->id);
         }
 
         $this->assertSame(['US-01', 'US-02'], Story::query()->orderBy('id')->get()->map->display_id->all());

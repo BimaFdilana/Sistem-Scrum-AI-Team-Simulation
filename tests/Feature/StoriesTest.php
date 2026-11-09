@@ -32,7 +32,7 @@ class StoriesTest extends TestCase
             'actor_id' => $actor->id,
             'sprint_purpose' => 'Sistem mengenali hierarki pengusul anggaran.',
             'acceptance_criteria' => "Tersedia fitur CRUD data unit kerja.\nKode unit kerja tidak boleh duplikat.",
-        ])->assertRedirect('/projects/'.$project->id.'/sprint-backlog');
+        ])->assertRedirect('/projects/'.$project->id);
 
         $story = Story::query()->sole();
         $this->assertSame($sprint->id, $story->sprint_id);
@@ -57,7 +57,7 @@ class StoriesTest extends TestCase
                 'actor_id' => $actor->id,
                 'sprint_purpose' => 'Mencapai hasil yang dapat diverifikasi.',
                 'acceptance_criteria' => 'Hasil memenuhi kriteria bisnis yang disepakati.',
-            ])->assertRedirect('/projects/'.$project->id.'/sprint-backlog');
+            ])->assertRedirect('/projects/'.$project->id);
         }
 
         $this->assertSame(['US-01', 'US-02'], Story::query()->orderBy('id')->get()->map->display_id->all());
@@ -69,9 +69,9 @@ class StoriesTest extends TestCase
         $project = $this->createProject();
         $sprint = $this->createSprint($project, 'Sprint 1');
 
-        $this->actingAs($owner)->from('/projects/'.$project->id.'/sprint-backlog')
+        $this->actingAs($owner)->from('/projects/'.$project->id)
             ->post('/sprints/'.$sprint->id.'/stories', ['title' => 'Feature only'])
-            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog')
+            ->assertRedirect('/projects/'.$project->id)
             ->assertSessionHasErrors(['actor_id', 'sprint_purpose', 'acceptance_criteria']);
         $this->assertDatabaseCount('stories', 0);
     }
@@ -102,7 +102,7 @@ class StoriesTest extends TestCase
             'title' => 'Revised feature',
             'sprint_purpose' => 'Revised purpose.',
             'acceptance_criteria' => 'Revised acceptance criteria are clear.',
-        ])->assertRedirect('/projects/'.$project->id.'/sprint-backlog');
+        ])->assertRedirect('/projects/'.$project->id);
 
         $story->refresh();
         $this->assertSame(5, $story->revision);
@@ -134,7 +134,7 @@ class StoriesTest extends TestCase
             'title' => 'Unreviewed feature change',
             'sprint_purpose' => 'A different purpose.',
             'acceptance_criteria' => 'A different criterion was proposed.',
-        ])->assertRedirect('/projects/'.$project->id.'/sprint-backlog')->assertSessionHasErrors('story');
+        ])->assertRedirect('/projects/'.$project->id)->assertSessionHasErrors('story');
 
         $this->assertSame('Committed feature', $story->fresh()->title);
     }
@@ -151,7 +151,7 @@ class StoriesTest extends TestCase
             'acceptance_criteria' => 'A valid acceptance criterion example.', 'revision' => 1,
         ]);
 
-        $this->actingAs($owner)->get('/projects/'.$project->id.'/sprint-backlog')
+        $this->actingAs($owner)->get('/projects/'.$project->id)
             ->assertOk()->assertSee('Sprint Backlog')->assertSee('Sprint 1')->assertSee('US-01')
             ->assertSee('Acceptance Criteria')->assertSee('name="sprint_purpose"', false)
             ->assertDontSee('Product backlog')->assertDontSee('>Sprints</a>', false)
@@ -161,7 +161,7 @@ class StoriesTest extends TestCase
     public function test_guest_cannot_open_a_project_sprint_backlog(): void
     {
         $project = $this->createProject();
-        $this->get('/projects/'.$project->id.'/sprint-backlog')->assertRedirect('/login');
+        $this->get('/projects/'.$project->id)->assertRedirect('/login');
     }
 
     private function createSprint(Project $project, string $name, string $status = 'PLANNING'): Sprint

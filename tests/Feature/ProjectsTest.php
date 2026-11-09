@@ -45,7 +45,7 @@ class ProjectsTest extends TestCase
         $this->assertDatabaseCount('projects', 0);
     }
 
-    public function test_sidebar_opens_one_project_selector_for_the_unified_sprint_backlog(): void
+    public function test_sidebar_has_a_single_projects_entry_and_no_separate_sprint_backlog_link(): void
     {
         $owner = User::factory()->create();
         $project = Project::query()->create([
@@ -56,13 +56,12 @@ class ProjectsTest extends TestCase
         ]);
 
         $this->actingAs($owner)
-            ->get('/projects?section=sprint-backlog')
+            ->get('/projects')
             ->assertOk()
-            ->assertSee('Pilih project untuk membuka Sprint Backlog')
-            ->assertSee(route('projects.sprint-backlog.index', $project), false)
-            ->assertSee('Sprint Backlog')
+            ->assertSee(route('projects.show', $project), false)
+            ->assertSee('Setiap project punya Sprint Backlog')
             ->assertDontSee('Product backlog')
             ->assertDontSee('>Sprints</a>', false)
-            ->assertDontSee('＋ Buat project');
+            ->assertDontSee('>Sprint Backlog</a>', false);
     }
 }

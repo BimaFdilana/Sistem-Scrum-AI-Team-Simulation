@@ -7,7 +7,7 @@
             <h1>{{ $story->display_id }} — Diskusi Tim</h1>
             <p class="page-subtitle">{{ $story->title }} · Revisi story {{ $story->revision }}</p>
         </div>
-        <a class="button button-ghost" href="{{ route('projects.sprint-backlog.index', $story->project_id) }}">← Kembali ke Sprint Backlog</a>
+        <a class="button button-ghost" href="{{ route('projects.show', $story->project_id) }}">← Kembali ke project</a>
     </section>
 
     @if (! $schemaReady)

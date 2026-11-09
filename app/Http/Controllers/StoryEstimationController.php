@@ -106,7 +106,7 @@ class StoryEstimationController extends Controller
             'story' => $story->load('project', 'sprint'),
             'runs' => $runs,
             'currentRun' => $currentRun,
-            'executions' => \Illuminate\Support\Facades\Schema::hasTable('execution_runs')
+            'executions' => Schema::hasTable('execution_runs')
                 ? $story->executionRuns()->withCount('tasks')->latest()->get()
                 : collect(),
             'schemaReady' => $ready,
@@ -191,6 +191,6 @@ class StoryEstimationController extends Controller
 
     private function backToBacklog(Story $story): RedirectResponse
     {
-        return redirect()->route('projects.sprint-backlog.index', $story->project_id);
+        return redirect()->route('projects.show', $story->project_id);
     }
 }

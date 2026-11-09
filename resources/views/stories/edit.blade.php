@@ -7,7 +7,7 @@
             <h1>Edit {{ $story->display_id }}</h1>
             <p class="page-subtitle">Perubahan User Story membatalkan persetujuan scope sebelumnya.</p>
         </div>
-        <a class="text-link" href="{{ route('projects.sprint-backlog.index', $project) }}">← Kembali ke Sprint Backlog</a>
+        <a class="text-link" href="{{ route('projects.show', $project) }}">← Kembali ke project</a>
     </section>
 
     <form class="project-form story-form" method="POST" action="{{ route('stories.update', $story) }}">
@@ -19,7 +19,7 @@
             <div class="field-group"><label for="sprint_purpose">Agar [Tujuan] <span>*</span></label><textarea id="sprint_purpose" name="sprint_purpose" rows="3" maxlength="3000" required>{{ old('sprint_purpose', $story->sprint_purpose) }}</textarea>@error('sprint_purpose')<small class="field-error">{{ $message }}</small>@enderror</div>
             <div class="field-group"><label for="acceptance_criteria">Acceptance Criteria <span>*</span></label><textarea id="acceptance_criteria" name="acceptance_criteria" rows="5" maxlength="10000" required>{{ old('acceptance_criteria', $story->acceptance_criteria) }}</textarea>@error('acceptance_criteria')<small class="field-error">{{ $message }}</small>@enderror</div>
             <div class="form-actions">
-                <a class="button button-ghost" href="{{ route('projects.sprint-backlog.index', $project) }}">Batal</a>
+                <a class="button button-ghost" href="{{ route('projects.show', $project) }}">Batal</a>
                 <button class="button button-primary" type="submit">Simpan revisi <span aria-hidden="true">→</span></button>
             </div>
         </div>

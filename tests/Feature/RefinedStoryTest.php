@@ -8,9 +8,11 @@ use App\Models\Sprint;
 use App\Models\Story;
 use App\Models\StoryEstimationRun;
 use App\Models\User;
+use App\Services\AgentConfiguration;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Mockery\MockInterface;
 use Tests\TestCase;
 
 class RefinedStoryTest extends TestCase
@@ -23,7 +25,7 @@ class RefinedStoryTest extends TestCase
         [$owner, $project, $story] = $this->makeStory();
 
         $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs')
-            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog');
+            ->assertRedirect('/projects/'.$project->id);
 
         $run = StoryEstimationRun::query()->where('story_id', $story->id)->firstOrFail();
         $this->assertSame('COMPLETED', $run->status);
@@ -47,7 +49,7 @@ class RefinedStoryTest extends TestCase
         [$owner, $project, $story] = $this->makeStory();
 
         $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs')
-            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog');
+            ->assertRedirect('/projects/'.$project->id);
 
         $run = StoryEstimationRun::query()->where('story_id', $story->id)->firstOrFail();
         $this->assertSame('COMPLETED', $run->status);
@@ -140,7 +142,7 @@ class RefinedStoryTest extends TestCase
             'ai.cliproxy.api_key' => 'test-key',
             'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
         ]);
-        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+        $this->mock(AgentConfiguration::class, function (MockInterface $mock) {
             $mock->shouldReceive('current')->with('backend-developer')->andReturn(['status' => 'verified', 'model' => 'be-model']);
             $mock->shouldReceive('current')->with('frontend-developer')->andReturn(['status' => 'verified', 'model' => 'fe-model']);
             $mock->shouldReceive('current')->with('qa-engineer')->andReturn(['status' => 'verified', 'model' => 'qa-model']);

@@ -10,9 +10,13 @@ use App\Models\Sprint;
 use App\Models\Story;
 use App\Models\StoryEstimationRun;
 use App\Models\User;
+use App\Services\AgentConfiguration;
 use App\Services\StoryEstimationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use Mockery\MockInterface;
 use Tests\TestCase;
 
 class StoryEstimationAsyncTest extends TestCase
@@ -31,7 +35,7 @@ class StoryEstimationAsyncTest extends TestCase
 
         $response = $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs');
 
-        $response->assertRedirect('/projects/'.$project->id.'/sprint-backlog')->assertSessionHas('status');
+        $response->assertRedirect('/projects/'.$project->id)->assertSessionHas('status');
         $run = StoryEstimationRun::query()->firstOrFail();
         $this->assertSame('QUEUED', $run->status);
         Queue::assertPushed(AdvanceStoryEstimationJob::class, fn ($job) => $job->runId === $run->id);
@@ -94,7 +98,7 @@ class StoryEstimationAsyncTest extends TestCase
         ]);
 
         $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs/'.$failed->id.'/retry')
-            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog')->assertSessionHas('status');
+            ->assertRedirect('/projects/'.$project->id)->assertSessionHas('status');
 
         $this->assertDatabaseCount('story_estimation_runs', 2);
         $this->assertDatabaseHas('story_estimation_runs', ['id' => $failed->id, 'status' => 'FAILED']);
@@ -167,7 +171,7 @@ class StoryEstimationAsyncTest extends TestCase
         ]);
 
         $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs/'.$run->id.'/agents/'.$failed->id.'/retry')
-            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog')->assertSessionHas('status');
+            ->assertRedirect('/projects/'.$project->id)->assertSessionHas('status');
 
         $this->assertSame('RUNNING', $run->fresh()->status);
         $this->assertSame('QUEUED', $failed->fresh()->status);
@@ -224,7 +228,7 @@ class StoryEstimationAsyncTest extends TestCase
         ]);
 
         $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs/'.$failed->id.'/retry')
-            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog')->assertSessionHasErrors('estimation');
+            ->assertRedirect('/projects/'.$project->id)->assertSessionHasErrors('estimation');
 
         $this->assertSame(2, StoryEstimationRun::query()->count());
         $this->assertSame($active->id, StoryEstimationRun::query()->where('status', 'RUNNING')->value('id'));
@@ -239,14 +243,14 @@ class StoryEstimationAsyncTest extends TestCase
             'ai.cliproxy.api_key' => 'test-key',
             'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
         ]);
-        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+        $this->mock(AgentConfiguration::class, function (MockInterface $mock) {
             $mock->shouldReceive('current')->with('qa-engineer')->andReturn(['status' => 'verified', 'model' => 'qa-model']);
         });
-        \Illuminate\Support\Facades\Http::fake([
-            'http://127.0.0.1:8317/v1/models' => \Illuminate\Support\Facades\Http::response(['data' => [['id' => 'qa-model', 'owned_by' => 'openai']]]),
-            'http://127.0.0.1:8317/v1/chat/completions' => \Illuminate\Support\Facades\Http::response(['choices' => [['message' => ['content' => 'Saya menilai story ini 5 poin.']]]]),
+        Http::fake([
+            'http://127.0.0.1:8317/v1/models' => Http::response(['data' => [['id' => 'qa-model', 'owned_by' => 'openai']]]),
+            'http://127.0.0.1:8317/v1/chat/completions' => Http::response(['choices' => [['message' => ['content' => 'Saya menilai story ini 5 poin.']]]]),
         ]);
-        \Illuminate\Support\Facades\Log::spy();
+        Log::spy();
         [$owner, $project, $story] = $this->makeStory();
         [$run] = app(StoryEstimationService::class)->claimRun($story, $owner);
         $run->forceFill(['status' => 'RUNNING'])->save();
@@ -254,7 +258,7 @@ class StoryEstimationAsyncTest extends TestCase
         app(StoryEstimationService::class)->processAgent($entry);
         $this->assertSame('FAILED', $entry->fresh()->status);
         $this->assertSame('INVALID_JSON_SCHEMA', $entry->fresh()->error_code);
-        \Illuminate\Support\Facades\Log::shouldHaveReceived('warning')
+        Log::shouldHaveReceived('warning')
             ->with('Story estimation vote failed validation', \Mockery::on(function (array $context) {
                 return $context['profile_slug'] === 'qa-engineer'
                     && $context['error_code'] === 'INVALID_JSON_SCHEMA'
@@ -291,7 +295,7 @@ class StoryEstimationAsyncTest extends TestCase
         ]);
 
         $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs')
-            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog')->assertSessionHas('status');
+            ->assertRedirect('/projects/'.$project->id)->assertSessionHas('status');
 
         // Run lama yang macet ditandai FAILED, lalu run baru diklaim.
         $this->assertSame('FAILED', $stale->fresh()->status);
@@ -314,7 +318,7 @@ class StoryEstimationAsyncTest extends TestCase
         ]);
 
         $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs')
-            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog')->assertSessionHas('status');
+            ->assertRedirect('/projects/'.$project->id)->assertSessionHas('status');
 
         $this->assertSame('RUNNING', $active->fresh()->status);
         $this->assertSame(1, StoryEstimationRun::query()->count());

@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreSprintRequest;
 use App\Http\Requests\UpdateSprintScopeRequest;
-use App\Models\Actor;
 use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\Story;
@@ -15,29 +14,28 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
-use Illuminate\View\View;
 
 class SprintController extends Controller
 {
     public function index(Project $project): RedirectResponse
     {
-        return redirect()->route('projects.sprint-backlog.index', $project);
+        return redirect()->route('projects.show', $project);
     }
 
     public function create(Project $project): RedirectResponse
     {
-        return redirect()->route('projects.sprint-backlog.index', $project);
+        return redirect()->route('projects.show', $project);
     }
 
     public function store(StoreSprintRequest $request, Project $project): RedirectResponse
     {
         if (! Schema::hasTable('backlogs') || ! Schema::hasColumn('sprints', 'backlog_id')) {
-            return redirect()->route('projects.stories.index', $project)
+            return redirect()->route('projects.show', $project)
                 ->withErrors(['database' => 'Pembuatan Sprint menunggu migrasi backlog yang belum dijalankan. Tidak ada data yang diubah.']);
         }
 
         if (! DB::table('migrations')->where('migration', '2026_10_08_000001_make_sprint_goal_and_legacy_dates_optional')->exists()) {
-            return redirect()->route('projects.sprint-backlog.index', $project)
+            return redirect()->route('projects.show', $project)
                 ->withErrors(['database' => 'Pembuatan Sprint menunggu migrasi Sprint Backlog. Data tidak diubah.']);
         }
 
@@ -54,7 +52,7 @@ class SprintController extends Controller
             'revision' => 1,
         ]);
 
-        return redirect()->route('projects.sprint-backlog.index', $project)->with('status', 'Sprint dibuat. Tambahkan User Story ke dalam '.$sprint->name.'.');
+        return redirect()->route('projects.show', $project)->with('status', 'Sprint dibuat. Tambahkan User Story ke dalam '.$sprint->name.'.');
     }
 
     public function generateGoal(Request $request, Sprint $sprint, HermesClient $hermes): RedirectResponse
@@ -102,25 +100,10 @@ class SprintController extends Controller
         return back()->with('status', 'Draf Sprint Goal dari Scrum Master AI dibuat. Tinjau User Story dan setujui scope sebelum Sprint dimulai.');
     }
 
-    public function show(Sprint $sprint): View
+    /** Detail sprint kini bagian dari halaman Project. */
+    public function show(Sprint $sprint): RedirectResponse
     {
-        $backlogReady = Schema::hasTable('backlogs') && Schema::hasColumn('sprints', 'backlog_id');
-        $detailsReady = $this->detailsSchemaReady();
-        $sprintSchemaReady = DB::table('migrations')->where('migration', '2026_10_08_000001_make_sprint_goal_and_legacy_dates_optional')->exists();
-        $sprint->load('project');
-        $sprint->load($detailsReady ? ['stories.actor'] : ['stories']);
-        $availableStories = $detailsReady ? $sprint->stories()->orderBy('id')->get() : collect();
-        $actors = $detailsReady ? Actor::query()->where('is_active', true)->orderBy('name')->get() : collect();
-
-        return view('sprints.show', [
-            'sprint' => $sprint,
-            'availableStories' => $availableStories,
-            'actors' => $actors,
-            'detailsReady' => $detailsReady,
-            'backlogReady' => $backlogReady,
-            'sprintSchemaReady' => $sprintSchemaReady,
-            'activePage' => 'sprints',
-        ]);
+        return redirect()->route('projects.show', $sprint->project_id);
     }
 
     public function updateScope(UpdateSprintScopeRequest $request, Sprint $sprint): RedirectResponse
@@ -216,7 +199,7 @@ class SprintController extends Controller
         });
 
         return redirect()
-            ->route('sprints.show', $sprint)
+            ->route('projects.show', $sprint->project_id)
             ->with('status', 'Rincian Sprint diperbarui. PO perlu menyetujui scope terbaru.');
     }
 
@@ -260,7 +243,7 @@ class SprintController extends Controller
         });
 
         return redirect()
-            ->route('sprints.show', $sprint)
+            ->route('projects.show', $sprint->project_id)
             ->with('status', 'Sprint scope disetujui untuk revision '.$sprint->revision.'.');
     }
 
@@ -283,7 +266,7 @@ class SprintController extends Controller
         ])->save();
 
         return redirect()
-            ->route('sprints.show', $sprint)
+            ->route('projects.show', $sprint->project_id)
             ->with('status', 'Sprint dimulai. Estimasi agent dan task execution belum aktif.');
     }
 

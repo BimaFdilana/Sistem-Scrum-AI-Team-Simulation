@@ -49,7 +49,7 @@ class StoryEstimationWorkflowTest extends TestCase
     public function test_team_discussion_is_read_only_and_accessible_from_each_story_in_backlog(): void
     {
         [$owner, $project, $story] = $this->makeStory();
-        $this->actingAs($owner)->get('/projects/'.$project->id.'/sprint-backlog')
+        $this->actingAs($owner)->get('/projects/'.$project->id)
             ->assertOk()->assertSee('Lihat Diskusi Tim')->assertSee('/stories/'.$story->id.'/discussion', false)
             ->assertDontSee('Poin final pilihan PO');
         $this->get('/stories/'.$story->id.'/discussion')->assertOk()->assertSee('Diskusi Fibonacci')->assertSee('Eksekusi & Revisi QA')
@@ -72,7 +72,7 @@ class StoryEstimationWorkflowTest extends TestCase
         $other = User::factory()->create();
         $this->actingAs($other)->post('/stories/'.$story->id.'/estimation-runs/'.$run->id.'/cancel')->assertForbidden();
         $this->actingAs($owner)->post('/stories/'.$story->id.'/estimation-runs/'.$run->id.'/cancel')
-            ->assertRedirect('/projects/'.$project->id.'/sprint-backlog');
+            ->assertRedirect('/projects/'.$project->id);
         $this->assertSame('CANCELLED', $run->fresh()->status);
         $this->assertNull($story->fresh()->estimate_points);
     }

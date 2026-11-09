@@ -93,9 +93,9 @@ class TasksTest extends TestCase
                 'acceptance_criteria' => 'Guests must authenticate before accessing protected pages.',
                 'status' => 'NOT_STARTED',
             ]],
-        ])->assertRedirect('/sprints/'.$sprint->id);
+        ])->assertRedirect('/projects/'.$sprint->project_id);
 
-        $this->actingAs($owner)->post('/sprints/'.$sprint->id.'/approve-scope')->assertRedirect('/sprints/'.$sprint->id);
+        $this->actingAs($owner)->post('/sprints/'.$sprint->id.'/approve-scope')->assertRedirect('/projects/'.$sprint->project_id);
     }
 
     private function createStory(Project $project): Story

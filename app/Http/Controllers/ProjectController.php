@@ -8,6 +8,7 @@ use App\Jobs\ScaffoldLaravelProjectJob;
 use App\Models\Project;
 use App\Services\PublicGithubRepositoryService;
 use App\Support\Demo\DemoServerManager;
+use App\Support\Projects\ProjectBoard;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -15,15 +16,11 @@ use Illuminate\View\View;
 
 class ProjectController extends Controller
 {
-    public function index(Request $request): View
+    public function index(): View
     {
-        $section = $request->query('section');
-        $section = in_array($section, ['backlog', 'sprints', 'sprint-backlog'], true) ? $section : null;
-
         return view('projects.index', [
             'projects' => Project::query()->latest()->get(),
-            'section' => $section,
-            'activePage' => $section === 'sprint-backlog' ? 'backlog' : ($section ?? 'projects'),
+            'activePage' => 'projects',
         ]);
     }
 
@@ -68,11 +65,16 @@ class ProjectController extends Controller
     {
         $demo = $demos->runningFor($project);
 
+        if (! ProjectBoard::ready()) {
+            return view('stories.migration-pending', ['project' => $project, 'activePage' => 'projects']);
+        }
+
         return view('projects.show', [
-            'project' => $project->loadCount('stories'),
+            'project' => $project->loadCount('stories')->load('backlog'),
             'demo' => $demo,
             'demoUrl' => $demo ? $demos->url($demo, request()->getHost()) : null,
             'activePage' => 'projects',
+            ...ProjectBoard::for($project),
         ]);
     }
 

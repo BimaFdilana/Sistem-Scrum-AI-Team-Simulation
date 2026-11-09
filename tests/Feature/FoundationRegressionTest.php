@@ -76,7 +76,7 @@ class FoundationRegressionTest extends TestCase
 
         if ($path === 'story') {
             $this->actingAs($owner)->patch('/stories/'.$story->id, $payload)
-                ->assertSessionHasNoErrors()->assertRedirect('/projects/'.$project->id.'/sprint-backlog');
+                ->assertSessionHasNoErrors()->assertRedirect('/projects/'.$project->id);
         } else {
             $this->actingAs($owner)->put('/sprints/'.$sprint->id.'/scope', [
                 'story_ids' => [$story->id],
@@ -85,7 +85,7 @@ class FoundationRegressionTest extends TestCase
                     'purpose' => $payload['sprint_purpose'],
                     'acceptance_criteria' => $payload['acceptance_criteria'],
                 ]],
-            ])->assertSessionHasNoErrors()->assertRedirect('/sprints/'.$sprint->id);
+            ])->assertSessionHasNoErrors()->assertRedirect('/projects/'.$sprint->project_id);
         }
 
         $updated = $story->fresh();
@@ -98,7 +98,7 @@ class FoundationRegressionTest extends TestCase
         $this->assertSame(1, $run->fresh()->story_revision);
         $this->assertSame(8, $run->fresh()->approved_points);
         $this->assertSame(1, StoryEstimationRun::query()->count());
-        $this->actingAs($owner)->get('/projects/'.$project->id.'/sprint-backlog')
+        $this->actingAs($owner)->get('/projects/'.$project->id)
             ->assertOk()->assertDontSee('8 poin Fibonacci')->assertSee('kedaluwarsa');
     }
 
@@ -121,7 +121,7 @@ class FoundationRegressionTest extends TestCase
             'actor_id' => $story->actor_id,
             'sprint_purpose' => $story->sprint_purpose,
             'acceptance_criteria' => $story->acceptance_criteria,
-        ])->assertSessionHasNoErrors()->assertRedirect('/projects/'.$project->id.'/sprint-backlog');
+        ])->assertSessionHasNoErrors()->assertRedirect('/projects/'.$project->id);
 
         $this->assertSame(8, $story->fresh()->estimate_points);
         $this->assertSame(1, $story->fresh()->revision);
