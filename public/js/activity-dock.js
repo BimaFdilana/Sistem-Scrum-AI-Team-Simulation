@@ -193,10 +193,18 @@
             method: 'POST',
             credentials: 'same-origin',
             headers: { 'X-CSRF-TOKEN': csrf, 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
+        }).then(function (res) {
+            if (res.status === 429) {
+                announce(run.label + ': terlalu banyak permintaan, tunggu sebentar lalu coba lagi.');
+            } else if (res.status >= 400) {
+                announce(run.label + ': aksi ditolak (' + res.status + ').');
+            }
         }).catch(function () {
             announce(run.label + ': aksi gagal dikirim, coba lagi.');
         }).finally(function () {
             busy[run.id] = false;
+            btn.disabled = false;
+            lastSignature = '';
             poll();
         });
     }
