@@ -51,3 +51,8 @@ Thumbs.db
 *.pem
 *.p12
 *.pfx
+
+# Cadangan manual & skrip sekali pakai
+*.bak
+*.bak-*
+/e2e-exec.php
