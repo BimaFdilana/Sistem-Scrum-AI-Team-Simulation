@@ -112,6 +112,7 @@
     </div>
 
     @include('components.confirm-dialog')
+    @include('components.activity-dock')
     <script src="{{ asset('js/confirm-dialog.js') }}"></script>
     <script>
         // Toggle tema gelap/terang — preferensi disimpan di localStorage.
