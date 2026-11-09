@@ -2,7 +2,10 @@
 
 namespace App\Providers;
 
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 
@@ -55,6 +58,11 @@ class AppServiceProvider extends ServiceProvider
         // worker queue, worker agent, dan request web menulis bersamaan.
         // Tanpa ini, laporan estimasi (dan job lain) gagal di tengah jalan.
         $this->tuneSqlite();
+
+        // Polling dock aktivitas memakai pembatas bernama sendiri. throttle:N,1
+        // bawaan berbagi satu hitungan per pengguna untuk SEMUA rute, sehingga polling
+        // tiap 3 detik menghabiskan jatah rute lain (mulai eksekusi, lanjutkan, dst).
+        RateLimiter::for('activity', fn (Request $request) => Limit::perMinute(120)->by('activity|'.($request->user()?->id ?? $request->ip())));
 
         // Badge jumlah notifikasi belum dibaca di sidebar (semua halaman workspace).
         View::composer('layouts.workspace', function ($view): void {

@@ -74,4 +74,18 @@ class ActivityEndpointTest extends TestCase
         $this->actingAs(User::factory()->create())->getJson(route('activity.active'))
             ->assertOk()->assertJsonCount(0, 'runs');
     }
+
+    public function test_polling_does_not_exhaust_the_throttle_of_other_routes(): void
+    {
+        $run = $this->makeRun('NEEDS_PO');
+        $user = User::factory()->create();
+
+        for ($i = 0; $i < 30; $i++) {
+            $this->actingAs($user)->getJson(route('activity.active'))->assertOk();
+        }
+
+        $this->actingAs($user)->post(route('stories.executions.resume', [$run->story, $run]))
+            ->assertRedirect();
+        $this->assertSame('EXECUTING', $run->fresh()->status);
+    }
 }
