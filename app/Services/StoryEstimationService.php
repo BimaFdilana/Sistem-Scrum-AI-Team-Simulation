@@ -438,6 +438,12 @@ class StoryEstimationService
 
     public function recoverStale(StoryEstimationRun $run): void
     {
+        // Dipanggil tiap polling status (1,5 dtk). Run yang tidak berjalan tidak
+        // perlu transaksi tulis sama sekali: jangan ambil kunci SQLite sia-sia.
+        if (! in_array($run->status, ['QUEUED', 'RUNNING'], true)) {
+            return;
+        }
+
         DB::transaction(function () use ($run): void {
             $locked = StoryEstimationRun::query()->lockForUpdate()->find($run->id);
             if (! $locked || ! in_array($locked->status, ['QUEUED', 'RUNNING'], true)) {
@@ -510,119 +516,68 @@ class StoryEstimationService
             return $this->finish($run, 'STALE');
         }
 
-        // Penanda diagnosis: di mana tepatnya laporan jatuh, karena catch
-        // di bawah menelan exception (kasus Run 14: job DONE tanpa jejak).
-        // Hanya panjang + alasan penolakan yang dicatat, bukan isi ringkasan.
-        $diagnostic = 'not_started';
+        // Tahap 1 — TANPA transaksi. Ringkasan SM dan versi refined adalah panggilan
+        // AI yang bisa memakan menit. Dulu keduanya berada di dalam DB::transaction:
+        // snapshot baca SQLite kedaluwarsa selama menunggu sehingga penyimpanan gagal
+        // "database is locked" (run estimasi 1-3), dan panggilan kedua menahan kunci
+        // tulis sehingga proses lain ikut terkunci.
+        $diagnostic = 'preparing';
         try {
-            DB::transaction(function () use ($run, $requester, &$diagnostic): void {
-                $locked = StoryEstimationRun::query()->lockForUpdate()->findOrFail($run->id);
-                $story = Story::query()->lockForUpdate()->findOrFail($locked->story_id);
-                $sprint = $story->sprint_id === null ? null : $story->sprint()->lockForUpdate()->first();
-                if ($locked->status !== 'REPORT_PENDING' || ! $this->current($locked)
-                    || $sprint?->status !== 'PLANNING' || ! $this->hasConsensusEvidence($locked)) {
-                    throw new RuntimeException('Stale or invalid consensus.');
-                }
-                $snapshot = $this->snapshot($story);
-                $evidence = $locked->messages()->where('recipient_slug', 'scrum-master')->get();
-                if ($evidence->isEmpty()) {
-                    // Specialist originals are addressed to the Scrum Master on receipt.
-                    throw new RuntimeException('No report evidence.');
-                }
-                $conversation = ChatConversation::query()->where('user_id', $requester->id)
-                    ->where('agent_profile', 'scrum-master')->latest('updated_at')->first();
-                if (! $conversation) {
-                    $conversation = ChatConversation::query()->create([
-                        'user_id' => $requester->id,
-                        'uuid' => (string) Str::uuid(),
-                        'title' => 'Refinement Fibonacci '.$snapshot['story_id'],
-                        'agent_profile' => 'scrum-master',
-                    ]);
-                }
-                $transcript = $evidence->map(fn ($message) => [
-                    'round' => $message->round,
-                    'sender' => $message->sender_slug,
-                    'content' => $message->content,
-                    'point' => $message->estimate_points,
-                    'explicit_agree' => $message->explicit_agree,
-                ])->all();
-                // Scrum Master mengumpulkan hasil tiap spesialis lalu merangkumnya
-                // untuk PO (keputusan Bima 2026-10-13).
-                $finalVotes = $locked->messages()->where('round', self::MAX_DISCUSSION_ROUNDS)
-                    ->where('recipient_slug', 'scrum-master')->orderBy('id')->get()
-                    ->map(fn ($message) => $message->sender_slug.' = '.$message->estimate_points.' poin')->implode('; ');
-                $methodText = $locked->consensus_method === 'deadlock_max'
-                    ? 'Deadlock setelah '.self::MAX_DISCUSSION_ROUNDS.' putaran tanpa mufakat bulat, sehingga Scrum Master menerapkan aturan MAKSIMUM (estimasi teraman) sesuai kesepakatan.'
-                    : 'Mufakat bulat: ketiga spesialis sepakat setelah diskusi.';
-                $prompt = AgentSoul::promptLine('scrum-master')."\n\n"
-                    .'Sebagai Scrum Master, kumpulkan hasil estimasi Fibonacci berikut dan rangkum untuk PO berdasarkan transkrip asli. '
-                    .'Jangan mengarang diskusi, poin, atau persetujuan. Berikan laporan singkat tanpa informasi internal.'
-                    ."\nStory: ".json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
-                    ."\nHasil final: ".$locked->consensus_points.' poin ('.self::category($locked->consensus_points).')'
-                    ."\nCara hasil dicapai: ".$methodText
-                    ."\nEstimasi final tiap spesialis: ".$finalVotes
-                    ."\nTranskrip: ".json_encode($transcript, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-                $diagnostic = 'requesting_summary';
-                $summary = trim($this->scrumMasterAnswer($prompt, $conversation->uuid));
-                $diagnostic = 'summary_received:'.mb_strlen($summary);
-                if ($summary === '' || mb_strlen($summary) > 6000
-                    || $summary === ChatDisclosurePolicy::SAFE_RESPONSE
-                    || $this->disclosure->containsSensitiveDisclosure($summary)) {
-                    $reasons = [];
-                    if ($summary === '') {
-                        $reasons[] = 'empty';
-                    }
-                    if (mb_strlen($summary) > 6000) {
-                        $reasons[] = 'too_long';
-                    }
-                    if ($summary === ChatDisclosurePolicy::SAFE_RESPONSE) {
-                        $reasons[] = 'safe_response';
-                    }
-                    if ($this->disclosure->containsSensitiveDisclosure($summary)) {
-                        $reasons[] = 'sensitive_disclosure';
-                    }
-                    $diagnostic = 'summary_rejected:'.implode(',', $reasons);
-                    throw new RuntimeException('Invalid Scrum Master report.');
-                }
-                if (! $this->current($locked) || $sprint->fresh()?->status !== 'PLANNING') {
-                    throw new RuntimeException('Sprint or story changed during report.');
-                }
-                $methodLabel = $locked->consensus_method === 'deadlock_max'
-                    ? 'Deadlock — Scrum Master menerapkan maksimum'
-                    : 'Mufakat bulat tim';
-                $diagnostic = 'saving';
-                $conversation->messages()->create([
-                    'role' => 'assistant',
-                    'content' => 'Refinement Fibonacci — '.$snapshot['story_id'].' · revisi '.$snapshot['revision']
-                        ."\nHasil final: ".$locked->consensus_points.' poin ('.self::category($locked->consensus_points).') · '.$methodLabel."\n"
-                        .$summary,
+            $story = Story::query()->findOrFail($run->story_id);
+            $sprint = $story->sprint_id === null ? null : $story->sprint()->first();
+            if ($sprint?->status !== 'PLANNING' || ! $this->hasConsensusEvidence($run)) {
+                throw new RuntimeException('Stale or invalid consensus.');
+            }
+            $snapshot = $this->snapshot($story);
+            $evidence = $run->messages()->where('recipient_slug', 'scrum-master')->get();
+            if ($evidence->isEmpty()) {
+                // Specialist originals are addressed to the Scrum Master on receipt.
+                throw new RuntimeException('No report evidence.');
+            }
+            $conversation = ChatConversation::query()->where('user_id', $requester->id)
+                ->where('agent_profile', 'scrum-master')->latest('updated_at')->first()
+                ?? ChatConversation::query()->create([
+                    'user_id' => $requester->id,
+                    'uuid' => (string) Str::uuid(),
+                    'title' => 'Refinement Fibonacci '.$snapshot['story_id'],
+                    'agent_profile' => 'scrum-master',
                 ]);
-                $conversation->touch();
-                // Scrum Master menghasilkan versi refined terstruktur dari hasil
-                // diskusi (keputusan Bima 2026-10-13). Opsional: jika gagal atau
-                // tidak valid, laporan tetap sukses tanpa versi refined.
-                $refined = $this->generateRefinedStory($snapshot, $transcript, $conversation->uuid);
-                $storyFill = ['estimate_points' => $locked->consensus_points];
-                if ($refined !== null) {
-                    $storyFill += [
-                        'refined_title' => $refined['refined_title'],
-                        'refined_purpose' => $refined['refined_purpose'],
-                        'refined_acceptance_criteria' => $refined['refined_acceptance_criteria'],
-                        'refined_at' => now(),
-                        'refined_from_run_id' => $locked->id,
-                    ];
-                }
-                // The report insert and final story point are committed together.
-                $story->forceFill($storyFill)->save();
-                $locked->forceFill([
-                    'status' => 'COMPLETED', 'summary' => $summary,
-                    'report_sent_at' => now(), 'completed_at' => now(),
-                ])->save();
-            });
+            $transcript = $evidence->map(fn ($message) => [
+                'round' => $message->round,
+                'sender' => $message->sender_slug,
+                'content' => $message->content,
+                'point' => $message->estimate_points,
+                'explicit_agree' => $message->explicit_agree,
+            ])->all();
+            // Scrum Master mengumpulkan hasil tiap spesialis lalu merangkumnya
+            // untuk PO (keputusan Bima 2026-10-13).
+            $finalVotes = $run->messages()->where('round', self::MAX_DISCUSSION_ROUNDS)
+                ->where('recipient_slug', 'scrum-master')->orderBy('id')->get()
+                ->map(fn ($message) => $message->sender_slug.' = '.$message->estimate_points.' poin')->implode('; ');
+            $methodText = $run->consensus_method === 'deadlock_max'
+                ? 'Deadlock setelah '.self::MAX_DISCUSSION_ROUNDS.' putaran tanpa mufakat bulat, sehingga Scrum Master menerapkan aturan MAKSIMUM (estimasi teraman) sesuai kesepakatan.'
+                : 'Mufakat bulat: ketiga spesialis sepakat setelah diskusi.';
+            $prompt = AgentSoul::promptLine('scrum-master')."\n\n"
+                .'Sebagai Scrum Master, kumpulkan hasil estimasi Fibonacci berikut dan rangkum untuk PO berdasarkan transkrip asli. '
+                .'Jangan mengarang diskusi, poin, atau persetujuan. Berikan laporan singkat tanpa informasi internal.'
+                ."\nStory: ".json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                ."\nHasil final: ".$run->consensus_points.' poin ('.self::category($run->consensus_points).')'
+                ."\nCara hasil dicapai: ".$methodText
+                ."\nEstimasi final tiap spesialis: ".$finalVotes
+                ."\nTranskrip: ".json_encode($transcript, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $diagnostic = 'requesting_summary';
+            // Gagal/ditolak = laporan tetap REPORT_PENDING agar PO (atau job) bisa
+            // mengulang dan mendapat ringkasan SM asli, tanpa memanggil ulang spesialis.
+            $summary = $this->reportSummary($prompt, $conversation->uuid, $diagnostic);
+            // Ringkasan bisa memakan menit: pastikan story/sprint belum berubah sebelum
+            // memanggil AI lagi untuk versi refined (hasilnya akan dibuang).
+            if (! $this->current($run) || $sprint->fresh()?->status !== 'PLANNING') {
+                throw new RuntimeException('Sprint or story changed during report.');
+            }
+            $diagnostic = 'refining';
+            // Opsional: jika gagal atau tidak valid, laporan tetap sukses tanpa versi refined.
+            $refined = $this->generateRefinedStory($snapshot, $transcript, $conversation->uuid);
         } catch (Throwable $exception) {
-            // The consensus and all messages predate this transaction and survive rollback.
-            // Kegagalan TIDAK BOLEH diam: catat tahap + exception agar retry
-            // berikutnya bisa dibedakan dari kegagalan AI vs validasi vs simpan.
             Log::warning('Story estimation report failed', [
                 'run_id' => $run->id, 'story_id' => $run->story_id,
                 'diagnostic' => $diagnostic,
@@ -632,9 +587,137 @@ class StoryEstimationService
             if (! $this->current($run)) {
                 return $this->finish($run, 'STALE');
             }
+
+            return $run->fresh(['agentRuns', 'messages']);
         }
 
+        // Tahap 2 — transaksi singkat yang hanya menulis.
+        $this->saveReport($run, $snapshot, $summary, $refined, $conversation);
+
         return $run->fresh(['agentRuns', 'messages']);
+    }
+
+    /** Ringkasan SM yang lolos validasi; melempar exception bila gagal atau ditolak. */
+    private function reportSummary(string $prompt, string $conversationUuid, string &$diagnostic): string
+    {
+        $summary = trim($this->scrumMasterAnswer($prompt, $conversationUuid));
+        $diagnostic = 'summary_received:'.mb_strlen($summary);
+        $reasons = [];
+        if ($summary === '') {
+            $reasons[] = 'empty';
+        }
+        if (mb_strlen($summary) > 6000) {
+            $reasons[] = 'too_long';
+        }
+        if ($summary === ChatDisclosurePolicy::SAFE_RESPONSE) {
+            $reasons[] = 'safe_response';
+        }
+        if ($summary !== '' && $this->disclosure->containsSensitiveDisclosure($summary)) {
+            $reasons[] = 'sensitive_disclosure';
+        }
+        if ($reasons !== []) {
+            $diagnostic = 'summary_rejected:'.implode(',', $reasons);
+            throw new RuntimeException('Invalid Scrum Master report.');
+        }
+
+        return $summary;
+    }
+
+    /**
+     * Simpan laporan, poin final story, dan status COMPLETED dalam satu transaksi
+     * singkat. Diulang sebentar bila SQLite sedang dikunci proses lain.
+     *
+     * @param  array<string, mixed>  $snapshot
+     * @param  array<string, string>|null  $refined
+     */
+    private function saveReport(StoryEstimationRun $run, array $snapshot, string $summary, ?array $refined, ChatConversation $conversation): void
+    {
+        for ($attempt = 1; ; $attempt++) {
+            try {
+                DB::transaction(function () use ($run, $snapshot, $summary, $refined, $conversation): void {
+                    $locked = StoryEstimationRun::query()->lockForUpdate()->findOrFail($run->id);
+                    $story = Story::query()->lockForUpdate()->findOrFail($locked->story_id);
+                    $sprint = $story->sprint_id === null ? null : $story->sprint()->first();
+                    if ($locked->status !== 'REPORT_PENDING' || ! $this->current($locked) || $sprint?->status !== 'PLANNING') {
+                        throw new RuntimeException('Sprint or story changed during report.');
+                    }
+                    $methodLabel = $locked->consensus_method === 'deadlock_max'
+                        ? 'Deadlock — Scrum Master menerapkan maksimum'
+                        : 'Mufakat bulat tim';
+                    $conversation->messages()->create([
+                        'role' => 'assistant',
+                        'content' => 'Refinement Fibonacci — '.$snapshot['story_id'].' · revisi '.$snapshot['revision']
+                            ."\nHasil final: ".$locked->consensus_points.' poin ('.self::category($locked->consensus_points).') · '.$methodLabel."\n"
+                            .$summary,
+                    ]);
+                    $conversation->touch();
+                    $storyFill = ['estimate_points' => $locked->consensus_points];
+                    if ($refined !== null) {
+                        $storyFill += [
+                            'refined_title' => $refined['refined_title'],
+                            'refined_purpose' => $refined['refined_purpose'],
+                            'refined_acceptance_criteria' => $refined['refined_acceptance_criteria'],
+                            'refined_at' => now(),
+                            'refined_from_run_id' => $locked->id,
+                        ];
+                    }
+                    // The report insert and final story point are committed together.
+                    $story->forceFill($storyFill)->save();
+                    $locked->forceFill([
+                        'status' => 'COMPLETED', 'summary' => $summary,
+                        'report_sent_at' => now(), 'completed_at' => now(),
+                    ])->save();
+                });
+
+                return;
+            } catch (Throwable $exception) {
+                $locked = str_contains(strtolower($exception->getMessage()), 'database is locked');
+                if ($locked && $attempt < 3) {
+                    usleep(500_000 * $attempt);
+
+                    continue;
+                }
+                Log::warning('Story estimation report failed', [
+                    'run_id' => $run->id, 'story_id' => $run->story_id, 'diagnostic' => 'saving',
+                    'exception' => class_basename($exception), 'message' => Str::limit($exception->getMessage(), 500),
+                ]);
+                if (! $this->current($run)) {
+                    $this->finish($run, 'STALE');
+
+                    return;
+                }
+
+                throw $exception;
+            }
+        }
+    }
+
+    /**
+     * Jalan terakhir bila laporan tetap gagal: simpan poin konsensus ke story dan
+     * tutup run dengan ringkasan otomatis. Dulu run ditutup COMPLETED TANPA
+     * menyimpan poin, sehingga estimasi terlihat selesai padahal poin hilang.
+     */
+    public function completeWithFallback(StoryEstimationRun $run, string $reason): string
+    {
+        return DB::transaction(function () use ($run, $reason): string {
+            $locked = StoryEstimationRun::query()->lockForUpdate()->find($run->id);
+            if (! $locked || $locked->status !== 'REPORT_PENDING') {
+                return (string) $locked?->status;
+            }
+            if (! in_array($locked->consensus_points, self::FIBONACCI_POINTS, true) || ! $this->current($locked)) {
+                $locked->forceFill(['status' => 'STALE', 'completed_at' => now()])->save();
+
+                return 'STALE';
+            }
+            Story::query()->whereKey($locked->story_id)->update(['estimate_points' => $locked->consensus_points]);
+            $locked->forceFill([
+                'status' => 'COMPLETED',
+                'summary' => 'Ringkasan otomatis ('.$reason.'). Hasil final: '.$locked->consensus_points.' poin ('.self::category($locked->consensus_points).').',
+                'completed_at' => now(),
+            ])->save();
+
+            return 'COMPLETED';
+        });
     }
 
     private function collectRound(StoryEstimationRun $run, array $snapshot, int $round): array

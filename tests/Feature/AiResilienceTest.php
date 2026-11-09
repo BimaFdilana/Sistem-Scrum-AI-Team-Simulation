@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Exceptions\AiUnavailableException;
 use App\Models\User;
+use App\Services\AgentConfiguration;
 use App\Services\CliProxyApiClient;
 use App\Services\HermesClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -59,6 +60,7 @@ class AiResilienceTest extends TestCase
                 return Http::response(['data' => [['id' => 'gpt-a', 'owned_by' => 'openai']]]);
             }
             $calls++;
+
             return $calls < 3 ? Http::response('overloaded', 503) : $this->okResponse();
         });
 
@@ -78,6 +80,7 @@ class AiResilienceTest extends TestCase
                 return Http::response(['data' => [['id' => 'gpt-a', 'owned_by' => 'openai']]]);
             }
             $calls++;
+
             return Http::response('unauthorized', 401);
         });
 
@@ -123,6 +126,7 @@ class AiResilienceTest extends TestCase
                 ]]);
             }
             $requested[] = $request['model'];
+
             return Http::response('no such model', 404);
         });
 
@@ -147,6 +151,7 @@ class AiResilienceTest extends TestCase
                 ]]);
             }
             $requested[] = $request['model'];
+
             return Http::response('no such model', 404);
         });
 
@@ -167,6 +172,7 @@ class AiResilienceTest extends TestCase
                 return Http::response(['data' => [['id' => 'gpt-a', 'owned_by' => 'openai']]]);
             }
             $calls++;
+
             return Http::response('overloaded', 503);
         });
 
@@ -189,6 +195,7 @@ class AiResilienceTest extends TestCase
             if ($calls === 1) {
                 throw new ConnectionException('cURL error 28: Operation timed out');
             }
+
             return $this->okResponse();
         });
 
@@ -202,7 +209,7 @@ class AiResilienceTest extends TestCase
     {
         // HermesClient kini me-resolve model SM lewat StrictModelResolver:
         // mock snapshot terverifikasi + katalog gateway, bukan resolveModel.
-        $this->mock(\App\Services\AgentConfiguration::class, function (MockInterface $mock) {
+        $this->mock(AgentConfiguration::class, function (MockInterface $mock) {
             $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'gpt-a']);
         });
         $cliproxy = Mockery::mock(CliProxyApiClient::class);
@@ -225,13 +232,14 @@ class AiResilienceTest extends TestCase
         $this->fakeModels(['gpt-a']);
         // Chat SM kini ketat: perlu snapshot SM terverifikasi agar
         // sendMessage mencapai gateway (bukan gagal "belum memilih").
-        $this->mock(\App\Services\AgentConfiguration::class, function (MockInterface $mock) {
+        $this->mock(AgentConfiguration::class, function (MockInterface $mock) {
             $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'gpt-a']);
         });
         Http::fake(function (Request $request) {
             if (str_ends_with($request->url(), '/v1/models')) {
                 return Http::response(['data' => [['id' => 'gpt-a', 'owned_by' => 'openai']]]);
             }
+
             return Http::response('overloaded', 503);
         });
 
@@ -244,7 +252,10 @@ class AiResilienceTest extends TestCase
 
     protected function tearDown(): void
     {
-        Mockery::close();
-        parent::tearDown();
+        try {
+            Mockery::close();
+        } finally {
+            parent::tearDown();
+        }
     }
 }

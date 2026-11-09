@@ -39,7 +39,19 @@ class SendStoryEstimationReportJob implements ShouldQueue
         }
 
         try {
-            $estimator->report($run, $run->requester);
+            $result = $estimator->report($run, $run->requester);
+
+            // report() tidak melempar bila ringkasan SM gagal/ditolak (run tetap
+            // REPORT_PENDING agar bisa diulang). Beri SM beberapa kesempatan lagi,
+            // lalu simpan poin konsensus dengan ringkasan otomatis.
+            if ($result->status === 'REPORT_PENDING') {
+                if ($this->attempts() < $this->tries) {
+                    $this->release(60);
+
+                    return;
+                }
+                $estimator->completeWithFallback($run, 'ringkasan Scrum Master tidak tersedia setelah '.$this->tries.' percobaan');
+            }
         } catch (Throwable $exception) {
             $message = strtolower($exception->getMessage());
             $retryable = str_contains($message, 'database is locked')
@@ -60,12 +72,9 @@ class SendStoryEstimationReportJob implements ShouldQueue
                 return;
             }
 
-            // Laporan hanyalah ringkasan; poin estimasi SUDAH tersimpan.
-            // Jangan biarkan run menggantung di REPORT_PENDING selamanya.
-            $run->forceFill([
-                'status' => 'COMPLETED',
-                'completed_at' => now(),
-            ])->save();
+            // Jangan biarkan run menggantung di REPORT_PENDING: simpan poin konsensus
+            // ke story lalu tutup run dengan ringkasan otomatis.
+            $estimator->completeWithFallback($run, 'laporan gagal disimpan');
         }
     }
 

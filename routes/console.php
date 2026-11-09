@@ -10,3 +10,5 @@ Artisan::command('inspire', function () {
 
 // Watchdog: task/run yang menggantung ditandai agar bisa ditindak PO.
 Schedule::command('runs:watchdog')->everyFiveMinutes()->withoutOverlapping();
+// Laporan estimasi yang macet (melebihi batas job SM) diselesaikan dengan poin tersimpan.
+Schedule::command('estimations:recover --minutes=45')->everyTenMinutes()->withoutOverlapping();

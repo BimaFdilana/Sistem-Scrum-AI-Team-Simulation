@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\StoryEstimationRun;
+use App\Services\StoryEstimationService;
 use Illuminate\Console\Command;
 
 /**
@@ -39,10 +40,8 @@ class RecoverStuckEstimations extends Command
             $this->line('#'.$run->id.' story='.$run->story_id.' updated='.$run->updated_at);
 
             if (! $this->option('dry-run')) {
-                $run->forceFill([
-                    'status' => 'COMPLETED',
-                    'completed_at' => now(),
-                ])->save();
+                // Poin konsensus ikut disimpan ke story (dulu hanya status yang diubah).
+                $this->line('  -> '.app(StoryEstimationService::class)->completeWithFallback($run, 'dipulihkan otomatis'));
             }
         }
 

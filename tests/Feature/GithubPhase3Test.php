@@ -9,6 +9,7 @@ use App\Models\Story;
 use App\Models\User;
 use App\Services\GithubApiClient;
 use App\Services\GithubProjectService;
+use App\Support\Demo\DemoServerManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery;
 use Tests\TestCase;
@@ -30,11 +31,11 @@ class GithubPhase3Test extends TestCase
         parent::setUp();
 
         // Tes ini menguji merge GitHub, bukan kesehatan demo: demo dianggap sehat.
-        $demo = Mockery::mock(\App\Support\Demo\DemoServerManager::class);
+        $demo = Mockery::mock(DemoServerManager::class);
         $demo->shouldReceive('verify')->andReturn([
             'ok' => true, 'http' => 200, 'url' => 'http://127.0.0.1:9999/', 'error' => null, 'demo' => null,
         ]);
-        $this->app->instance(\App\Support\Demo\DemoServerManager::class, $demo);
+        $this->app->instance(DemoServerManager::class, $demo);
     }
 
     protected function mockClient(array $stubs): GithubApiClient
@@ -305,7 +306,10 @@ class GithubPhase3Test extends TestCase
 
     protected function tearDown(): void
     {
-        Mockery::close();
-        parent::tearDown();
+        try {
+            Mockery::close();
+        } finally {
+            parent::tearDown();
+        }
     }
 }

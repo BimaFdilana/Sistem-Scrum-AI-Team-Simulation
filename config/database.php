@@ -41,7 +41,9 @@ return [
             'busy_timeout' => null,
             'journal_mode' => null,
             'synchronous' => null,
-            'transaction_mode' => 'DEFERRED',
+            // IMMEDIATE: transaksi tulis mengambil kunci di awal dan menunggu busy_timeout,
+            // bukan gagal "database is locked" saat snapshot baca kedaluwarsa.
+            'transaction_mode' => env('DB_TRANSACTION_MODE', 'IMMEDIATE'),
         ],
 
         'mysql' => [

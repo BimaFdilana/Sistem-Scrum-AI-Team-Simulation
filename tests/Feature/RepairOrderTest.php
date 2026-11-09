@@ -7,6 +7,7 @@ use App\Models\ExecutionRun;
 use App\Models\Project;
 use App\Models\RepairOrder;
 use App\Models\User;
+use App\Services\ChatDisclosurePolicy;
 use App\Services\HermesClient;
 use App\Services\RepairOrderDetector;
 use App\Support\Workspace\PatchApplier;
@@ -163,7 +164,7 @@ class RepairOrderTest extends TestCase
         $this->app->instance(HermesClient::class, $fake);
 
         $run = ExecutionRun::query()->where('repair_order_id', $order->id)->firstOrFail();
-        (new BreakdownExecutionJob($run->id))->handle($fake, app(\App\Services\ChatDisclosurePolicy::class));
+        (new BreakdownExecutionJob($run->id))->handle($fake, app(ChatDisclosurePolicy::class));
 
         $this->assertSame('AWAITING_PERMISSION', $run->fresh()->status);
         $this->assertSame(1, $run->tasks()->count());
@@ -321,7 +322,10 @@ class RepairOrderTest extends TestCase
 
     protected function tearDown(): void
     {
-        Mockery::close();
-        parent::tearDown();
+        try {
+            Mockery::close();
+        } finally {
+            parent::tearDown();
+        }
     }
 }

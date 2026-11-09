@@ -241,16 +241,20 @@ class EstimationRateLimitStrictTest extends TestCase
             'scope_status' => 'NEEDS_REFINEMENT', 'revision' => 1,
         ]);
         [$run] = app(StoryEstimationService::class)->claimRun($story, $owner);
-        $run->forceFill(['status' => 'REPORT_PENDING'])->save();
+        $run->forceFill(['status' => 'REPORT_PENDING', 'consensus_points' => 5, 'consensus_method' => 'unanimous'])->save();
 
+        $real = app(StoryEstimationService::class);
         $service = \Mockery::mock(StoryEstimationService::class);
         $service->shouldReceive('report')->once()->andThrow(new \RuntimeException('boom'));
+        $service->shouldReceive('completeWithFallback')->once()->andReturnUsing(fn ($run, $reason) => $real->completeWithFallback($run, $reason));
         Log::spy();
 
         (new SendStoryEstimationReportJob($run->id))->handle($service);
 
         // Laporan hanyalah ringkasan: gagal dicatat di log, run ditutup COMPLETED agar tidak menggantung.
         $this->assertSame('COMPLETED', $run->fresh()->status);
+        // Poin konsensus TETAP tersimpan ke story (dulu run ditutup tanpa poin).
+        $this->assertSame(5, $story->fresh()->estimate_points);
         Log::shouldHaveReceived('warning')->withArgs(function ($message, $context) use ($run) {
             return $message === 'Story estimation report job failed' && ($context['run_id'] ?? null) === $run->id;
         });
@@ -258,8 +262,13 @@ class EstimationRateLimitStrictTest extends TestCase
 
     protected function tearDown(): void
     {
-        \Mockery::close();
-        parent::tearDown();
+        // parent::tearDown WAJIB tetap jalan walau ekspektasi mock gagal; tanpa itu
+        // transaksi RefreshDatabase tidak di-rollback dan semua tes berikutnya ikut gagal.
+        try {
+            \Mockery::close();
+        } finally {
+            parent::tearDown();
+        }
     }
 
     public function test_provider_for_model_resolves_from_gateway_catalog(): void
