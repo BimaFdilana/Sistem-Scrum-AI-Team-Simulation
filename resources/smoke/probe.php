@@ -247,15 +247,17 @@ $send = function (string $method, string $uri, array $data = []) use ($app, $ker
     }
 
     $errors = [];
+    $fieldErrors = [];
     try {
         $bag = $session()->get('errors');
         if ($bag instanceof ViewErrorBag) {
             $errors = $bag->getBag('default')->all();
+            $fieldErrors = $bag->getBag('default')->messages();
         }
     } catch (Throwable) {
     }
 
-    return ['status' => $status, 'html' => $html, 'errors' => $errors, 'exception' => $exception, 'location' => $location];
+    return ['status' => $status, 'html' => $html, 'errors' => $errors, 'field_errors' => $fieldErrors, 'exception' => $exception, 'location' => $location];
 };
 
 /** Nilai contoh untuk satu field form. */
@@ -599,6 +601,32 @@ foreach ($routes as $item) {
         }
         $result = $send('POST', $form['action'], $data);
         $kind = $classify($result);
+        // Data contoh ditolak validasi: coba sekali lagi dengan nilai yang sesuai pesannya,
+        // agar alur simpan -> detail -> ubah tetap teruji.
+        if ($kind === 'ok' && $result['field_errors'] !== []) {
+            $retry = $data;
+            $adjusted = false;
+            foreach ($result['field_errors'] as $field => $messages) {
+                $text = strtolower(implode(' ', (array) $messages));
+                $lower = strtolower((string) $field);
+                $value = match (true) {
+                    str_contains($text, 'number') || str_contains($text, 'numeric') || str_contains($text, 'integer') || str_contains($text, 'angka') || str_contains($text, 'digits') => (str_contains($lower, 'tahun') || str_contains($lower, 'year') ? date('Y') : '10'),
+                    str_contains($text, 'date') || str_contains($text, 'tanggal') => date('Y-m-d'),
+                    str_contains($text, 'email') => 'uji'.random_int(100000, 999999).'@example.com',
+                    str_contains($text, 'taken') || str_contains($text, 'sudah') || str_contains($text, 'unique') => 'UJI-'.random_int(100000, 999999),
+                    str_contains($text, 'required') || str_contains($text, 'wajib') => (isset($data[$field]) && $data[$field] !== '' ? null : 'Uji otomatis'),
+                    default => null,
+                };
+                if ($value !== null && ! str_contains((string) $field, '.')) {
+                    $retry[$field] = $value;
+                    $adjusted = true;
+                }
+            }
+            if ($adjusted) {
+                $result = $send('POST', $form['action'], $retry);
+                $kind = $classify($result);
+            }
+        }
         if ($kind === 'ok' && $result['errors'] !== []) {
             $kind = 'validation';
         }
