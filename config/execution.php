@@ -38,4 +38,11 @@ return [
 
     /* Batas putaran perbaikan setelah review batch — ditegakkan di kode. */
     'qa_max_repair_rounds' => (int) env('EXECUTION_QA_MAX_REPAIR_ROUNDS', 3),
+
+    /*
+    | Uji jalan nyata sebelum QA dan saat PO menerima story: halaman yang
+    | berubah dibuka dengan salinan database demo; error 500 = temuan.
+    */
+    'smoke_enabled' => (bool) env('EXECUTION_SMOKE', true),
+    'smoke_timeout' => (int) env('EXECUTION_SMOKE_TIMEOUT', 240),
 ];

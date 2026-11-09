@@ -89,6 +89,16 @@ class FindingDialogue
             ->update(['status' => ExecutionFinding::RESOLVED]);
     }
 
+    /** Tutup temuan uji jalan yang masih terbuka; hasil uji jalan terbaru yang berlaku. */
+    public function resolveSmoke(ExecutionRun $run): void
+    {
+        ExecutionFinding::query()
+            ->where('execution_run_id', $run->id)
+            ->where('status', ExecutionFinding::OPEN)
+            ->where('issue', 'like', RuntimeSmoke::FINDING_PREFIX.'%')
+            ->update(['status' => ExecutionFinding::RESOLVED]);
+    }
+
     public function resolveAllOpen(ExecutionRun $run): void
     {
         ExecutionFinding::query()

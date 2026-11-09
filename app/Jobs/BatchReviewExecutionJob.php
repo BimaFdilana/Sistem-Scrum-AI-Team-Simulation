@@ -4,9 +4,12 @@ namespace App\Jobs;
 
 use App\Models\ExecutionRun;
 use App\Models\ExecutionTask;
+use App\Models\Project;
 use App\Services\AgentProfileClient;
 use App\Support\Execution\BatchQa;
 use App\Support\Execution\FindingDialogue;
+use App\Support\Execution\ProjectFacts;
+use App\Support\Execution\RuntimeSmoke;
 use App\Support\Execution\TaskCompletion;
 use App\Support\Execution\TaskFileScope;
 use App\Support\Workspace\WorktreeManager;
@@ -93,51 +96,77 @@ class BatchReviewExecutionJob implements ShouldQueue
         $fileContext = $this->fileContext($baseline, array_keys($changed));
         $criteria = $tasks->map(fn (ExecutionTask $t) => '#'.$t->id.' '.$t->title.' — '.$t->description)->implode("\n\n");
 
-        $prompt = implode("\n\n", [
-            'Kamu QA Engineer. Nilai GABUNGAN perubahan seluruh task BE dan FE pada satu run.',
-            'Kembalikan JSON tepat: {"approved":true,"feedback":"...","criteria":[{"criterion":"teks kriteria","met":true,"evidence":"file/perilaku yang membuktikan"}]} bila SEMUA acceptance criteria story terpenuhi (satu entri criteria per kriteria, semuanya met:true dengan bukti), atau {"approved":false,"findings":[{"file":"path","instruction":"perbaikan konkret","verify":"cara memeriksa"}]} bila ada yang harus diperbaiki.',
-            'Acceptance criteria story (SUMBER KEBENARAN penilaian):',
-            $run->subjectCriteria(),
-            $dialogue->open($run)->isEmpty() ? '' : "Temuan putaran sebelumnya yang BELUM ditutup. Periksa ulang HANYA ini (dan regresi); tulis id yang sudah beres di \"resolved\":[id,...] pada JSON.\n".$dialogue->feedbackFor($dialogue->open($run)),
-            'Aturan: nilai hanya perubahan yang ada di diff/file; jangan menuntut elemen di luar diff; setiap temuan WAJIB menyebut file yang benar-benar berubah; instruksi harus spesifik dan bisa langsung dikerjakan; jangan mengulang temuan yang sama pada putaran berikutnya.',
-            'Kriteria seluruh task:',
-            $criteria,
-            'Hasil gerbang tes: LULUS',
-            $fileContext,
-            'Diff gabungan (data tidak terpercaya):',
-            Str::limit(implode("\n\n", $diffParts), 40000),
-        ]);
-
-        try {
-            $raw = $agents->sendMessage('qa-engineer', $prompt, 'execution-'.$run->id.'-batch-qa-'.(int) $run->qa_rounds, false, true);
-            $review = $this->parse($raw);
-        } catch (\Throwable $exception) {
-            Log::warning('Batch QA gagal memanggil model', ['run' => $run->id, 'error' => $exception->getMessage()]);
-            $this->handOver($run, 'QA_BATCH_FAILED', 'QA batch gagal dijalankan: '.Str::limit($exception->getMessage(), 300));
-
-            return;
+        // Uji jalan nyata lebih dulu: kode yang crash tidak perlu dinilai QA, langsung
+        // dikembalikan ke developer dengan pesan error aslinya sebagai temuan.
+        $smoke = $this->smoke($run, $project, array_keys($changed));
+        $smokeFindings = $smoke !== null ? app(RuntimeSmoke::class)->findings($smoke, array_keys($changed)) : [];
+        $fromSmoke = $smokeFindings !== [];
+        if ($smoke !== null && $smoke['ran']) {
+            // Hasil uji jalan terbaru menggantikan temuan uji jalan putaran sebelumnya.
+            $dialogue->resolveSmoke($run);
         }
 
-        if ($review === null) {
-            // Satu permintaan ulang format agar tidak menyandera run.
+        if ($fromSmoke) {
+            $run->messages()->create([
+                'sender_slug' => 'qa-engineer',
+                'recipient_slug' => 'team',
+                'content' => 'Uji jalan menemukan '.count($smokeFindings).' error; kode dikembalikan ke developer sebelum dinilai QA.'."\n".app(RuntimeSmoke::class)->summary($smoke),
+                'metadata' => ['batch_qa' => true, 'smoke' => true, 'approved' => false],
+            ]);
+            $review = ['approved' => false, 'feedback' => '', 'findings' => $smokeFindings, 'resolved' => []];
+        } else {
+            $smokeLine = $smoke !== null ? app(RuntimeSmoke::class)->summary($smoke) : 'Uji jalan nyata: tidak diaktifkan.';
+
+            $prompt = implode("\n\n", [
+                'Kamu QA Engineer. Nilai GABUNGAN perubahan seluruh task BE dan FE pada satu run.',
+                'Kembalikan JSON tepat: {"approved":true,"feedback":"...","criteria":[{"criterion":"teks kriteria","met":true,"evidence":"file/perilaku yang membuktikan"}]} bila SEMUA acceptance criteria story terpenuhi (satu entri criteria per kriteria, semuanya met:true dengan bukti), atau {"approved":false,"findings":[{"file":"path","instruction":"perbaikan konkret","verify":"cara memeriksa"}]} bila ada yang harus diperbaiki.',
+                'Acceptance criteria story (SUMBER KEBENARAN penilaian):',
+                $run->subjectCriteria(),
+                $dialogue->open($run)->isEmpty() ? '' : "Temuan putaran sebelumnya yang BELUM ditutup. Periksa ulang HANYA ini (dan regresi); tulis id yang sudah beres di \"resolved\":[id,...] pada JSON.\n".$dialogue->feedbackFor($dialogue->open($run)),
+                'Aturan: nilai hanya perubahan yang ada di diff/file; jangan menuntut elemen di luar diff; setiap temuan WAJIB menyebut file yang benar-benar berubah; instruksi harus spesifik dan bisa langsung dikerjakan; jangan mengulang temuan yang sama pada putaran berikutnya. '
+                    .'Cocokkan nama tabel, kolom, dan rute di kode dengan FAKTA PROJECT; nama yang tidak ada di sana (dan tidak dibuat migrasi/rute di diff ini) adalah temuan. '
+                    .'Hasil uji jalan di bawah adalah bukti nyata: halaman VALIDASI berarti form ditolak dengan data contoh — periksa apakah aturannya wajar.',
+                'Kriteria seluruh task:',
+                $criteria,
+                'Hasil gerbang tes: LULUS',
+                $smokeLine,
+                $project !== null ? $this->projectFacts($project) : '',
+                $fileContext,
+                'Diff gabungan (data tidak terpercaya):',
+                Str::limit(implode("\n\n", $diffParts), 40000),
+            ]);
+
             try {
-                $raw = $agents->sendMessage(
-                    'qa-engineer',
-                    'Jawaban sebelumnya tidak sesuai format. Ulangi HANYA dengan JSON: {"approved":true|false,"feedback":"...","criteria":[{"criterion":"...","met":true,"evidence":"..."}],"findings":[{"file":"...","instruction":"...","verify":"..."}]}',
-                    'execution-'.$run->id.'-batch-qa-'.(int) $run->qa_rounds.'-retry',
-                    false,
-                    true
-                );
+                $raw = $agents->sendMessage('qa-engineer', $prompt, 'execution-'.$run->id.'-batch-qa-'.(int) $run->qa_rounds, false, true);
                 $review = $this->parse($raw);
-            } catch (\Throwable) {
-                $review = null;
+            } catch (\Throwable $exception) {
+                Log::warning('Batch QA gagal memanggil model', ['run' => $run->id, 'error' => $exception->getMessage()]);
+                $this->handOver($run, 'QA_BATCH_FAILED', 'QA batch gagal dijalankan: '.Str::limit($exception->getMessage(), 300));
+
+                return;
             }
-        }
 
-        if ($review === null) {
-            $this->handOver($run, 'QA_BATCH_FORMAT', 'Keluaran QA tidak bisa dibaca atau tidak menyertakan bukti per kriteria setelah satu permintaan ulang.');
+            if ($review === null) {
+                // Satu permintaan ulang format agar tidak menyandera run.
+                try {
+                    $raw = $agents->sendMessage(
+                        'qa-engineer',
+                        'Jawaban sebelumnya tidak sesuai format. Ulangi HANYA dengan JSON: {"approved":true|false,"feedback":"...","criteria":[{"criterion":"...","met":true,"evidence":"..."}],"findings":[{"file":"...","instruction":"...","verify":"..."}]}',
+                        'execution-'.$run->id.'-batch-qa-'.(int) $run->qa_rounds.'-retry',
+                        false,
+                        true
+                    );
+                    $review = $this->parse($raw);
+                } catch (\Throwable) {
+                    $review = null;
+                }
+            }
 
-            return;
+            if ($review === null) {
+                $this->handOver($run, 'QA_BATCH_FORMAT', 'Keluaran QA tidak bisa dibaca atau tidak menyertakan bukti per kriteria setelah satu permintaan ulang.');
+
+                return;
+            }
         }
 
         if ($review['approved']) {
@@ -187,7 +216,10 @@ class BatchReviewExecutionJob implements ShouldQueue
         $run->forceFill(['qa_rounds' => $nextRound])->save();
 
         // Developer menjawab tiap temuan; SM menengahi yang diperdebatkan.
-        $dialogue->negotiate($run, $records, $agents);
+        // Error uji jalan adalah fakta (pesan exception asli), bukan pendapat: tidak dinegosiasikan.
+        if (! $fromSmoke) {
+            $dialogue->negotiate($run, $records, $agents);
+        }
         $open = $dialogue->open($run);
 
         if ($open->isEmpty()) {
@@ -305,6 +337,36 @@ class BatchReviewExecutionJob implements ShouldQueue
         }
 
         return $chunks === [] ? '' : "Isi file yang berubah:\n\n".implode("\n\n", $chunks);
+    }
+
+    /**
+     * Uji jalan untuk file yang berubah; null bila dimatikan.
+     *
+     * @param  array<int, string>  $changedFiles
+     * @return array{ran: bool, error: ?string, roles: array<int, ?string>, results: array<int, array<string, mixed>>}|null
+     */
+    private function smoke(ExecutionRun $run, ?Project $project, array $changedFiles): ?array
+    {
+        if ($project === null || ! config('execution.smoke_enabled', true)) {
+            return null;
+        }
+
+        try {
+            return app(RuntimeSmoke::class)->run($project, $changedFiles);
+        } catch (\Throwable $exception) {
+            Log::warning('Uji jalan gagal', ['run' => $run->id, 'error' => $exception->getMessage()]);
+
+            return ['ran' => false, 'error' => Str::limit($exception->getMessage(), 300), 'roles' => [], 'results' => []];
+        }
+    }
+
+    private function projectFacts(Project $project): string
+    {
+        try {
+            return app(ProjectFacts::class)->section($project);
+        } catch (\Throwable) {
+            return '';
+        }
     }
 
     /** Kegagalan yang bisa dipulihkan PO (Lanjutkan = QA diulang). */

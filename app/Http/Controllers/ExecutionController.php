@@ -6,12 +6,15 @@ use App\Jobs\BreakdownExecutionJob;
 use App\Jobs\RefreshDemoJob;
 use App\Models\ExecutionRun;
 use App\Models\PermissionRequest;
+use App\Models\Project;
 use App\Models\Story;
 use App\Services\GithubApiClient;
 use App\Services\GithubProjectService;
 use App\Support\Demo\DemoServerManager;
 use App\Support\Execution\DirectWorkspace;
+use App\Support\Execution\RuntimeSmoke;
 use App\Support\Workspace\BaselineSnapshot;
+use App\Support\Workspace\WorktreeManager;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -124,6 +127,16 @@ class ExecutionController extends Controller
 
             $demoEvidence = 'Demo terverifikasi '.($check['url'] ?? '-')
                 .' HTTP '.($check['http'] ?? '-').' pada '.now()->format('d M Y H:i');
+
+            $smoke = $this->acceptanceSmoke($story->project, $run);
+            if ($smoke['blocking'] !== []) {
+                return back()->withErrors([
+                    'acceptance' => 'Uji jalan menemukan error pada halaman story ini, keputusan BERHASIL ditolak: '
+                        .implode(' | ', array_slice($smoke['blocking'], 0, 4))
+                        .'. Tandai Gagal lalu jalankan ulang story, atau perbaiki dulu kodenya.',
+                ]);
+            }
+            $demoEvidence .= "\n".$smoke['note'];
         }
 
         // Mode direct: hasil run ada di branch run; gabungkan bila diterima, kembalikan baseline apa pun hasilnya.
@@ -168,6 +181,64 @@ class ExecutionController extends Controller
 
         return redirect()->route('stories.executions.show', [$story, $run])
             ->with('status', 'Story diterima PO dengan status '.$label.'. Eksekusi ulang dikunci.');
+    }
+
+    /**
+     * Uji jalan seluruh halaman project sebelum story diterima.
+     *
+     * Error pada halaman milik story ini (rute atau file penyebab termasuk file
+     * yang diubah run) memblokir penerimaan; error di halaman lain hanya dicatat
+     * sebagai peringatan regresi agar PO tahu, tanpa menyandera story ini.
+     *
+     * @return array{blocking: array<int, string>, note: string}
+     */
+    private function acceptanceSmoke(Project $project, ExecutionRun $run): array
+    {
+        if (! config('execution.smoke_enabled', true)) {
+            return ['blocking' => [], 'note' => 'Uji jalan: dimatikan.'];
+        }
+
+        $path = rtrim((string) $project->workspace_path, '/');
+        $git = app(WorktreeManager::class);
+        $changed = [];
+
+        try {
+            if ($run->work_branch) {
+                if ($git->currentBranch($path) !== $run->work_branch) {
+                    return ['blocking' => [], 'note' => 'Uji jalan dilewati: baseline sedang tidak berada di cabang '.$run->work_branch.'.'];
+                }
+                $start = 'refs/scrumspace/run-'.$run->id.'-start';
+                $changed = $git->changedFilesBetween($path, $git->branchExists($path, $start) ? $start : (string) $run->base_branch, $run->work_branch);
+            }
+        } catch (\Throwable) {
+            $changed = [];
+        }
+
+        $smoke = app(RuntimeSmoke::class);
+        $report = $smoke->run($project, $changed, 'all');
+        if (! $report['ran']) {
+            return ['blocking' => [], 'note' => $smoke->summary($report)];
+        }
+
+        $blocking = [];
+        $warnings = [];
+        foreach ($smoke->crashes($report) as $crash) {
+            $label = trim(($crash['method'] ?? 'GET').' '.($crash['uri'] ?? '')).': '.mb_substr((string) ($crash['error'] ?? 'HTTP 500'), 0, 160);
+            $ownsStory = in_array($crash['route_file'] ?? null, $changed, true) || in_array($crash['file'] ?? null, $changed, true);
+            if ($ownsStory) {
+                $blocking[] = $label;
+            } else {
+                $warnings[] = $label;
+            }
+        }
+
+        $total = count($report['results']);
+        $note = 'Uji jalan seluruh halaman: '.$total.' permintaan, '.count($blocking).' error di halaman story ini';
+        if ($warnings !== []) {
+            $note .= ', '.count($warnings).' error di halaman lain (regresi atau bug lama): '.implode(' | ', array_slice($warnings, 0, 5));
+        }
+
+        return ['blocking' => $blocking, 'note' => $note.'.'];
     }
 
     /**

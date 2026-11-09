@@ -7,6 +7,7 @@ use App\Models\ExecutionRun;
 use App\Models\ExecutionTask;
 use App\Models\Notification;
 use App\Models\PermissionRequest;
+use App\Models\Project;
 use App\Services\AgentProfileClient;
 use App\Services\AgentToolRunner;
 use App\Services\AiGateway;
@@ -14,6 +15,7 @@ use App\Services\KanbanClient;
 use App\Support\Execution\DirectWorkspace;
 use App\Support\Execution\ExecutorPlanner;
 use App\Support\Execution\OpenCodeRunner;
+use App\Support\Execution\ProjectFacts;
 use App\Support\Execution\TaskCompletion;
 use App\Support\Execution\TaskFileScope;
 use App\Support\Workspace\PatchApplier;
@@ -178,6 +180,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             // description task. Daftar ini hanya instruksi di prompt —
             // tidak mengubah gerbang permission, QA, merge, atau demo.
             $fileScopeSection = $useHermes ? $this->fileScopeSection($run, $task, $project?->name) : '';
+            $factsSection = $this->projectFactsSection($project);
             $prompt = $useHermes ? implode("\n\n", array_filter([
                 "Kamu {$task->assigneeName()}. Kerjakan task berikut pada project Laravel di direktori kerja ini.",
                 $originalStatus === 'REVISION' && $task->qa_feedback
@@ -186,6 +189,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                 $fileScopeSection,
                 $previousSection,
                 $this->criteriaSection($run, $task),
+                $factsSection,
             ])) : implode("\n\n", array_filter([
                 "Kamu {$task->assigneeName()}. Kerjakan task berikut pada project Laravel HANYA lewat tool yang tersedia.",
                 'Langkah: baca file yang relevan dengan read_file, ubah dengan apply_edit (old_text harus cocok persis tepat satu kali), buat file baru dengan create_file, dan akhiri dengan submit_task berisi ringkasan perubahan. Jangan menulis code di teks chat.',
@@ -194,6 +198,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                     : 'Task: '.$task->title.' — '.$task->description,
                 $previousSection,
                 $this->criteriaSection($run, $task),
+                $factsSection,
             ]));
 
             // Jalur OpenCode (bila peran ini diaktifkan di OPENCODE_ROLES):
@@ -323,6 +328,22 @@ class ExecuteExecutionTaskJob implements ShouldQueue
     {
         return $exception instanceof ProcessSignaledException
             && in_array($exception->getProcess()->getTermSignal(), [9, 15], true);
+    }
+
+    /** Skema database dan rute nyata project; kosong bila tidak bisa dibaca (tidak menggagalkan task). */
+    private function projectFactsSection(?Project $project): string
+    {
+        if ($project === null) {
+            return '';
+        }
+
+        try {
+            return app(ProjectFacts::class)->section($project);
+        } catch (Throwable $exception) {
+            Log::warning('Fakta project tidak bisa dibaca', ['project' => $project->id, 'error' => $exception->getMessage()]);
+
+            return '';
+        }
     }
 
     /**
