@@ -829,10 +829,13 @@ class StoryEstimationService
         };
         $keys = is_array($data) ? array_keys($data) : [];
         $missing = array_diff($expected, $keys);
-        $unknown = array_diff($keys, $expected);
-        if (! is_array($data) || $missing !== [] || $unknown !== []) {
+        if (! is_array($data) || $missing !== []) {
             throw new RuntimeException('Invalid response schema.');
         }
+        // Kunci tambahan (mis. "note") dibuang, bukan menggagalkan vote: semua kunci
+        // wajib sudah ada dan kunci lain tidak pernah dipakai. US-04 (10 Nov) gagal
+        // seluruhnya hanya karena QA menambahkan "note" pada jawaban yang sah.
+        $data = array_intersect_key($data, array_flip($expected));
         // Poin di luar daftar sah TIDAK lagi membuang jawaban. Agent sering
         // menjawab angka Fibonacci yang jujur (terbanyak: 2) yang tidak ada
         // di [1,2,3,5,8,13]; membuang seluruh vote karena itu membuat

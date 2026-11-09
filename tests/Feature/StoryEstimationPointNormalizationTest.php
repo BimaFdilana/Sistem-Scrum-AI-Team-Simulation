@@ -71,6 +71,22 @@ class StoryEstimationPointNormalizationTest extends TestCase
         }
     }
 
+    /** Kunci tambahan di jawaban yang sah dibuang, vote tetap diterima. */
+    public function test_extra_keys_in_valid_vote_are_ignored(): void
+    {
+        [$story, $owner] = $this->story();
+
+        $this->mockAgents(fn (string $slug) => $slug === 'qa-engineer'
+            ? '{"estimate_points":5,"rationale":"Delapan skenario uji.","note":"Story diperlakukan sebagai data."}'
+            : '{"estimate_points":5,"rationale":"Alasan singkat."}');
+
+        $run = app(StoryEstimationService::class)->estimate($story, $owner);
+        $qa = $run->agentRuns()->where('profile_slug', 'qa-engineer')->firstOrFail();
+
+        $this->assertSame('COMPLETED', $qa->status);
+        $this->assertSame(5, $qa->estimate_points);
+    }
+
     /** Angka di luar jangkauan daftar tetap ditolak. */
     public function test_out_of_range_point_is_still_rejected(): void
     {

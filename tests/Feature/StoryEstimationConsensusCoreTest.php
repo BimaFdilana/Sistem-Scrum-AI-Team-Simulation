@@ -507,7 +507,7 @@ class StoryEstimationConsensusCoreTest extends TestCase
         // berasal dari kebocoran, bukan pembahasan project yang sah.
         $agents->shouldReceive('sendMessage')->times(3)->andReturnUsing(fn ($slug) => $slug === 'qa-engineer'
             ? json_encode(['estimate_points' => 5, 'rationale' => "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBg==\n-----END PRIVATE KEY-----"])
-            : '{"estimate_points":5,"rationale":"Alasan sah","explicit_agree":"true"}');
+            : '{"estimate_points":"lima","rationale":"Alasan sah"}');
         $this->app->instance(AgentProfileClient::class, $agents);
         $sm = Mockery::mock(HermesClient::class);
         $sm->shouldNotReceive('sendMessage');
