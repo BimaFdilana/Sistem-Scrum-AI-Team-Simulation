@@ -29,7 +29,7 @@
 @endif
 
 @if ($run->status === 'AWAITING_PERMISSION')
-    <p class="discussion-banner">Menunggu persetujuan PO di menu <a href="{{ route('accepted.index') }}">Accepted</a> sebelum agen mengubah code.</p>
+    @include('executions.partials.permission-approval', ['run' => $run])
 @elseif ($run->status === 'COMPLETED')
     <p class="discussion-banner"><strong>Eksekusi selesai.</strong> {{ $run->summary }}</p>
 @elseif ($run->status === 'BLOCKED')

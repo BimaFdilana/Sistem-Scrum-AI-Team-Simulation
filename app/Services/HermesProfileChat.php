@@ -88,9 +88,24 @@ class HermesProfileChat
             throw new RuntimeException('Gagal membuat file prompt sementara.');
         }
         try {
-            file_put_contents($promptFile, $prompt."\n\nATURAN TAMBAHAN (wajib): diskusi saja, jangan mengubah file apa pun, jangan menjalankan perintah shell/server, jangan commit/push/merge. Kembalikan jawaban dalam format yang diminta di prompt di atas.");
+            file_put_contents($promptFile, $prompt."\n\nATURAN TAMBAHAN: ini hanya diskusi penilaian, jangan mengubah file apa pun dan jangan menjalankan perintah shell/server.");
             chmod($promptFile, 0644);
-            $command = [$binary, '-p', $profile, 'chat', '--query-file', $promptFile, '--model', $model];
+            // --format stream-json WAJIB, bukan pilihan gaya.
+            //
+            // Bukti (3 Nov 2026): output `--format text` adalah SELURUH
+            // transkrip sesi (diukur 2.472 byte) — prompt di-echo di awal,
+            // banner "☤ Hermes", jawaban agent, lalu ekor "Resume this
+            // session with:" + "Title:" + statistik sesi. extractJsonObject()
+            // lalu mengambil dari '{' pertama (yang ada di ECHO PROMPT kita
+            // sendiri) sampai '}' terakhir (yang ada di ekor), sehingga yang
+            // tervalidasi bukan jawaban agent melainkan rentang gabungan —
+            // inilah sumber INVALID_JSON_SCHEMA yang berulang (32 warning
+            // di log produksi, 6 dari 8 estimation run gagal).
+            //
+            // stream-json memberi satu baris per event; yang kita pakai
+            // hanya {"type":"result","text":"<jawaban bersih>"}, terverifikasi
+            // berisi JSON vote utuh tanpa banner/echo/ekor.
+            $command = [$binary, '-p', $profile, 'chat', '--query-file', $promptFile, '--model', $model, '--format', 'stream-json'];
             $started = microtime(true);
             // Input null = stdin tertutup. Ini BUKAN detail kosmetik:
             // probe VPS membuktikan chat dengan stdin terbuka menggantung
@@ -121,10 +136,63 @@ class HermesProfileChat
                 throw new RuntimeException('Hermes profile '.$profile.' tidak mengembalikan jawaban.');
             }
 
-            return $output;
+            return $this->extractResultText($output, $profile);
         } finally {
             @unlink($promptFile);
             @rmdir($workdir);
         }
+    }
+
+    /**
+     * Ambil teks jawaban dari keluaran `--format stream-json`.
+     *
+     * Formatnya satu event JSON per baris. Baris terakhir yang relevan
+     * berjenis "result" dan membawa jawaban lengkap di field "text":
+     *   {"type":"result","session_id":"...","exit_code":0,"text":"<jawaban>"}
+     *
+     * Fallback berlapis, dari yang paling andal:
+     *  1. baris "result" terakhir dengan text tidak kosong;
+     *  2. bila tidak ada, gabungkan semua potongan {"type":"text"} —
+     *     dipakai saat stream terputus sebelum event result tiba;
+     *  3. bila stream-json tidak terbaca sama sekali (mis. versi Hermes
+     *     lawas yang mengabaikan flag), kembalikan keluaran apa adanya.
+     *     Jalur ini membuat perubahan tetap kompatibel ke belakang alih-alih
+     *     gagal total di lingkungan yang belum mendukung flag itu.
+     */
+    private function extractResultText(string $output, string $profile): string
+    {
+        $resultText = null;
+        $streamed = '';
+        $sawJson = false;
+
+        foreach (preg_split('/\R/', $output) ?: [] as $line) {
+            $line = trim($line);
+            if ($line === '' || ! str_starts_with($line, '{')) {
+                continue;
+            }
+            $event = json_decode($line, true);
+            if (! is_array($event) || ! isset($event['type'])) {
+                continue;
+            }
+            $sawJson = true;
+            if ($event['type'] === 'result' && is_string($event['text'] ?? null) && trim($event['text']) !== '') {
+                $resultText = $event['text'];
+            } elseif ($event['type'] === 'text' && is_string($event['text'] ?? null)) {
+                $streamed .= $event['text'];
+            }
+        }
+
+        if ($resultText !== null) {
+            return trim($resultText);
+        }
+        if (trim($streamed) !== '') {
+            return trim($streamed);
+        }
+        if ($sawJson) {
+            throw new RuntimeException('Hermes profile '.$profile.' mengembalikan stream tanpa teks jawaban.');
+        }
+
+        // Bukan stream-json (flag diabaikan versi lama): pakai apa adanya.
+        return trim($output);
     }
 }

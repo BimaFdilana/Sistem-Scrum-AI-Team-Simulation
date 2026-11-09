@@ -9,6 +9,7 @@ class DemoServer extends Model
 {
     protected $fillable = [
         'project_id', 'port', 'pid', 'status', 'started_at', 'expires_at', 'worktree_path',
+        'health_status', 'health_http_status', 'health_error', 'health_checked_at',
     ];
 
     protected function casts(): array
@@ -18,6 +19,8 @@ class DemoServer extends Model
             'pid' => 'integer',
             'started_at' => 'datetime',
             'expires_at' => 'datetime',
+            'health_http_status' => 'integer',
+            'health_checked_at' => 'datetime',
         ];
     }
 

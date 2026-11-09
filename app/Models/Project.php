@@ -47,6 +47,12 @@ class Project extends Model
         return $this->hasOne(Backlog::class);
     }
 
+    /** Profil runtime (versi PHP/Laravel, DB, status provisioning). */
+    public function profile(): HasOne
+    {
+        return $this->hasOne(ProjectProfile::class);
+    }
+
     public function stories(): HasMany
     {
         return $this->hasMany(Story::class);

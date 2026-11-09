@@ -87,12 +87,34 @@ class KanbanExecutionPollJob implements ShouldQueue
         }
         $status = $result['status'];
         if (in_array($status, ['todo', 'ready', 'running', 'review'], true)) {
+            // Watchdog: catat progres terakhir, dan bila tidak ada aktivitas
+            // sama sekali selama batas waktu, jangan menunggu selamanya.
+            $this->touchProgress($result, $task);
+
+            if ($this->isStalled($task)) {
+                $this->recoverStalled($run, $task, $card, $kanban, $worktrees, $baseline);
+
+                return;
+            }
+
             $this->release(60);
 
             return;
         }
         if ($status === 'blocked') {
-            $reason = $result['raw']['blocked_reason'] ?? $result['raw']['last_failure_error'] ?? $result['raw']['result'] ?? 'Kartu kanban diblokir oleh worker/dispatcher.';
+            // Alasan blokir dari worker ada di beberapa tempat tergantung
+            // versi CLI: task.blocked_reason, latest_summary, atau summary
+            // run terakhir. Dulu hanya dua kunci pertama yang dibaca
+            // sehingga PO melihat pesan generik tanpa sebab.
+            $runs = $result['raw']['runs'] ?? [];
+            $lastRun = is_array($runs) && $runs !== [] ? end($runs) : [];
+            $reason = $result['raw']['task']['blocked_reason']
+                ?? $result['raw']['blocked_reason']
+                ?? $result['raw']['latest_summary']
+                ?? (is_array($lastRun) ? ($lastRun['summary'] ?? $lastRun['error'] ?? null) : null)
+                ?? $result['raw']['last_failure_error']
+                ?? $result['raw']['result']
+                ?? 'Kartu kanban diblokir oleh worker/dispatcher.';
             $this->failRun($run, $task, 'KANBAN_BLOCKED', $worktrees, $baseline, is_string($reason) ? mb_substr($reason, 0, 1000) : 'Kartu kanban diblokir.');
 
             return;
@@ -166,7 +188,11 @@ class KanbanExecutionPollJob implements ShouldQueue
         $process = new Process(['git', '-C', $worktree, 'status', '--porcelain'], $worktree, null, null, 60);
         $process->run();
         if (! $process->isSuccessful()) {
-            throw new RuntimeException('Gagal membaca status git worktree.');
+            // Sertakan stderr: tanpa ini penyebab nyata (mis. registrasi
+            // worktree hilang / "dubious ownership") tidak terlihat di log.
+            $reason = trim($process->getErrorOutput()) ?: trim($process->getOutput());
+
+            throw new RuntimeException('Gagal membaca status git worktree: '.mb_substr($reason !== '' ? $reason : 'tanpa pesan git', 0, 500));
         }
         $files = [];
         foreach (explode("\n", $process->getOutput()) as $line) {
@@ -186,10 +212,131 @@ class KanbanExecutionPollJob implements ShouldQueue
         return array_values(array_unique($files));
     }
 
+    /** Catat waktu aktivitas terakhir kartu ke task. */
+    private function touchProgress(array $result, ExecutionTask $task): void
+    {
+        $candidates = [
+            $result['raw']['task']['updated_at'] ?? null,
+            $result['raw']['task']['last_activity_at'] ?? null,
+            $result['raw']['task']['blocked_at'] ?? null,
+        ];
+
+        foreach (($result['raw']['runs'] ?? []) as $run) {
+            if (is_array($run)) {
+                $candidates[] = $run['ended_at'] ?? null;
+                $candidates[] = $run['started_at'] ?? null;
+            }
+        }
+
+        $latest = null;
+        foreach ($candidates as $candidate) {
+            if (! is_string($candidate) || $candidate === '') {
+                continue;
+            }
+            try {
+                $moment = \Illuminate\Support\Carbon::parse($candidate);
+            } catch (Throwable) {
+                continue;
+            }
+            if ($latest === null || $moment->gt($latest)) {
+                $latest = $moment;
+            }
+        }
+
+        if ($latest !== null && ($task->last_progress_at === null || $latest->gt($task->last_progress_at))) {
+            $task->forceFill(['last_progress_at' => $latest])->save();
+        }
+    }
+
+    private function stallMinutes(): int
+    {
+        return max(0, (int) config('execution.stall_minutes', 20));
+    }
+
+    /** Task dianggap menggantung bila tidak ada aktivitas melewati batas. */
+    private function isStalled(ExecutionTask $task): bool
+    {
+        $minutes = $this->stallMinutes();
+        if ($minutes === 0) {
+            return false;
+        }
+
+        $since = $task->last_progress_at ?? $task->updated_at;
+
+        return $since !== null && $since->lt(now()->subMinutes($minutes));
+    }
+
+    /**
+     * Hentikan kartu yang menggantung, lalu pulihkan sekali dengan attempt
+     * baru. Bila sudah pernah dipulihkan, run dinyatakan TASK_STALLED supaya
+     * PO tahu ini bukan sekadar lambat.
+     */
+    private function recoverStalled(
+        ExecutionRun $run,
+        ExecutionTask $task,
+        array $card,
+        KanbanClient $kanban,
+        ?WorktreeManager $worktrees,
+        ?string $baseline
+    ): void {
+        $minutes = $this->stallMinutes();
+        $max = max(0, (int) config('execution.max_auto_recoveries', 1));
+
+        $kanban->blockTask($card['board'], $card['id'], 'Watchdog: tidak ada progres '.$minutes.' menit.');
+
+        $run->messages()->create([
+            'execution_task_id' => $task->id,
+            'sender_slug' => 'scrum-master',
+            'recipient_slug' => 'team',
+            'content' => 'Watchdog: kartu '.$card['id'].' tidak menunjukkan progres selama '.$minutes.' menit sehingga dihentikan.',
+        ]);
+
+        if ((int) $task->patch_retry_count < $max) {
+            $task->forceFill([
+                'status' => 'REVISION',
+                'patch_retry_count' => (int) $task->patch_retry_count + 1,
+                'last_error' => 'WATCHDOG_STALL',
+                'last_progress_at' => now(),
+            ])->save();
+
+            ExecuteExecutionTaskJob::dispatch($run->id, $task->id);
+
+            return;
+        }
+
+        $this->failRun(
+            $run,
+            $task,
+            'TASK_STALLED',
+            $worktrees,
+            $baseline,
+            'Worker tidak menunjukkan progres selama '.$minutes.' menit (sudah '.$max.' pemulihan otomatis).'
+        );
+    }
+
+    /** Kalimat pembuka yang bisa dibaca PO untuk tiap kode kegagalan. */
+    private function describeError(string $code): string
+    {
+        return match ($code) {
+            'KANBAN_BLOCKED' => 'Worker menghentikan kartu dan menyerahkan keputusan ke PO:',
+            'KANBAN_NO_CHANGES' => 'Worker menandai kartu selesai tetapi tidak mengubah file apa pun:',
+            'KANBAN_POLL_FAILED' => 'Status kartu kanban tidak dapat dipantau lagi:',
+            'TASK_STALLED' => 'Worker berhenti merespons tanpa progres:',
+            'QA_REVISION_LIMIT' => 'QA menolak setelah batas revisi habis:',
+            'EXECUTION_FAILED' => 'Eksekusi task gagal di sisi worker:',
+            default => 'Eksekusi berhenti:',
+        };
+    }
+
     private function failRun(ExecutionRun $run, ExecutionTask $task, string $code, ?WorktreeManager $worktrees = null, ?string $baseline = null, ?string $errorMessage = null): void
     {
         $task->forceFill(['status' => 'FAILED', 'last_error' => $errorMessage ?: $code])->save();
-        $run->forceFill(['status' => 'FAILED', 'error_code' => $code, 'completed_at' => now()])->save();
+        $run->forceFill([
+            'status' => 'FAILED',
+            'error_code' => $code,
+            'summary' => trim($this->describeError($code).' '.($errorMessage ?? '')),
+            'completed_at' => now(),
+        ])->save();
         try {
             Notification::patchFailed($run, $task, $errorMessage ?: $code);
         } catch (Throwable) {

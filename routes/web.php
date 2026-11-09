@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\ActorController;
-use App\Http\Controllers\AgentConfigurationController;
 use App\Http\Controllers\AiProviderController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\ChatController;
@@ -38,6 +37,10 @@ Route::middleware('auth')->group(function (): void {
         ->name('chat.messages.store');
     Route::get('/agents', [WorkspaceController::class, 'agents'])->name('agents.index');
     Route::get('/ai-providers', [AiProviderController::class, 'index'])->name('ai-providers.index');
+    // Satu model untuk semua peran agent, dipilih di halaman AI Providers.
+    // Menggantikan halaman Konfigurasi Agent per peran (dihapus 3 Nov 2026).
+    Route::post('/ai-providers/active-model', [AiProviderController::class, 'updateActiveModel'])
+        ->middleware('throttle:20,1')->name('ai-providers.active-model.update');
     Route::get('/ai-providers/{provider}/connect', [AiProviderController::class, 'connect'])->name('ai-providers.connect');
     Route::post('/ai-providers/{provider}/callback', [AiProviderController::class, 'callback'])->middleware('throttle:20,1')->name('ai-providers.callback');
     Route::post('/ai-providers/{provider}/disconnect', [AiProviderController::class, 'disconnect'])->name('ai-providers.disconnect');
@@ -51,11 +54,6 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/settings/github', [GithubSettingsController::class, 'update'])->middleware('throttle:10,1')->name('settings.github.update');
     Route::post('/settings/github/test', [GithubSettingsController::class, 'test'])->middleware('throttle:10,1')->name('settings.github.test');
     Route::post('/settings/github/disconnect', [GithubSettingsController::class, 'disconnect'])->name('settings.github.disconnect');
-    Route::get('/agents/{slug}/config', [AgentConfigurationController::class, 'edit'])->name('agents.config.edit');
-    Route::put('/agents/{slug}/config', [AgentConfigurationController::class, 'update'])->name('agents.config.update');
-    Route::get('/agents/{slug}/config/history', [AgentConfigurationController::class, 'history'])->name('agents.config.history');
-    Route::post('/agents/{slug}/config/restore/{version}', [AgentConfigurationController::class, 'restore'])->whereNumber('version')->name('agents.config.restore');
-    Route::get('/agents/{slug}/config/connectivity', [AgentConfigurationController::class, 'connectivity'])->middleware('throttle:20,1')->name('agents.config.connectivity');
     Route::get('/agents/{slug}/activity', [WorkspaceController::class, 'agentActivity'])->name('agents.activity');
     Route::get('/agents/{slug}/chat', [ChatController::class, 'profileChat'])->name('agents.chat');
     Route::post('/agents/{slug}/chat/messages', [ChatController::class, 'storeForProfile'])
@@ -90,12 +88,15 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/repair-orders/{repairOrder}/retry', [RepairOrderController::class, 'retry'])->middleware('throttle:6,1')->name('repair-orders.retry');
     Route::get('/repair-orders/{repairOrder}/executions/{run}', [RepairOrderController::class, 'showExecution'])->name('repair-orders.executions.show');
     Route::post('/repair-orders/{repairOrder}/executions/{run}/accept', [RepairOrderController::class, 'accept'])->name('repair-orders.executions.accept');
-    Route::get('/accepted', [PermissionRequestController::class, 'index'])->name('accepted.index');
+    // Halaman "Accepted" dilebur ke halaman eksekusi: izin disetujui di sana.
+    Route::get('/accepted', fn () => redirect()->route('dashboard'))->name('accepted.index');
     Route::post('/accepted/{permissionRequest}/approve', [PermissionRequestController::class, 'approve'])->name('accepted.approve');
     Route::post('/accepted/{permissionRequest}/reject', [PermissionRequestController::class, 'reject'])->name('accepted.reject');
     Route::post('/accepted/{permissionRequest}/cancel', [PermissionRequestController::class, 'cancel'])->name('accepted.cancel');
     Route::post('/projects/{project}/demo/start', [DemoController::class, 'start'])->middleware('throttle:6,1')->name('projects.demo.start');
     Route::post('/projects/{project}/demo/stop', [DemoController::class, 'stop'])->name('projects.demo.stop');
+    Route::get('/projects/{project}/demo/status', [DemoController::class, 'status'])->name('projects.demo.status');
+    Route::post('/projects/{project}/demo/rebuild-assets', [DemoController::class, 'rebuildAssets'])->middleware('throttle:6,1')->name('projects.demo.rebuild');
     Route::post('/projects/{project}/demo/request-fix', [DemoController::class, 'requestFix'])->middleware('throttle:6,1')->name('projects.demo.request-fix');
     Route::get('/projects/{project}/download', [ProjectDownloadController::class, 'download'])->name('projects.download');
     Route::get('/stories/{story}/tasks', [TaskController::class, 'index'])->name('stories.tasks.index');

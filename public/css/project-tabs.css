@@ -1,0 +1,70 @@
+/* Tab halaman detail project */
+.pj-tabs { margin-top: 4px; }
+
+.pj-tabbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 5px;
+    border-radius: 12px;
+    background: rgba(148, 163, 184, .10);
+    border: 1px solid rgba(148, 163, 184, .18);
+    margin-bottom: 16px;
+}
+
+.pj-tab {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--muted, #94a3b8);
+    font-size: .8rem;
+    font-weight: 650;
+    padding: 8px 14px;
+    border-radius: 9px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    transition: .15s ease;
+}
+
+.pj-tab:hover { color: #e2e8f0; background: rgba(148, 163, 184, .12); }
+
+.pj-tab.is-active {
+    color: #fff;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    box-shadow: 0 6px 16px rgba(99, 102, 241, .32);
+}
+
+.pj-flag {
+    font-size: .62rem;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, .4);
+    color: #cbd5e1;
+}
+
+.pj-flag.is-ok { border-color: rgba(52, 211, 153, .55); color: #6ee7b7; }
+.pj-flag.is-live { border-color: rgba(129, 140, 248, .6); color: #c7d2fe; }
+.pj-flag.is-info { border-color: rgba(56, 189, 248, .5); color: #7dd3fc; }
+
+.pj-panel { display: none; }
+.pj-panel.is-active { display: block; animation: pj-in .18s ease; }
+
+@keyframes pj-in {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: none; }
+}
+
+.pj-panel .project-detail-grid { margin-top: 0; }
+
+.demo-live {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border: 1px solid rgba(148, 163, 184, .22);
+    border-radius: 10px;
+    background: rgba(56, 189, 248, .06);
+    font-size: .8rem;
+    color: var(--muted, #cbd5e1);
+}

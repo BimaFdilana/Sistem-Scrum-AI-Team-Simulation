@@ -44,16 +44,12 @@ class PermissionRequestController extends Controller
         $run->messages()->create([
             'sender_slug' => 'po',
             'recipient_slug' => 'scrum-master',
-            'content' => 'PO menyetujui eksekusi. Agen mulai mengerjakan '.count($run->tasks).' task secara berurutan.',
+            'content' => 'PO menyetujui eksekusi. Agen mulai mengerjakan '.count($run->tasks).' task sesuai dependensi (paralel bila file berbeda).',
         ]);
 
-        // Model berurutan (keputusan Bima 2026-10-31): hanya task pertama
-        // yang di-dispatch; task berikutnya di-dispatch ReviewExecutionTaskJob
-        // setelah task sebelumnya QA-APPROVED — bukan semua sekaligus.
-        $first = $run->nextPendingTask();
-        if ($first) {
-            ExecuteExecutionTaskJob::dispatch($run->id, $first->id);
-        }
+        // Paralel terkendali: kirim semua task yang siap (dependensi beres,
+        // file tidak beririsan) sampai kuota execution.max_parallel.
+        app(\App\Support\Execution\ExecutionScheduler::class)->dispatchReady($run);
 
         return back()->with('status', 'Izin disetujui. Agen mulai bekerja.');
     }

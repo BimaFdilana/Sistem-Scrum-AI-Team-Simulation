@@ -16,7 +16,12 @@
             @php($chatUrl = $agent['slug'] === 'scrum-master' ? route('chat.index', [], false) : null)
             @php($activityUrl = route('agents.activity', ['slug' => $agent['slug']], false))
             <article class="directory-row">
-                <span class="agent-avatar avatar-{{ $agent['tone'] }}">{{ $agent['initials'] }}</span>
+                @php($avatarFile = 'avatars/'.$agent['slug'].'.svg')
+                @if (file_exists(public_path($avatarFile)))
+                    <img class="agent-avatar" src="{{ asset($avatarFile) }}" alt="" width="44" height="44" loading="lazy">
+                @else
+                    <span class="agent-avatar avatar-{{ $agent['tone'] }}">{{ $agent['initials'] }}</span>
+                @endif
                 <div class="directory-main">
                     <h2>{{ $agent['name'] }}</h2>
                     <p>{{ $agent['description'] }}</p>
@@ -34,7 +39,9 @@
                     @else
                         <span class="button button-ghost" aria-label="Agent spesialis dikoordinasikan oleh Scrum Master">Dipanggil melalui Scrum Master</span>
                     @endif
-                    <a class="button button-secondary" href="{{ route('agents.config.edit', ['slug' => $agent['slug']], false) }}">Konfigurasi Agent</a>
+                    {{-- Konfigurasi Agent per peran dihapus 3 Nov 2026: model
+                         kini dipilih sekali untuk semua agent di halaman AI Providers. --}}
+                    <a class="button button-secondary" href="{{ route('ai-providers.index') }}">Model AI</a>
                     <a class="button button-secondary" href="{{ $activityUrl }}">Log activity</a>
                 </div>
             </article>

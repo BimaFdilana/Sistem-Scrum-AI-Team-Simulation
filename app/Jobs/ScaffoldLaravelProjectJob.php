@@ -62,6 +62,8 @@ class ScaffoldLaravelProjectJob implements ShouldBeUnique, ShouldQueue
                 }
             }
 
+            \App\Support\Workspace\WorkspacePermissions::grant($root);
+
             $project->forceFill([
                 'workspace_path' => $root,
                 'stack' => 'Laravel',
@@ -69,6 +71,7 @@ class ScaffoldLaravelProjectJob implements ShouldBeUnique, ShouldQueue
                 'source_error' => null,
             ])->save();
 
+            $this->provision($project);
             $this->syncToGithub($project);
         } catch (Throwable $exception) {
             $project->forceFill([
@@ -76,6 +79,23 @@ class ScaffoldLaravelProjectJob implements ShouldBeUnique, ShouldQueue
                 'source_error' => mb_substr($exception->getMessage(), 0, 255),
             ])->save();
             throw $exception;
+        }
+    }
+
+    /**
+     * Siapkan runtime (profil + dependency + .env + migrasi). Kegagalan
+     * dicatat, tidak menggagalkan pembuatan project.
+     */
+    protected function provision(Project $project): void
+    {
+        try {
+            $profile = app(\App\Support\Projects\ProjectProfiler::class)->profile($project);
+            app(\App\Support\Projects\ProjectProvisioner::class)->provision($project, $profile);
+        } catch (\Throwable $exception) {
+            \Illuminate\Support\Facades\Log::warning('Provisioning project baru gagal', [
+                'project_id' => $project->id,
+                'error' => mb_substr($exception->getMessage(), 0, 500),
+            ]);
         }
     }
 

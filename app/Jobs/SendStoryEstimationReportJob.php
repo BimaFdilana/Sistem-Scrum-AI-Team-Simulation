@@ -17,7 +17,8 @@ class SendStoryEstimationReportJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 1;
+    /** Lock SQLite bersifat sementara: coba beberapa kali sebelum menyerah. */
+    public int $tries = 3;
 
     public int $timeout = 300;
 
@@ -40,15 +41,31 @@ class SendStoryEstimationReportJob implements ShouldQueue
         try {
             $estimator->report($run, $run->requester);
         } catch (Throwable $exception) {
-            // Keep REPORT_PENDING so the existing report retry action can recover safely —
-            // tapi kegagalan TIDAK BOLEH diam lagi (kasus Run 14: job DONE
-            // tanpa jejak apa pun). Catat penyebabnya agar diagnosis berikutnya
-            // tidak menebak-nebak.
+            $message = strtolower($exception->getMessage());
+            $retryable = str_contains($message, 'database is locked')
+                || str_contains($message, 'database table is locked')
+                || str_contains($message, 'deadlock');
+
             Log::warning('Story estimation report job failed', [
                 'run_id' => $this->runId,
+                'attempt' => $this->attempts(),
+                'retryable' => $retryable,
                 'exception' => class_basename($exception),
                 'message' => Str::limit($exception->getMessage(), 500),
             ]);
+
+            if ($retryable && $this->attempts() < $this->tries) {
+                $this->release(10);
+
+                return;
+            }
+
+            // Laporan hanyalah ringkasan; poin estimasi SUDAH tersimpan.
+            // Jangan biarkan run menggantung di REPORT_PENDING selamanya.
+            $run->forceFill([
+                'status' => 'COMPLETED',
+                'completed_at' => now(),
+            ])->save();
         }
     }
 

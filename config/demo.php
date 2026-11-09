@@ -8,4 +8,12 @@ return [
 
     // Demo berhenti otomatis setelah sekian menit (0 = tanpa batas).
     'ttl_minutes' => (int) env('DEMO_TTL_MINUTES', 60),
+
+    /*
+    | Host publik demo (subdomain yang di-proxy nginx ke port demo).
+    | Cloudflare hanya mem-proxy port 80/443, jadi demo TIDAK bisa dibuka
+    | lewat :9110 dari luar. Isi mis. https://demo.scrum-team.artitechlabs.com
+    | Kosongkan untuk kembali memakai host:port langsung.
+    */
+    'public_host' => env('DEMO_PUBLIC_HOST', ''),
 ];
