@@ -159,7 +159,7 @@ class CliProxyAgentWiringTest extends TestCase
             $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'gpt-5.6-luna']);
         });
 
-        $image = UploadedFile::fake()->image('mockup.png', 100, 100)->size(100);
+        $image = UploadedFile::fake()->createWithContent('mockup.png', base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='));
 
         $this->actingAs(User::factory()->create())
             ->post('/chat/messages', ['message' => 'Tolong review mockup ini.', 'image' => $image])
@@ -182,7 +182,7 @@ class CliProxyAgentWiringTest extends TestCase
             ['id' => 'gpt-5.6-luna', 'owned_by' => 'openai'],
         ]);
 
-        $image = UploadedFile::fake()->image('besar.png')->size(6000);
+        $image = UploadedFile::fake()->createWithContent('besar.png', base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==').str_repeat('\0', 6 * 1024 * 1024));
 
         $this->actingAs(User::factory()->create())
             ->post('/chat/messages', ['message' => 'Lihat ini.', 'image' => $image])

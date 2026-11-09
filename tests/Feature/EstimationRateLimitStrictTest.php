@@ -3,18 +3,24 @@
 namespace Tests\Feature;
 
 use App\Exceptions\AiUnavailableException;
+use App\Exceptions\ModelNotChosenException;
+use App\Jobs\SendStoryEstimationReportJob;
 use App\Models\Actor;
 use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\Story;
-use App\Models\StoryEstimationRun;
 use App\Models\User;
+use App\Services\AgentConfiguration;
+use App\Services\AgentProfileClient;
 use App\Services\CliProxyApiClient;
+use App\Services\HermesClient;
 use App\Services\StoryEstimationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Mockery\MockInterface;
 use ReflectionMethod;
 use Tests\TestCase;
 
@@ -134,14 +140,14 @@ class EstimationRateLimitStrictTest extends TestCase
         $this->assertSame('PROVIDER_OVERLOADED', $method->invoke($service, new AiUnavailableException('UPSTREAM_OVERLOADED'), $run));
         $this->assertSame('PROVIDER_REQUEST_FAILED', $method->invoke($service, new AiUnavailableException('AUTH_FAILED'), $run));
         $this->assertSame('MODEL_PROBLEMATIC', $method->invoke($service, new AiUnavailableException('MODEL_PROBLEMATIC'), $run));
-        $this->assertSame('MODEL_NOT_CHOSEN', $method->invoke($service, new \App\Exceptions\ModelNotChosenException('belum dipilih'), $run));
+        $this->assertSame('MODEL_NOT_CHOSEN', $method->invoke($service, new ModelNotChosenException('belum dipilih'), $run));
     }
 
     public function test_failed_send_message_carries_attempted_model(): void
     {
         // sendMessage kini me-resolve model QA lewat StrictModelResolver:
         // mock snapshot terverifikasi + katalog gateway, bukan resolveModel.
-        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
+        $this->mock(AgentConfiguration::class, function (MockInterface $mock) {
             $mock->shouldReceive('current')->with('qa-engineer')->andReturn(['status' => 'verified', 'model' => 'claude-opus-4-6']);
         });
         $cliproxy = \Mockery::mock(CliProxyApiClient::class);
@@ -152,7 +158,7 @@ class EstimationRateLimitStrictTest extends TestCase
         $this->app->instance(CliProxyApiClient::class, $cliproxy);
 
         try {
-            app(\App\Services\AgentProfileClient::class)->sendMessage('qa-engineer', 'halo', 'conv-1');
+            app(AgentProfileClient::class)->sendMessage('qa-engineer', 'halo', 'conv-1');
             $this->fail('Seharusnya melempar AiUnavailableException.');
         } catch (AiUnavailableException $e) {
             $this->assertSame('RATE_LIMITED', $e->errorCode);
@@ -172,9 +178,9 @@ class EstimationRateLimitStrictTest extends TestCase
             'scope_status' => 'NEEDS_REFINEMENT', 'revision' => 1,
         ]);
 
-        $sm = \Mockery::mock(\App\Services\HermesClient::class);
+        $sm = \Mockery::mock(HermesClient::class);
         $sm->shouldReceive('sendMessage')->once()->andThrow(new AiUnavailableException('RATE_LIMITED'));
-        $this->app->instance(\App\Services\HermesClient::class, $sm);
+        $this->app->instance(HermesClient::class, $sm);
 
         [$run] = app(StoryEstimationService::class)->claimRun($story, $owner);
         $run->forceFill(['status' => 'REPORT_PENDING', 'consensus_points' => 3, 'consensus_method' => 'deadlock_max'])->save();
@@ -209,13 +215,13 @@ class EstimationRateLimitStrictTest extends TestCase
             ]);
         }
 
-        \Illuminate\Support\Facades\Log::spy();
+        Log::spy();
         $result = app(StoryEstimationService::class)->report($run->fresh(), $owner);
 
         // Perilaku dipertahankan: tetap REPORT_PENDING agar retry bisa pulih.
         $this->assertSame('REPORT_PENDING', $result->status);
         // Tapi kegagalan tidak boleh diam lagi (regresi Run 14).
-        \Illuminate\Support\Facades\Log::shouldHaveReceived('warning')->withArgs(function ($message, $context) use ($run) {
+        Log::shouldHaveReceived('warning')->withArgs(function ($message, $context) use ($run) {
             return $message === 'Story estimation report failed'
                 && ($context['run_id'] ?? null) === $run->id
                 && ($context['diagnostic'] ?? null) === 'requesting_summary'
@@ -223,7 +229,7 @@ class EstimationRateLimitStrictTest extends TestCase
         });
     }
 
-    public function test_report_job_failure_is_logged_not_silent(): void
+    public function test_report_job_failure_is_logged_and_run_is_completed(): void
     {
         $owner = User::factory()->create();
         $project = Project::query()->create(['name' => 'Report Job Workspace', 'project_type' => 'NEW_PROJECT', 'stack' => 'Laravel', 'status' => 'SETUP_REQUIRED']);
@@ -239,13 +245,13 @@ class EstimationRateLimitStrictTest extends TestCase
 
         $service = \Mockery::mock(StoryEstimationService::class);
         $service->shouldReceive('report')->once()->andThrow(new \RuntimeException('boom'));
-        \Illuminate\Support\Facades\Log::spy();
+        Log::spy();
 
-        (new \App\Jobs\SendStoryEstimationReportJob($run->id))->handle($service);
+        (new SendStoryEstimationReportJob($run->id))->handle($service);
 
-        // Perilaku dipertahankan: job menelan error agar run tetap REPORT_PENDING.
-        $this->assertSame('REPORT_PENDING', $run->fresh()->status);
-        \Illuminate\Support\Facades\Log::shouldHaveReceived('warning')->withArgs(function ($message, $context) use ($run) {
+        // Laporan hanyalah ringkasan: gagal dicatat di log, run ditutup COMPLETED agar tidak menggantung.
+        $this->assertSame('COMPLETED', $run->fresh()->status);
+        Log::shouldHaveReceived('warning')->withArgs(function ($message, $context) use ($run) {
             return $message === 'Story estimation report job failed' && ($context['run_id'] ?? null) === $run->id;
         });
     }

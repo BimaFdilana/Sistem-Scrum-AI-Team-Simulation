@@ -80,11 +80,10 @@ class StoryEstimationDisclosureTest extends TestCase
         $this->assertSame(5, $run->consensus_points);
     }
 
-    public function test_qa_rationale_beyond_qa_limit_maps_to_length_rejection(): void
+    public function test_long_qa_rationale_is_accepted(): void
     {
-        // Batas baru QA bukan tanpa batas: di atas 3000 karakter,
-        // kegagalan harus berkode LENGTH_REJECTION — bukan lagi
-        // SAFETY_REJECTION yang dulu mengaburkan penyebabnya.
+        // Panjang rationale QA tidak lagi ditolak: skenario uji panjang adalah
+        // hal wajar dan ringkasan dilakukan SM sesudahnya.
         [$story, $owner] = $this->story();
         $tooLong = str_repeat('Skenario uji. ', 250); // ~3750 karakter
 
@@ -99,8 +98,8 @@ class StoryEstimationDisclosureTest extends TestCase
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
         $qaRun = $run->agentRuns()->where('profile_slug', 'qa-engineer')->firstOrFail();
 
-        $this->assertSame('FAILED', $qaRun->status);
-        $this->assertSame('LENGTH_REJECTION', $qaRun->error_code);
+        $this->assertSame('COMPLETED', $qaRun->status);
+        $this->assertNull($qaRun->error_code);
     }
 
     public function test_empty_rationale_maps_to_empty_response(): void

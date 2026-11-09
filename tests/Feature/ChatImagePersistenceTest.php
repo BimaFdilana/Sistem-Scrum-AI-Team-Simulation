@@ -2,9 +2,9 @@
 
 namespace Tests\Feature;
 
-use App\Models\ChatConversation;
 use App\Models\ChatMessage;
 use App\Models\User;
+use App\Services\HermesClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -19,10 +19,10 @@ class ChatImagePersistenceTest extends TestCase
         Storage::fake('public');
 
         $user = User::factory()->create();
-        $file = UploadedFile::fake()->image('diagram.png', 100, 100);
+        $file = UploadedFile::fake()->createWithContent('diagram.png', base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='));
 
         // Mock HermesClient agar tidak memanggil AI sungguhan
-        $this->mock(\App\Services\HermesClient::class, function ($mock) {
+        $this->mock(HermesClient::class, function ($mock) {
             $mock->shouldReceive('sendMessage')->andReturn('Baik, saya lihat gambarnya.');
         });
 
@@ -47,7 +47,7 @@ class ChatImagePersistenceTest extends TestCase
     {
         $user = User::factory()->create();
 
-        $this->mock(\App\Services\HermesClient::class, function ($mock) {
+        $this->mock(HermesClient::class, function ($mock) {
             $mock->shouldReceive('sendMessage')->andReturn('Halo!');
         });
 

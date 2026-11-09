@@ -31,6 +31,8 @@
         <env name="SESSION_DRIVER" value="array"/>
         <env name="CLIPROXY_AGENTS_ENABLED" value="false"/>
         <env name="OPENCODE_ENABLED" value="false"/>
+        <env name="CLIPROXY_API_KEY" value="test-key" force="true"/>
+        <env name="CLIPROXY_BASE_URL" value="http://127.0.0.1:8317" force="true"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>

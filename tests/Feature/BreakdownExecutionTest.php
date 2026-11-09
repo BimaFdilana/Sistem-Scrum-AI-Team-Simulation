@@ -4,9 +4,11 @@ namespace Tests\Feature;
 
 use App\Jobs\BreakdownExecutionJob;
 use App\Models\ExecutionRun;
+use App\Models\PermissionRequest;
 use App\Models\Project;
 use App\Models\Story;
 use App\Models\User;
+use App\Services\AgentConfiguration;
 use App\Services\ChatDisclosurePolicy;
 use App\Services\CliProxyApiClient;
 use App\Services\HermesClient;
@@ -126,8 +128,8 @@ class BreakdownExecutionTest extends TestCase
     {
         $run = $this->makeRun();
         $fake = Mockery::mock(HermesClient::class);
-        // Satu percobaan awal + satu kesempatan perbaikan; keduanya menolak.
-        $fake->shouldReceive('sendMessage')->twice()->andReturn(ChatDisclosurePolicy::SAFE_RESPONSE);
+        // Satu percobaan awal + dua kesempatan perbaikan; ketiganya menolak.
+        $fake->shouldReceive('sendMessage')->times(3)->andReturn(ChatDisclosurePolicy::SAFE_RESPONSE);
 
         try {
             (new BreakdownExecutionJob($run->id))->handle($fake, app(ChatDisclosurePolicy::class));
@@ -147,9 +149,9 @@ class BreakdownExecutionTest extends TestCase
         $captured = null;
         // sendMessage SM kini ketat: mock snapshot terverifikasi +
         // katalog gateway, bukan resolveModel.
-        $config = Mockery::mock(\App\Services\AgentConfiguration::class);
+        $config = Mockery::mock(AgentConfiguration::class);
         $config->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'gemini-test']);
-        $this->app->instance(\App\Services\AgentConfiguration::class, $config);
+        $this->app->instance(AgentConfiguration::class, $config);
         $cliproxy = Mockery::mock(CliProxyApiClient::class);
         $cliproxy->shouldReceive('models')->andReturn([['id' => 'gemini-test', 'owned_by' => 'google']]);
         $cliproxy->shouldReceive('chatResilient')->withArgs(function ($model, $systemPrompt, $message) use (&$captured) {
@@ -212,7 +214,7 @@ class BreakdownExecutionTest extends TestCase
         $this->assertStringContainsString('resources/views/modul_admin/transaksi/: index.blade.php', $prompts[0]);
         $this->assertStringContainsString('JAWABAN SEBELUMNYA DITOLAK', $prompts[1]);
 
-        $payload = \App\Models\PermissionRequest::query()->latest('id')->firstOrFail()->payload;
+        $payload = PermissionRequest::query()->latest('id')->firstOrFail()->payload;
         $this->assertSame([
             'app/Http/Controllers/TransaksiController.php',
             'resources/views/modul_admin/transaksi/index.blade.php',
@@ -232,7 +234,7 @@ class BreakdownExecutionTest extends TestCase
         ]]]);
 
         $fake = Mockery::mock(HermesClient::class);
-        $fake->shouldReceive('sendMessage')->twice()->andReturn($bad, $bad);
+        $fake->shouldReceive('sendMessage')->times(3)->andReturn($bad, $bad, $bad);
 
         try {
             (new BreakdownExecutionJob($run->id))->handle($fake, app(ChatDisclosurePolicy::class));

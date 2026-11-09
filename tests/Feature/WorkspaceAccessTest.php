@@ -58,7 +58,7 @@ class WorkspaceAccessTest extends TestCase
             'HTTP_X_FORWARDED_PROTO' => 'https',
         ])->get('/login')
             ->assertOk()
-            ->assertSee('href="https://localhost:8000/css/workspace.css"', false)
+            ->assertSee('href="https://localhost:8000/css/workspace.css?v=', false)
             ->assertSee('action="https://localhost:8000/login"', false);
     }
 
