@@ -18,6 +18,7 @@
     var errors = 0;
     var timer = null;
     var busy = {};
+    var lastSignature = '';
 
     var pill = el('button', 'dock-pill');
     pill.type = 'button';
@@ -225,6 +226,10 @@
             return res.json();
         }).then(function (data) {
             errors = 0;
+            // Render ulang hanya bila data berubah: menjaga fokus, posisi gulir, dan klik yang sedang berjalan.
+            var signature = JSON.stringify(data);
+            if (signature === lastSignature) { return; }
+            lastSignature = signature;
             detectChanges(data.runs);
             runs = data.runs;
             render();
