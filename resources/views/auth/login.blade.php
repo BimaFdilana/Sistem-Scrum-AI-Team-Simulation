@@ -15,7 +15,7 @@
             } catch (e) {}
         })();
     </script>
-    <link rel="stylesheet" href="{{ asset('css/workspace.css') }}?v=2">
+    <link rel="stylesheet" href="{{ asset('css/workspace.css') }}?v={{ filemtime(public_path('css/workspace.css')) }}">
 </head>
 <body class="login-body">
     <main class="login-layout">

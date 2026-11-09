@@ -17,9 +17,9 @@
         })();
     </script>
     <link rel="stylesheet" href="{{ asset('css/workspace.css') }}?v={{ filemtime(public_path('css/workspace.css')) }}">
-    <link rel="stylesheet" href="{{ asset('css/dialog.css') }}">
+    <link rel="stylesheet" href="{{ asset('css/dialog.css') }}?v={{ filemtime(public_path('css/dialog.css')) }}">
     @if (in_array(($activePage ?? ''), ['agents', 'agent-activity', 'ai-providers'], true))
-        <link rel="stylesheet" href="/css/agents.css">
+        <link rel="stylesheet" href="{{ asset('css/agents.css') }}?v={{ filemtime(public_path('css/agents.css')) }}">
     @endif
     @if (($activePage ?? '') === 'ai-providers')
         <link rel="stylesheet" href="{{ asset('css/ai-providers.css') }}?v={{ filemtime(public_path('css/ai-providers.css')) }}">
@@ -34,21 +34,21 @@
         <link rel="stylesheet" href="{{ asset('css/execution.css') }}?v={{ filemtime(public_path('css/execution.css')) }}">
     @endif
     @if (in_array(($activePage ?? ''), ['chat', 'agent-chat', 'discussion'], true))
-        <link rel="stylesheet" href="{{ asset('css/chat.css') }}?v=3">
+        <link rel="stylesheet" href="{{ asset('css/chat.css') }}?v={{ filemtime(public_path('css/chat.css')) }}">
     @endif
     @if (($activePage ?? '') === 'discussion')
-        <link rel="stylesheet" href="{{ asset('css/discussion.css') }}">
+        <link rel="stylesheet" href="{{ asset('css/discussion.css') }}?v={{ filemtime(public_path('css/discussion.css')) }}">
     @endif
     @if (route('dashboard') === url()->current())
         <link rel="stylesheet" href="{{ asset('css/dashboard.css') }}?v={{ filemtime(public_path('css/dashboard.css')) }}">
         <link rel="stylesheet" href="{{ asset('css/backlog-board.css') }}?v={{ filemtime(public_path('css/backlog-board.css')) }}">
     @endif
     @if (in_array(($activePage ?? ''), ['backlog', 'sprints'], true))
-        <link rel="stylesheet" href="{{ asset('css/sprints.css') }}">
+        <link rel="stylesheet" href="{{ asset('css/sprints.css') }}?v={{ filemtime(public_path('css/sprints.css')) }}">
         <link rel="stylesheet" href="{{ asset('css/backlog-board.css') }}?v={{ filemtime(public_path('css/backlog-board.css')) }}">
     @endif
     @if (($activePage ?? '') === 'actors')
-        <link rel="stylesheet" href="{{ asset('css/actors.css') }}">
+        <link rel="stylesheet" href="{{ asset('css/actors.css') }}?v={{ filemtime(public_path('css/actors.css')) }}">
     @endif
 </head>
 <body class="workspace-body">
@@ -114,7 +114,7 @@
 
     @include('components.confirm-dialog')
     @include('components.activity-dock')
-    <script src="{{ asset('js/confirm-dialog.js') }}"></script>
+    <script src="{{ asset('js/confirm-dialog.js') }}?v={{ filemtime(public_path('js/confirm-dialog.js')) }}"></script>
     <script>
         // Toggle tema gelap/terang — preferensi disimpan di localStorage.
         (function () {

@@ -64,7 +64,7 @@
         </form>
     </section>
 
-    <script src="{{ asset('js/chat-markdown.js') }}?v=1"></script>
+    <script src="{{ asset('js/chat-markdown.js') }}?v={{ filemtime(public_path('js/chat-markdown.js')) }}"></script>
     <script>
         (() => {
             // Balasan AI lama (dari server) diformat saat halaman dimuat:
