@@ -6,6 +6,7 @@ use App\Models\ExecutionRun;
 use App\Models\ExecutionTask;
 use App\Services\AgentProfileClient;
 use App\Support\Execution\BatchQa;
+use App\Support\Execution\FindingDialogue;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -36,7 +37,9 @@ class BatchReviewExecutionJob implements ShouldQueue
         AgentProfileClient $agents,
         WorktreeManager $worktrees,
         BatchQa $batchQa,
+        ?FindingDialogue $dialogue = null,
     ): void {
+        $dialogue ??= app(FindingDialogue::class);
         $run = ExecutionRun::query()->find($this->runId);
         if (! $run || $run->status !== 'QA_REVIEW') {
             return;
@@ -84,6 +87,7 @@ class BatchReviewExecutionJob implements ShouldQueue
             'Kembalikan JSON tepat: {"approved":true,"feedback":"...","criteria":[{"criterion":"teks kriteria","met":true,"evidence":"file/perilaku yang membuktikan"}]} bila SEMUA acceptance criteria story terpenuhi (satu entri criteria per kriteria, semuanya met:true dengan bukti), atau {"approved":false,"findings":[{"file":"path","instruction":"perbaikan konkret","verify":"cara memeriksa"}]} bila ada yang harus diperbaiki.',
             'Acceptance criteria story (SUMBER KEBENARAN penilaian):',
             $run->subjectCriteria(),
+            $dialogue->open($run)->isEmpty() ? '' : "Temuan putaran sebelumnya yang BELUM ditutup. Periksa ulang HANYA ini (dan regresi); tulis id yang sudah beres di \"resolved\":[id,...] pada JSON.\n".$dialogue->feedbackFor($dialogue->open($run)),
             'Aturan: nilai hanya perubahan yang ada di diff/file; jangan menuntut elemen di luar diff; setiap temuan WAJIB menyebut file yang benar-benar berubah; instruksi harus spesifik dan bisa langsung dikerjakan; jangan mengulang temuan yang sama pada putaran berikutnya.',
             'Kriteria seluruh task:',
             $criteria,
@@ -126,6 +130,7 @@ class BatchReviewExecutionJob implements ShouldQueue
         }
 
         if ($review['approved']) {
+            $dialogue->resolveAllOpen($run);
             foreach ($tasks as $task) {
                 $task->forceFill(['status' => 'APPROVED', 'qa_feedback' => null])->save();
             }
@@ -148,39 +153,46 @@ class BatchReviewExecutionJob implements ShouldQueue
             return;
         }
 
+        // QA yang memeriksa ulang boleh menutup temuan lama dan menambah temuan baru.
+        $dialogue->resolve($run, $review['resolved']);
+        $nextRound = (int) $run->qa_rounds + 1;
+        $records = $dialogue->record($run, $findings, $nextRound, $batchQa, $tasks);
+
         // Review final: perbaikan sudah dijatah habis. Jangan setujui diam-diam
-        // dan jangan perbaiki tanpa batas: serahkan ke PO beserta temuan QA.
-        if ((int) $run->qa_rounds >= (int) config('execution.qa_max_repair_rounds', 1)) {
-            $list = collect($findings)->map(fn (array $f) => '- '.$f['file'].': '.$f['instruction'])->implode("\n");
+        // dan jangan perbaiki tanpa batas: serahkan ke PO beserta argumen kedua pihak.
+        if ((int) $run->qa_rounds >= (int) config('execution.qa_max_repair_rounds', 3)) {
+            $summary = $dialogue->summaryForPo($run);
             $run->messages()->create([
                 'sender_slug' => 'qa-engineer',
                 'recipient_slug' => 'product-owner',
-                'content' => 'QA masih menolak setelah '.(int) $run->qa_rounds." putaran perbaikan. Temuan yang belum selesai:\n".$list,
+                'content' => 'QA masih menolak setelah '.(int) $run->qa_rounds." putaran perbaikan. Temuan terbuka dan argumen kedua pihak:\n".$summary,
                 'metadata' => ['batch_qa' => true, 'approved' => false, 'final' => true],
             ]);
-            $this->handOver($run, 'QA_REJECTED_AFTER_REPAIR', 'QA masih menolak setelah '.(int) $run->qa_rounds.' putaran perbaikan; task tidak disetujui otomatis. Temuan: '.Str::limit(str_replace("\n", ' ', $list), 500));
+            $this->handOver($run, 'QA_REJECTED_AFTER_REPAIR', 'QA masih menolak setelah '.(int) $run->qa_rounds.' putaran perbaikan; task tidak disetujui otomatis. Temuan: '.Str::limit(str_replace("\n", ' ', $summary), 500));
 
             return;
         }
 
-        // Petakan temuan ke task pemilik file (server yang menentukan role).
-        $byRole = [];
-        foreach ($findings as $finding) {
-            $role = $batchQa->roleForFile($finding['file']);
-            $byRole[$role][] = $finding;
+        $run->forceFill(['qa_rounds' => $nextRound])->save();
+
+        // Developer menjawab tiap temuan; SM menengahi yang diperdebatkan.
+        $dialogue->negotiate($run, $records, $agents);
+        $open = $dialogue->open($run);
+
+        if ($open->isEmpty()) {
+            // Penengah SM memenangkan developer atas semua temuan baru dan tidak ada
+            // temuan lama yang tersisa: jejaknya ada di pesan penengah dan tabel temuan.
+            $batchQa->finalize($run, 'Semua temuan QA ditutup oleh penengah SM (developer dinyatakan benar); lihat daftar temuan.');
+
+            return;
         }
 
-        $run->forceFill(['qa_rounds' => (int) $run->qa_rounds + 1])->save();
-
-        foreach ($byRole as $role => $items) {
-            $feedback = collect($items)
-                ->map(fn (array $f) => '- '.$f['file'].': '.$f['instruction'].($f['verify'] !== '' ? ' (cek: '.$f['verify'].')' : ''))
-                ->implode("\n");
-
+        foreach ($open->groupBy('assignee') as $role => $items) {
+            $feedback = $dialogue->feedbackFor($items);
             $target = $tasks->firstWhere('assignee', $role) ?? $tasks->first();
             $target->forceFill([
                 'status' => 'REVISION',
-                'qa_feedback' => "Perbaikan dari QA (putaran final):\n".$feedback,
+                'qa_feedback' => 'Perbaikan dari QA (putaran '.(int) $run->qa_rounds."):\n".$feedback,
                 'revision_count' => (int) $target->revision_count + 1,
             ])->save();
 
@@ -188,7 +200,7 @@ class BatchReviewExecutionJob implements ShouldQueue
                 'execution_task_id' => $target->id,
                 'sender_slug' => 'qa-engineer',
                 'recipient_slug' => $role,
-                'content' => 'QA meminta perbaikan pada '.count($items).' file untuk task "'.$target->title.'": '.$feedback,
+                'content' => 'QA meminta perbaikan pada '.$items->count().' temuan untuk task "'.$target->title.'": '.$feedback,
                 'metadata' => ['batch_qa' => true, 'approved' => false, 'round' => (int) $run->qa_rounds],
             ]);
         }
@@ -196,7 +208,7 @@ class BatchReviewExecutionJob implements ShouldQueue
         // Task lain tetap menunggu keputusan akhir.
         $run->forceFill(['status' => 'EXECUTING', 'qa_started_at' => null])->save();
 
-        foreach ($byRole as $role => $_items) {
+        foreach ($open->groupBy('assignee') as $role => $_items) {
             $target = $tasks->firstWhere('assignee', $role) ?? $tasks->first();
             ExecuteExecutionTaskJob::dispatch($run->id, $target->id);
         }
@@ -220,6 +232,8 @@ class BatchReviewExecutionJob implements ShouldQueue
                 continue;
             }
             $findings[] = [
+                'line' => isset($item['line']) && is_numeric($item['line']) ? (int) $item['line'] : null,
+                'severity' => is_string($item['severity'] ?? null) ? $item['severity'] : null,
                 'file' => ltrim((string) $item['file'], '/'),
                 'instruction' => Str::limit((string) $item['instruction'], 400),
                 'verify' => Str::limit((string) ($item['verify'] ?? ''), 200),
@@ -251,6 +265,7 @@ class BatchReviewExecutionJob implements ShouldQueue
             'approved' => $approved,
             'feedback' => Str::limit((string) ($data['feedback'] ?? ''), 600),
             'findings' => $findings,
+            'resolved' => array_values(array_filter(array_map('intval', (array) ($data['resolved'] ?? [])), fn (int $id) => $id > 0)),
         ];
     }
 

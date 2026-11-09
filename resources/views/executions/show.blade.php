@@ -149,6 +149,24 @@
     <p class="discussion-banner discussion-banner--danger"><strong>Eksekusi gagal.</strong> {{ $run->error_code }}</p>
 @endif
 
+@if ($run->findings->isNotEmpty())
+    <section class="exec-panel" aria-label="Temuan QA">
+        <h3>Temuan QA — {{ $run->findings->where('status', 'OPEN')->count() }} terbuka dari {{ $run->findings->count() }}</h3>
+        <ul class="exec-permission-list">
+            @foreach ($run->findings as $finding)
+                <li>
+                    <strong>{{ $finding->file }}{{ $finding->line ? ':'.$finding->line : '' }}</strong>
+                    <span class="exec-chip {{ $finding->status === 'OPEN' ? 'exec-chip--warn' : 'exec-chip--ok' }}">{{ match ($finding->status) { 'OPEN' => 'terbuka', 'RESOLVED' => 'selesai', default => 'ditutup SM' } }}</span>
+                    <span class="exec-chip">{{ $finding->severity }}</span>
+                    <div>QA: {{ $finding->issue }}</div>
+                    @if ($finding->dev_reason)<div>Developer ({{ $finding->dev_stance === 'disagree' ? 'tidak setuju' : 'setuju' }}): {{ $finding->dev_reason }}</div>@endif
+                    @if ($finding->sm_reason)<div>SM ({{ $finding->sm_winner === 'developer' ? 'developer benar' : 'QA benar' }}): {{ $finding->sm_reason }}</div>@endif
+                </li>
+            @endforeach
+        </ul>
+    </section>
+@endif
+
 <div class="exec-grid">
     <section class="exec-panel" aria-label="Task eksekusi">
         <h3>Task dari Scrum Master — {{ $total }}</h3>

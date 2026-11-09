@@ -20,6 +20,12 @@ class BatchQaHonestyTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['execution.qa_max_repair_rounds' => 1]);
+    }
+
     private function makeRun(int $qaRounds = 0): ExecutionRun
     {
         $dir = storage_path('framework/testing/qa-'.uniqid());

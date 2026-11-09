@@ -37,5 +37,5 @@ return [
     'qa_mode' => env('EXECUTION_QA_MODE', 'per_task'),
 
     /* Batas putaran perbaikan setelah review batch — ditegakkan di kode. */
-    'qa_max_repair_rounds' => (int) env('EXECUTION_QA_MAX_REPAIR_ROUNDS', 1),
+    'qa_max_repair_rounds' => (int) env('EXECUTION_QA_MAX_REPAIR_ROUNDS', 3),
 ];

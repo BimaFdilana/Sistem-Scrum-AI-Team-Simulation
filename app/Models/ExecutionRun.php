@@ -92,6 +92,11 @@ class ExecutionRun extends Model
         return $this->orderedTasks()->where('status', 'PENDING')->first();
     }
 
+    public function findings(): HasMany
+    {
+        return $this->hasMany(ExecutionFinding::class)->orderBy('id');
+    }
+
     public function messages(): HasMany
     {
         return $this->hasMany(ExecutionMessage::class);
