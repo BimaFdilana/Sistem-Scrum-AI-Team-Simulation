@@ -9,7 +9,7 @@ class DemoServer extends Model
 {
     protected $fillable = [
         'project_id', 'port', 'pid', 'status', 'started_at', 'expires_at', 'worktree_path',
-        'health_status', 'health_http_status', 'health_error', 'health_checked_at',
+        'health_status', 'health_http_status', 'health_error', 'health_checked_at', 'credentials',
     ];
 
     protected function casts(): array
@@ -21,6 +21,7 @@ class DemoServer extends Model
             'expires_at' => 'datetime',
             'health_http_status' => 'integer',
             'health_checked_at' => 'datetime',
+            'credentials' => 'encrypted:array',
         ];
     }
 

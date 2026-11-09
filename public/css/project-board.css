@@ -78,3 +78,14 @@
     .bk-sprint-body{padding:2px 10px 14px}
 }
 @media (prefers-reduced-motion:reduce){.bk-chevron,.bk-open::after{transition:none}}
+.bk-demo-accounts{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.bk-demo-accounts h3{margin:0 0 4px;font-size:12px}
+.bk-pass{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 6px}
+.bk-pass input{flex:1;min-width:160px;padding:9px 11px;border:1px solid var(--line-strong);border-radius:8px;background:var(--input-bg);color:var(--text);font:inherit;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;letter-spacing:.5px}
+.bk-account-list{display:grid;gap:6px;margin:10px 0 0;padding:0;list-style:none}
+.bk-account-list li{display:grid;gap:2px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.bk-account-list code{color:var(--text);font-size:12px;overflow-wrap:anywhere}
+.bk-account-list span{color:var(--muted);font-size:11px;overflow-wrap:anywhere}
+.bk-account-list strong{color:var(--accent-strong);font-weight:600}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+

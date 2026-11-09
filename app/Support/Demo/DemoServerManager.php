@@ -88,6 +88,9 @@ class DemoServerManager
         // Env proses MENANG atas .env karena Dotenv bersifat immutable.
         $demoEnv = $this->demoEnvironment($projectRoot, $project, $log);
 
+        // Akun masuk demo: kata sandi acak untuk akun di database demo (bukan database project).
+        $credentials = app(DemoAccounts::class)->provision((string) ($demoEnv['DB_DATABASE'] ?? ''));
+
         // Aset frontend: tanpa manifest Vite, halaman ber-@vite (login, dsb.)
         // melempar 500 "Vite manifest not found". Bangun bila memungkinkan,
         // dan bila gagal sediakan manifest stub agar halaman tetap terbuka.
@@ -139,6 +142,7 @@ class DemoServerManager
             'started_at' => now(),
             'expires_at' => now()->addMinutes((int) config('demo.ttl_minutes', 60)),
             'worktree_path' => $worktreePath,
+            'credentials' => $credentials,
         ]);
     }
 

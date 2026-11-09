@@ -29,6 +29,33 @@
         @if ($demo && $demoUrl)
             <p>Demo aktif di <a href="{{ $demoUrl }}" target="_blank" rel="noopener">{{ $demoUrl }}</a> · berhenti otomatis {{ $demo->expires_at?->format('H:i') }}.</p>
             <form method="POST" action="{{ route('projects.demo.stop', $project) }}">@csrf<button class="button button-ghost" type="submit">Hentikan demo</button></form>
+
+            @php($demoAccounts = $demo->credentials['accounts'] ?? [])
+            @if ($demoAccounts !== [])
+                <div class="bk-demo-accounts" aria-label="Akun masuk demo">
+                    <h3>Akun untuk masuk ke demo</h3>
+                    <p class="field-help">Kata sandi acak ini dibuat saat demo dinyalakan dan berlaku untuk semua akun di bawah. Hanya berlaku di database demo, bukan di project Anda.</p>
+                    <div class="bk-pass">
+                        <label for="demo-password" class="sr-only">Kata sandi demo</label>
+                        <input id="demo-password" type="password" readonly value="{{ $demo->credentials['password'] }}" autocomplete="off">
+                        <button class="button button-ghost" type="button" data-demo-pass-toggle aria-controls="demo-password">Tampilkan</button>
+                        <button class="button button-ghost" type="button" data-demo-pass-copy>Salin</button>
+                    </div>
+                    <p class="field-help" data-demo-pass-note role="status" hidden></p>
+                    <ul class="bk-account-list">
+                        @foreach ($demoAccounts as $account)
+                            <li>
+                                <code>{{ $account['email'] }}</code>
+                                <span>{{ $account['name'] ?: 'Tanpa nama' }}@if (filled($account['role'] ?? null)) · <strong>{{ $account['role'] }}</strong>@endif</span>
+                            </li>
+                        @endforeach
+                    </ul>
+                </div>
+            @elseif ($demo->credentials === null)
+                <p class="field-help">Akun masuk dibuat saat demo dinyalakan. Demo ini dinyalakan sebelum fitur akun ada: hentikan lalu jalankan ulang demo untuk menampilkan akun dan kata sandinya.</p>
+            @else
+                <p class="field-help">Tidak ada akun yang bisa ditampilkan: database demo belum punya tabel pengguna dengan email dan password, atau seeder project belum mengisinya.</p>
+            @endif
         @else
             <p>Jalankan project di server demo sementara (port unik per project).</p>
             <form method="POST" action="{{ route('projects.demo.start', $project) }}">@csrf<button class="button button-primary" type="submit">Jalankan demo</button></form>
@@ -77,6 +104,34 @@
         }
         poll();
         setInterval(poll, 8000);
+    })();
+</script>
+@endonce
+
+@once
+<script>
+    // Kata sandi demo: tampilkan/sembunyikan dan salin.
+    (function () {
+        var input = document.getElementById('demo-password');
+        if (!input) return;
+        var note = document.querySelector('[data-demo-pass-note]');
+        var say = function (text) { if (note) { note.textContent = text; note.hidden = false; } };
+        document.querySelector('[data-demo-pass-toggle]').addEventListener('click', function (event) {
+            var show = input.type === 'password';
+            input.type = show ? 'text' : 'password';
+            event.currentTarget.textContent = show ? 'Sembunyikan' : 'Tampilkan';
+        });
+        document.querySelector('[data-demo-pass-copy]').addEventListener('click', function () {
+            var done = function () { say('Kata sandi disalin.'); };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(input.value).then(done, function () { say('Gagal menyalin; tampilkan lalu salin manual.'); });
+            } else {
+                var previous = input.type;
+                input.type = 'text'; input.select();
+                try { document.execCommand('copy'); done(); } catch (e) { say('Gagal menyalin; tampilkan lalu salin manual.'); }
+                input.type = previous;
+            }
+        });
     })();
 </script>
 @endonce
