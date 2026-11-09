@@ -3,8 +3,8 @@
 namespace App\Support\Execution;
 
 use App\Models\Project;
+use App\Support\Workspace\WorktreeManager;
 use RuntimeException;
-use Symfony\Component\Process\Process;
 
 /**
  * Pekerjaan langsung di baseline: tanpa worktree, tanpa merge.
@@ -12,10 +12,14 @@ use Symfony\Component\Process\Process;
  * Dipakai mode `direct`. Jaring pengamannya adalah commit checkpoint per task:
  * sebelum task mulai dicatat HEAD, dan bila task gagal total repo dikembalikan
  * ke commit itu. Jadi tidak ada file setengah jadi yang tertinggal.
+ *
+ * Sengaja TIDAK ada rollback `reset --hard` / `clean -fd` di baseline utama:
+ * perintah itu bisa menghapus pekerjaan yang belum di-commit. Pemulihan
+ * dilakukan manual dari commit checkpoint, bukan otomatis.
  */
 class DirectWorkspace
 {
-    public function __construct(private readonly \App\Support\Workspace\WorktreeManager $git) {}
+    public function __construct(private readonly WorktreeManager $git) {}
 
     /** Pastikan baseline bersih; kalau tidak, jangan menimpa pekerjaan siapa pun. */
     public function assertClean(Project $project): void
@@ -43,19 +47,6 @@ class DirectWorkspace
         $this->git->commit($path, $message);
 
         return $this->git->head($path);
-    }
-
-    /** Kembalikan baseline ke commit tertentu (task gagal). */
-    public function rollback(Project $project, string $commit): void
-    {
-        $path = $this->path($project);
-        $this->git->resetHard($path, $commit);
-
-        // Buang file baru yang tidak dilacak agar benar-benar bersih.
-        $process = new Process(['git', 'clean', '-fd'], $path, [
-            'PATH' => getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin',
-        ], null, 60);
-        $process->run();
     }
 
     /** Diff gabungan seluruh run (untuk review QA batch). */

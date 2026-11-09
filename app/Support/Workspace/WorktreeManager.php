@@ -310,6 +310,12 @@ class WorktreeManager
     }
 
     /** Kembalikan repo ke commit tertentu — dipakai saat gate integrasi gagal. */
+    /** Simpan commit di ref cadangan agar tetap bisa dipulihkan setelah reset. */
+    public function preserveRef(string $path, string $ref, string $commit): void
+    {
+        $this->git($path, ['update-ref', $ref, $commit]);
+    }
+
     public function resetHard(string $path, string $commit): void
     {
         $this->git($path, ['reset', '--hard', $commit]);

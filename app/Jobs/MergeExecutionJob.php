@@ -5,7 +5,9 @@ namespace App\Jobs;
 use App\Models\ChatConversation;
 use App\Models\ExecutionRun;
 use App\Services\ChatDisclosurePolicy;
+use App\Services\GithubProjectService;
 use App\Services\HermesClient;
+use App\Services\TestGate;
 use App\Support\Agents\AgentSoul;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Bus\Queueable;
@@ -13,6 +15,8 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
@@ -38,6 +42,26 @@ class MergeExecutionJob implements ShouldQueue
     ): void {
         $run = ExecutionRun::query()->with(['tasks', 'story.project', 'repairOrder.project'])->find($this->runId);
         if (! $run || $run->status !== 'MERGING') {
+            return;
+        }
+
+        // Kunci per run: job ganda (retry/redispatch) tidak boleh menggabung dua kali.
+        $lock = Cache::lock('merge-run-'.$run->id, $this->timeout + 60);
+        if (! $lock->get()) {
+            return;
+        }
+
+        try {
+            $this->merge($run, $worktrees, $scrumMaster, $disclosure);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    private function merge(ExecutionRun $run, WorktreeManager $worktrees, HermesClient $scrumMaster, ChatDisclosurePolicy $disclosure): void
+    {
+        $run->refresh();
+        if ($run->status !== 'MERGING') {
             return;
         }
         // Mode langsung: setiap task sudah di-commit ke baseline, tidak ada
@@ -84,13 +108,15 @@ class MergeExecutionJob implements ShouldQueue
             // dianggap selesai. Sebelumnya merge langsung dianggap sukses.
             $after = $worktrees->head($baseline);
             $changed = $worktrees->changedFilesBetween($baseline, $before, $after);
-            $integrationError = app(\App\Services\TestGate::class)->run(
+            $integrationError = app(TestGate::class)->run(
                 $baseline,
                 $changed,
                 $run->project()?->test_command,
             );
 
             if ($integrationError !== null) {
+                // Hasil gabungan disimpan di ref cadangan sebelum baseline dikembalikan.
+                $worktrees->preserveRef($baseline, 'refs/scrumspace/failed-merge-run-'.$run->id, $after);
                 $worktrees->resetHard($baseline, $before);
 
                 $run->forceFill([
@@ -168,15 +194,15 @@ class MergeExecutionJob implements ShouldQueue
                 return;
             }
 
-            $service = app(\App\Services\GithubProjectService::class);
+            $service = app(GithubProjectService::class);
             if (! $service->isConnected()) {
                 return;
             }
 
             // Push main lokal → target branch di GitHub (story branch / integration).
             $service->pushBranch($baseline, $project->github_owner, $project->github_repo, 'main', $targetBranch);
-        } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('Push branch ke GitHub gagal', [
+        } catch (Throwable $e) {
+            Log::warning('Push branch ke GitHub gagal', [
                 'run_id' => $run->id,
                 'branch' => $targetBranch,
                 'error' => $e->getMessage(),

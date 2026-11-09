@@ -5,7 +5,6 @@ namespace App\Support\Execution;
 use App\Jobs\ExecuteExecutionTaskJob;
 use App\Models\ExecutionRun;
 use App\Models\ExecutionTask;
-use App\Models\PermissionRequest;
 
 /**
  * Penentu task mana yang boleh dikirim ke worker sekarang.
@@ -31,7 +30,13 @@ class ExecutionScheduler
         $busyFiles = [];
         foreach ($tasks as $task) {
             if (in_array($task->status, ['IN_PROGRESS', 'REVISION', 'IN_REVIEW'], true)) {
-                $busyFiles = array_merge($busyFiles, $scope->filesFor($run, $task));
+                $files = $scope->filesFor($run, $task);
+                if ($files === []) {
+                    // Task berjalan dengan cakupan file tak diketahui: benturan tidak
+                    // bisa dibuktikan, jadi tidak ada task lain yang boleh dikirim.
+                    return [];
+                }
+                $busyFiles = array_merge($busyFiles, $files);
             }
         }
         $busyFiles = array_values(array_unique($busyFiles));
@@ -92,7 +97,7 @@ class ExecutionScheduler
         }
 
         $active = $run->tasks()
-            ->whereIn('status', ['IN_PROGRESS', 'IN_REVIEW'])
+            ->whereIn('status', ['IN_PROGRESS', 'IN_REVIEW', 'REVISION'])
             ->count();
 
         $slots = max(0, $limit - $active);
