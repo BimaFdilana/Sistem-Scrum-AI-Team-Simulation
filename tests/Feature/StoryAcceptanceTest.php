@@ -14,6 +14,18 @@ use Tests\TestCase;
 
 class StoryAcceptanceTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Gerbang demo diuji terpisah; di sini demo dianggap sehat.
+        $demo = \Mockery::mock(\App\Support\Demo\DemoServerManager::class);
+        $demo->shouldReceive('verify')->andReturn([
+            'ok' => true, 'http' => 200, 'url' => 'http://127.0.0.1:9999/', 'error' => null, 'demo' => null,
+        ]);
+        $this->app->instance(\App\Support\Demo\DemoServerManager::class, $demo);
+    }
+
     use RefreshDatabase;
 
     public function test_po_accepts_completed_execution_as_berhasil(): void

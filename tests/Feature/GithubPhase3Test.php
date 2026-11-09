@@ -25,6 +25,18 @@ class GithubPhase3Test extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Tes ini menguji merge GitHub, bukan kesehatan demo: demo dianggap sehat.
+        $demo = Mockery::mock(\App\Support\Demo\DemoServerManager::class);
+        $demo->shouldReceive('verify')->andReturn([
+            'ok' => true, 'http' => 200, 'url' => 'http://127.0.0.1:9999/', 'error' => null, 'demo' => null,
+        ]);
+        $this->app->instance(\App\Support\Demo\DemoServerManager::class, $demo);
+    }
+
     protected function mockClient(array $stubs): GithubApiClient
     {
         $client = Mockery::mock(GithubApiClient::class)->makePartial();
