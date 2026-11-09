@@ -198,19 +198,23 @@ class BatchReviewExecutionJob implements ShouldQueue
             return;
         }
 
-        foreach ($open->groupBy('assignee') as $role => $items) {
+        // Tiap temuan sudah punya task tujuan (yang cakupan filenya memuat file temuan);
+        // kelompokkan per task, bukan per peran, supaya perbaikan sampai ke task yang tepat.
+        $targets = [];
+        foreach ($open->groupBy('execution_task_id') as $taskId => $items) {
+            $target = $tasks->firstWhere('id', (int) $taskId) ?? $tasks->firstWhere('assignee', $items->first()->assignee) ?? $tasks->first();
             $feedback = $dialogue->feedbackFor($items);
-            $target = $tasks->firstWhere('assignee', $role) ?? $tasks->first();
             $target->forceFill([
                 'status' => 'REVISION',
                 'qa_feedback' => 'Perbaikan dari QA (putaran '.(int) $run->qa_rounds."):\n".$feedback,
                 'revision_count' => (int) $target->revision_count + 1,
             ])->save();
+            $targets[$target->id] = $target;
 
             $run->messages()->create([
                 'execution_task_id' => $target->id,
                 'sender_slug' => 'qa-engineer',
-                'recipient_slug' => $role,
+                'recipient_slug' => $target->assignee,
                 'content' => 'QA meminta perbaikan pada '.$items->count().' temuan untuk task "'.$target->title.'": '.$feedback,
                 'metadata' => ['batch_qa' => true, 'approved' => false, 'round' => (int) $run->qa_rounds],
             ]);
@@ -219,8 +223,7 @@ class BatchReviewExecutionJob implements ShouldQueue
         // Task lain tetap menunggu keputusan akhir.
         $run->forceFill(['status' => 'EXECUTING', 'qa_started_at' => null])->save();
 
-        foreach ($open->groupBy('assignee') as $role => $_items) {
-            $target = $tasks->firstWhere('assignee', $role) ?? $tasks->first();
+        foreach ($targets as $target) {
             ExecuteExecutionTaskJob::dispatch($run->id, $target->id);
         }
     }

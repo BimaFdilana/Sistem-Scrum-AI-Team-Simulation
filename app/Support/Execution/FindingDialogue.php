@@ -33,7 +33,7 @@ class FindingDialogue
 
         foreach ($findings as $finding) {
             $role = $batchQa->roleForFile($finding['file']);
-            $task = $tasks->firstWhere('assignee', $role) ?? $tasks->first();
+            $task = $this->targetTask($run, $tasks, $role, $finding['file']);
 
             $records->push(ExecutionFinding::query()->create([
                 'execution_run_id' => $run->id,
@@ -50,6 +50,20 @@ class FindingDialogue
         }
 
         return $records;
+    }
+
+    /**
+     * Task tujuan perbaikan: yang cakupan filenya sudah memuat file temuan; bila tidak ada,
+     * task pertama dengan peran pemilik file, lalu task pertama mana pun.
+     *
+     * @param  Collection<int, ExecutionTask>  $tasks
+     */
+    private function targetTask(ExecutionRun $run, Collection $tasks, string $role, string $file): ?ExecutionTask
+    {
+        $scope = new TaskFileScope;
+        $owning = $tasks->first(fn (ExecutionTask $task) => in_array($file, $scope->declaredFilesFor($run, $task), true));
+
+        return $owning ?? $tasks->firstWhere('assignee', $role) ?? $tasks->first();
     }
 
     /** @return Collection<int, ExecutionFinding> */

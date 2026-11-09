@@ -15,6 +15,7 @@ use App\Support\Execution\DirectWorkspace;
 use App\Support\Execution\ExecutorPlanner;
 use App\Support\Execution\OpenCodeRunner;
 use App\Support\Execution\TaskCompletion;
+use App\Support\Execution\TaskFileScope;
 use App\Support\Workspace\PatchApplier;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Bus\Queueable;
@@ -354,47 +355,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
      */
     private function relatedFiles(ExecutionRun $run, ExecutionTask $task): array
     {
-        $requests = PermissionRequest::query()
-            ->where('execution_run_id', $run->id)
-            ->orderBy('id', 'desc')
-            ->get();
-        foreach ($requests as $request) {
-            $payloadTasks = $request->payload['tasks'] ?? null;
-            if (! is_array($payloadTasks) || $payloadTasks === []) {
-                continue;
-            }
-            $candidate = $payloadTasks[$task->sort_order] ?? null;
-            if (! is_array($candidate) || ($candidate['title'] ?? null) !== $task->title) {
-                $candidate = null;
-                foreach ($payloadTasks as $payloadTask) {
-                    if (is_array($payloadTask)
-                        && ($payloadTask['title'] ?? null) === $task->title
-                        && ($payloadTask['assignee'] ?? null) === $task->assignee) {
-                        $candidate = $payloadTask;
-                        break;
-                    }
-                }
-            }
-            if (is_array($candidate) && is_array($candidate['files'] ?? null)) {
-                $cleaned = $this->cleanPaths($candidate['files']);
-                if ($cleaned !== []) {
-                    return $cleaned;
-                }
-            }
-        }
-
-        if (preg_match('/FILE\s*:\s*(.+?)(?=\n\s*(HASIL|SELESAI BILA|KERJAKAN)\b|$)/is', $task->description ?? '', $matches)) {
-            $parts = preg_split('/[\n,]+/', $matches[1]) ?: [];
-            $cleaned = $this->cleanPaths(array_map(
-                fn ($part) => trim($part, " \t\r\n-•`\"'"),
-                $parts
-            ));
-            if ($cleaned !== []) {
-                return $cleaned;
-            }
-        }
-
-        return [];
+        return (new TaskFileScope)->filesFor($run, $task);
     }
 
     /** @param  array<int, mixed>  $paths */

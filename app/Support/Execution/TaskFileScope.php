@@ -2,6 +2,7 @@
 
 namespace App\Support\Execution;
 
+use App\Models\ExecutionFinding;
 use App\Models\ExecutionRun;
 use App\Models\ExecutionTask;
 use App\Models\PermissionRequest;
@@ -15,9 +16,29 @@ use App\Models\PermissionRequest;
 class TaskFileScope
 {
     /**
+     * Cakupan file satu task: file yang dideklarasikan rencana, ditambah file dari temuan QA
+     * yang masih terbuka untuk task ini. Tanpa tambahan itu, perbaikan atas temuan di file
+     * lain (mis. routes/web.php) mustahil karena developer dilarang menyentuh file di luar
+     * daftar, sehingga temuan yang sama berulang di setiap putaran.
+     *
      * @return array<int, string>
      */
     public function filesFor(ExecutionRun $run, ExecutionTask $task): array
+    {
+        $declared = $this->declaredFilesFor($run, $task);
+        $fromFindings = ExecutionFinding::query()
+            ->where('execution_task_id', $task->id)
+            ->where('status', ExecutionFinding::OPEN)
+            ->pluck('file')
+            ->all();
+
+        return $fromFindings === [] ? $declared : $this->clean(array_merge($declared, $fromFindings));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function declaredFilesFor(ExecutionRun $run, ExecutionTask $task): array
     {
         $requests = PermissionRequest::query()
             ->where('execution_run_id', $run->id)
