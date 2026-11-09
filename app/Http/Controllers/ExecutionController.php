@@ -9,6 +9,7 @@ use App\Models\Story;
 use App\Services\GithubApiClient;
 use App\Services\GithubProjectService;
 use App\Support\Demo\DemoServerManager;
+use App\Support\Execution\DirectWorkspace;
 use App\Support\Workspace\BaselineSnapshot;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -122,6 +123,14 @@ class ExecutionController extends Controller
 
             $demoEvidence = 'Demo terverifikasi '.($check['url'] ?? '-')
                 .' HTTP '.($check['http'] ?? '-').' pada '.now()->format('d M Y H:i');
+        }
+
+        // Mode direct: hasil run ada di branch run; gabungkan bila diterima, kembalikan baseline apa pun hasilnya.
+        if ($story->project !== null) {
+            $settleError = app(DirectWorkspace::class)->settle($story->project, $run, $status === 'BERHASIL');
+            if ($settleError !== null) {
+                return back()->withErrors(['acceptance' => $settleError]);
+            }
         }
 
         // Fase 3 GitHub: bila BERHASIL dan ada story branch, merge ke integration.

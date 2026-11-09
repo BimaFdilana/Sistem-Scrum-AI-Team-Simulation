@@ -38,6 +38,15 @@ Aturan yang ditegakkan di kode, bukan di prompt:
 - `NEEDS_PO` hanya bisa keluar lewat `ExecutionRun::resumeFromPo()` atau keputusan Gagal.
   Job yang masih berjalan tidak bisa menimpanya.
 - Story atau perintah yang sudah diputuskan PO terkunci: run-nya tidak bisa dilanjutkan lagi.
+- Mode direct: setiap run bekerja di branch sendiri `scrum/run-{id}` (titik awalnya disimpan di
+  `refs/scrumspace/run-{id}-start`). Branch utama baru berubah saat PO menerima hasilnya
+  (merge `--no-ff`); bila ditolak, baseline kembali ke branch utama dan hasilnya tetap bisa
+  dilihat di branch run. Run berikutnya selalu berangkat dari branch utama, bukan dari run yang
+  belum diputuskan. Pemulihan manual: `git checkout scrum/run-N` atau
+  `git branch pulih refs/scrumspace/run-N-start`.
+- Proses anak yang menjalankan kode project (demo, tes, `composer`/`npm`) tidak mewarisi rahasia
+  ScrumSpace: `APP_KEY`, `DB_*`, `GITHUB_*`, `CLIPROXY_*`, dan variabel bernama
+  KEY/TOKEN/SECRET/PASSWORD disaring oleh `App\Support\Projects\ProjectEnvironment`.
 - Merge dikunci per run; hasil merge yang gagal diverifikasi disimpan di
   `refs/scrumspace/failed-merge-run-N` sebelum baseline dikembalikan.
 

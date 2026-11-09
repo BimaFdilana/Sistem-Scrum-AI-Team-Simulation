@@ -4,7 +4,9 @@ namespace App\Support\Projects;
 
 use App\Models\Project;
 use App\Models\ProjectProfile;
+use App\Support\Demo\DemoServerManager;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 use Throwable;
@@ -56,9 +58,9 @@ class ProjectProvisioner
             // Siapkan DB demo sejak awal; kegagalan migrasi SQLite ketahuan di
             // sini, bukan saat PO menekan "Jalankan demo" di akhir.
             try {
-                app(\App\Support\Demo\DemoServerManager::class)->prepareDatabase($project);
-            } catch (\Throwable $e) {
-                \Illuminate\Support\Facades\Log::warning('Persiapan DB demo gagal', ['project' => $project->id, 'error' => $e->getMessage()]);
+                app(DemoServerManager::class)->prepareDatabase($project);
+            } catch (Throwable $e) {
+                Log::warning('Persiapan DB demo gagal', ['project' => $project->id, 'error' => $e->getMessage()]);
             }
 
             $profile->forceFill([
@@ -247,7 +249,7 @@ class ProjectProvisioner
         try {
             $this->artisan($appRoot, $profile, ['db:seed', '--force', '--no-interaction'], 300, true, $env);
         } catch (Throwable $exception) {
-            \Illuminate\Support\Facades\Log::warning('Seeder project gagal (diabaikan)', [
+            Log::warning('Seeder project gagal (diabaikan)', [
                 'project_id' => $profile->project_id,
                 'error' => mb_substr($exception->getMessage(), 0, 300),
             ]);
@@ -340,7 +342,7 @@ class ProjectProvisioner
     /** @param array<int, string> $command */
     private function run(array $command, string $cwd, int $timeout, array $extraEnv = []): Process
     {
-        $env = array_merge([
+        $env = array_merge(ProjectEnvironment::scrubbed(), [
             'HOME' => storage_path('app/private/.provision-home'),
             'COMPOSER_ALLOW_SUPERUSER' => '1',
             'COMPOSER_NO_INTERACTION' => '1',

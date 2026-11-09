@@ -6,6 +6,7 @@ use App\Jobs\BreakdownExecutionJob;
 use App\Models\ExecutionRun;
 use App\Models\Project;
 use App\Models\RepairOrder;
+use App\Support\Execution\DirectWorkspace;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -179,6 +180,11 @@ class RepairOrderController extends Controller
         $closableByPo = $run->isTerminal() || ($run->isWaitingForPo() && $status === 'GAGAL');
         if (! $closableByPo) {
             return back()->withErrors(['acceptance' => 'Keputusan final hanya untuk eksekusi yang sudah selesai atau diblokir.']);
+        }
+
+        $settleError = app(DirectWorkspace::class)->settle($repairOrder->project, $run, $status === 'BERHASIL');
+        if ($settleError !== null) {
+            return back()->withErrors(['acceptance' => $settleError]);
         }
 
         $repairOrder->forceFill([

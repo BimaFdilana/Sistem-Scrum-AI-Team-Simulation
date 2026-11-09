@@ -92,6 +92,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             if ($directMode) {
                 $direct = app(DirectWorkspace::class);
                 $direct->assertClean($project);
+                $direct->beginRun($project, $run);
 
                 $attempt = max(1, (int) $task->attempt_seq + 1);
                 $worktree = $baseline;

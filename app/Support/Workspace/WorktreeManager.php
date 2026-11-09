@@ -303,6 +303,18 @@ class WorktreeManager
         return trim($this->git($path, ['rev-parse', '--abbrev-ref', 'HEAD']));
     }
 
+    /** Pindah ke branch yang sudah ada (tanpa force: gagal bila mengorbankan perubahan lokal). */
+    public function checkoutBranch(string $path, string $branch): void
+    {
+        $this->git($path, ['checkout', '--quiet', $branch]);
+    }
+
+    /** Buat branch baru dari ref tertentu lalu pindah ke sana. */
+    public function createBranchAndCheckout(string $path, string $branch, string $fromRef): void
+    {
+        $this->git($path, ['checkout', '--quiet', '-b', $branch, $fromRef]);
+    }
+
     /** Commit HEAD saat ini (untuk rollback merge). */
     public function head(string $path): string
     {

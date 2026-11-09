@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\Projects\ProjectEnvironment;
 use Illuminate\Support\Str;
 use Symfony\Component\Process\Process;
 
@@ -53,7 +54,7 @@ class TestGate
         // (penyebab umum HTTP 500 di demo). Compile view sebagai bagian gerbang.
         $touchedBlade = collect($changedFiles)->contains(fn (string $f) => str_ends_with($f, '.blade.php'));
         if ($touchedBlade && is_file($worktree.'/artisan')) {
-            $compile = new Process([PHP_BINARY, 'artisan', 'view:cache', '--no-interaction'], $worktree);
+            $compile = new Process([PHP_BINARY, 'artisan', 'view:cache', '--no-interaction'], $worktree, ProjectEnvironment::scrubbed());
             $compile->setTimeout(120);
             $compile->run();
             if (! $compile->isSuccessful()) {
@@ -65,7 +66,7 @@ class TestGate
         if ($testCommand === '') {
             return null;
         }
-        $process = Process::fromShellCommandline($testCommand, $worktree);
+        $process = Process::fromShellCommandline($testCommand, $worktree, ProjectEnvironment::scrubbed());
         $process->setTimeout(self::TEST_TIMEOUT_SECONDS);
         $process->run();
         if (! $process->isSuccessful()) {

@@ -4,7 +4,16 @@ namespace App\Support\Demo;
 
 use App\Models\DemoServer;
 use App\Models\Project;
+use App\Services\GithubApiClient;
+use App\Services\GithubProjectService;
+use App\Support\Projects\CliPhp;
+use App\Support\Projects\ProjectEnvironment;
+use App\Support\Projects\ProjectProfiler;
+use App\Support\Projects\ProjectProvisioner;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
+use Symfony\Component\Process\Process;
 
 /**
  * Menjalankan demo sementara project (php -S) di port unik per project.
@@ -43,7 +52,7 @@ class DemoServerManager
         $profile = $project->profile;
         if ($profile === null) {
             try {
-                $profile = app(\App\Support\Projects\ProjectProfiler::class)->profile($project);
+                $profile = app(ProjectProfiler::class)->profile($project);
             } catch (\Throwable) {
                 $profile = null;
             }
@@ -62,7 +71,7 @@ class DemoServerManager
         // Siapkan dependency/.env/migrasi sebelum server dijalankan. Tanpa
         // langkah ini project hasil clone tanpa vendor/ selalu berakhir 500.
         try {
-            app(\App\Support\Projects\ProjectProvisioner::class)->ensure($project);
+            app(ProjectProvisioner::class)->ensure($project);
         } catch (\Throwable $exception) {
             if ($worktreePath !== null) {
                 $this->removeWorktree($project, $worktreePath);
@@ -70,7 +79,7 @@ class DemoServerManager
             throw new RuntimeException('Demo tidak bisa disiapkan: '.mb_substr($exception->getMessage(), 0, 300));
         }
 
-        $phpBinary = $profile?->php_binary ?: \App\Support\Projects\CliPhp::path();
+        $phpBinary = $profile?->php_binary ?: CliPhp::path();
         $port = $this->allocatePort();
         $log = storage_path('logs/demo-project-'.$project->id.'.log');
 
@@ -97,7 +106,7 @@ class DemoServerManager
             .' -S 0.0.0.0:'.$port.' -t '.escapeshellarg($docroot)
             .' </dev/null > '.escapeshellarg($log).' 2>&1 & echo $!';
 
-        $launcher = new \Symfony\Component\Process\Process(['bash', '-lc', $shell], $projectRoot);
+        $launcher = new Process(['bash', '-lc', $shell], $projectRoot, ProjectEnvironment::scrubbed());
         $launcher->setTimeout(20);
         $launcher->run();
         $pid = (int) trim($launcher->getOutput());
@@ -234,20 +243,20 @@ class DemoServerManager
             // npm gagal menyimpan cache. Arahkan HOME + cache ke storage.
             $npmHome = storage_path('app/private/.npm-home');
             @mkdir($npmHome.'/.npm', 0775, true);
-            $env = getenv();
-            $env['PATH'] = ($env['PATH'] ?? '/usr/bin').':/usr/local/bin';
+            $env = ProjectEnvironment::scrubbed();
+            $env['PATH'] = (getenv('PATH') ?: '/usr/bin').':/usr/local/bin';
             $env['HOME'] = $npmHome;
             $env['npm_config_cache'] = $npmHome.'/.npm';
 
             if (! is_dir($projectRoot.'/node_modules')) {
-                $install = new \Symfony\Component\Process\Process(['npm', 'install', '--no-audit', '--no-fund'], $projectRoot, $env);
+                $install = new Process(['npm', 'install', '--no-audit', '--no-fund'], $projectRoot, $env);
                 $install->setTimeout(900);
                 $install->run();
                 @file_put_contents($log, "\n[npm install] exit=".$install->getExitCode()."\n".mb_substr($install->getErrorOutput(), -800)."\n", FILE_APPEND);
             }
 
             if (is_dir($projectRoot.'/node_modules')) {
-                $build = new \Symfony\Component\Process\Process(['npm', 'run', 'build'], $projectRoot, $env);
+                $build = new Process(['npm', 'run', 'build'], $projectRoot, $env);
                 $build->setTimeout(900);
                 $build->run();
                 @file_put_contents($log, "\n[vite build] exit=".$build->getExitCode()."\n".mb_substr($build->getErrorOutput(), -800)."\n", FILE_APPEND);
@@ -334,10 +343,10 @@ class DemoServerManager
     private function migrateDemoDatabase(string $projectRoot, string $database, array $env, string $log): void
     {
         for ($attempt = 1; $attempt <= 10; $attempt++) {
-            $process = new \Symfony\Component\Process\Process(
-                [\App\Support\Projects\CliPhp::path(), 'artisan', 'migrate', '--force', '--no-interaction'],
+            $process = new Process(
+                [CliPhp::path(), 'artisan', 'migrate', '--force', '--no-interaction'],
                 $projectRoot,
-                array_merge(getenv(), $env),
+                array_merge(ProjectEnvironment::scrubbed(), $env),
                 null,
                 300
             );
@@ -393,10 +402,10 @@ class DemoServerManager
      */
     private function seedDemoDatabase(string $projectRoot, array $env, string $log): void
     {
-        $process = new \Symfony\Component\Process\Process(
-            [\App\Support\Projects\CliPhp::path(), 'artisan', 'db:seed', '--force', '--no-interaction'],
+        $process = new Process(
+            [CliPhp::path(), 'artisan', 'db:seed', '--force', '--no-interaction'],
             $projectRoot,
-            array_merge(getenv(), $env),
+            array_merge(ProjectEnvironment::scrubbed(), $env),
             null,
             240
         );
@@ -404,7 +413,7 @@ class DemoServerManager
 
         file_put_contents(
             $log,
-            '['.date('c')."] db:seed exit=".$process->getExitCode()."\n".mb_substr($process->getOutput().$process->getErrorOutput(), -2000)."\n",
+            '['.date('c').'] db:seed exit='.$process->getExitCode()."\n".mb_substr($process->getOutput().$process->getErrorOutput(), -2000)."\n",
             FILE_APPEND
         );
     }
@@ -425,7 +434,7 @@ class DemoServerManager
             }
 
             try {
-                $response = \Illuminate\Support\Facades\Http::timeout(5)->get($url);
+                $response = Http::timeout(5)->get($url);
                 $status = $response->status();
 
                 if ($status < 500) {
@@ -466,12 +475,12 @@ class DemoServerManager
                 return null;
             }
 
-            $service = app(\App\Services\GithubProjectService::class);
+            $service = app(GithubProjectService::class);
             if (! $service->isConnected()) {
                 return null;
             }
 
-            $github = app(\App\Services\GithubApiClient::class);
+            $github = app(GithubApiClient::class);
             if ($github->branchSha($project->github_owner, $project->github_repo, 'integration') === null) {
                 return null; // Belum ada integration — pakai baseline lokal.
             }
@@ -491,7 +500,7 @@ class DemoServerManager
 
             return $worktreePath;
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('Demo worktree integration gagal, pakai baseline', [
+            Log::warning('Demo worktree integration gagal, pakai baseline', [
                 'project_id' => $project->id,
                 'error' => $e->getMessage(),
             ]);
@@ -571,7 +580,7 @@ class DemoServerManager
         $error = null;
 
         try {
-            $response = \Illuminate\Support\Facades\Http::timeout(10)->get($url);
+            $response = Http::timeout(10)->get($url);
             $status = $response->status();
             $body = (string) $response->body();
 
@@ -662,7 +671,7 @@ class DemoServerManager
     /** Matikan proses php -S yang memakai port tertentu. */
     private function killByPort(int $port): void
     {
-        $process = new \Symfony\Component\Process\Process(['pgrep', '-f', '-S 0.0.0.0:'.$port]);
+        $process = new Process(['pgrep', '-f', '-S 0.0.0.0:'.$port]);
         $process->run();
         foreach (preg_split('/\s+/', trim($process->getOutput())) as $pid) {
             if ($pid !== '' && (int) $pid > 0) {
@@ -670,7 +679,7 @@ class DemoServerManager
             }
         }
         sleep(1);
-        $again = new \Symfony\Component\Process\Process(['pgrep', '-f', '-S 0.0.0.0:'.$port]);
+        $again = new Process(['pgrep', '-f', '-S 0.0.0.0:'.$port]);
         $again->run();
         foreach (preg_split('/\s+/', trim($again->getOutput())) as $pid) {
             if ($pid !== '' && (int) $pid > 0) {
@@ -683,7 +692,7 @@ class DemoServerManager
     public function reapOrphans(): int
     {
         $active = $this->activePorts();
-        $process = new \Symfony\Component\Process\Process(['pgrep', '-af', 'php.*-S (0.0.0.0|127.0.0.1):']);
+        $process = new Process(['pgrep', '-af', 'php.*-S (0.0.0.0|127.0.0.1):']);
         $process->run();
 
         $killed = 0;
