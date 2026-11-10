@@ -40,10 +40,17 @@ class CliProxyApiClient
     public function isAvailable(): bool
     {
         try {
-            $response = Http::timeout(3)->get($this->baseUrl.'/v1/models');
+            // WAJIB menyertakan kunci API: permintaan tanpa kunci dijawab 401 dan gateway
+            // menghitungnya sebagai percobaan autentikasi gagal. Cek ini jalan setiap
+            // halaman dibuka, sehingga IP server cepat diblokir ("IP banned due to too
+            // many failed attempts") dan Management API pun menolak kunci yang benar.
+            $request = Http::timeout(3);
+            if ($this->apiKey) {
+                $request = $request->withToken($this->apiKey);
+            }
+            $response = $request->get($this->baseUrl.'/v1/models');
 
-            // 401/403 both prove the gateway is up and responding; it just
-            // requires an API key for unauthenticated callers.
+            // 401/403 tetap membuktikan gateway hidup (mis. kunci API belum diisi).
             return $response->successful() || in_array($response->status(), [401, 403], true);
         } catch (Throwable) {
             return false;
@@ -342,14 +349,14 @@ class CliProxyApiClient
         // Jangan cache hasil kosong: bila gateway hiccup sesaat, [] yang
         // ter-cache 60 detik membuat semua agent tampil "terputus" walau
         // gateway sudah pulih. Hanya hasil non-kosong yang disimpan.
-        $cached = \Illuminate\Support\Facades\Cache::get('cliproxy:models');
+        $cached = Cache::get('cliproxy:models');
         if (is_array($cached) && $cached !== []) {
             return $cached;
         }
 
         $result = $this->fetchModels();
         if ($result !== []) {
-            \Illuminate\Support\Facades\Cache::put('cliproxy:models', $result, 60);
+            Cache::put('cliproxy:models', $result, 60);
         }
 
         return $result;
@@ -406,7 +413,7 @@ class CliProxyApiClient
      * Punya ketahanan: retry pada model yang sama (lihat chatResilient);
      * tidak ada fallback ke model lain.
      *
-     * @param array{data: string, mime: string}|null $image lampiran gambar (base64); diteruskan lalu dibuang.
+     * @param  array{data: string, mime: string}|null  $image  lampiran gambar (base64); diteruskan lalu dibuang.
      */
     public function chat(string $model, string $systemPrompt, string $userMessage, int $timeout = 120, ?array $image = null): ?string
     {
@@ -425,7 +432,7 @@ class CliProxyApiClient
      *   daftar model available, supaya pemanggil bisa menampilkan
      *   prompt penggantian ke PO.
      *
-     * @param array{data: string, mime: string}|null $image
+     * @param  array{data: string, mime: string}|null  $image
      * @return array{text: ?string, error: ?string, model: ?string, available_models?: string[]}
      */
     public function chatResilient(string $model, string $systemPrompt, string $userMessage, int $timeout = 120, ?array $image = null): array
@@ -468,7 +475,7 @@ class CliProxyApiClient
         return ['text' => null, 'error' => $lastError, 'model' => null, 'retry_after' => $lastRetryAfter];
     }
 
-        /**
+    /**
      * Apakah body error gateway menandakan model itu sendiri yang
      * bermasalah (bukan permintaan atau akun)? Dipakai untuk 400/403
      * agar model_disabled / unknown provider tidak disamarkan jadi
@@ -504,6 +511,7 @@ class CliProxyApiClient
                 ['type' => 'image_url', 'image_url' => ['url' => 'data:'.$image['mime'].';base64,'.$image['data']]],
             ]
             : $userMessage;
+
         return $this->attemptChatMessages($model, $systemPrompt, [['role' => 'user', 'content' => $userContent]], $timeout, $tools);
     }
 
