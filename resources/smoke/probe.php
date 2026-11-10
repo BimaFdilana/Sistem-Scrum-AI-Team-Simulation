@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Vite;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
@@ -182,6 +183,24 @@ if (is_string($userModel) && class_exists($userModel)) {
         $report(['kind' => 'setup', 'method' => '-', 'uri' => '-', 'status' => null, 'error' => 'Tidak bisa menyiapkan pengguna uji: '.mb_substr($e->getMessage(), 0, 300)]);
     }
 }
+// Pengguna uji diberi password yang diketahui penguji (hanya di database salinan),
+// supaya form yang meminta password lama (ubah password, konfirmasi) bisa
+// dijalankan sampai jalur suksesnya, bukan selalu berhenti di "password salah".
+try {
+    if ($actors !== []) {
+        $model = $actors[0]['user'];
+        if (Schema::hasColumn($model->getTable(), 'password')) {
+            DB::table($model->getTable())
+                ->whereIn($model->getKeyName(), array_map(fn ($actor) => $actor['user']->getKey(), $actors))
+                ->update(['password' => Hash::make('Password123!')]);
+            foreach ($actors as $actor) {
+                $actor['user']->refresh();
+            }
+        }
+    }
+} catch (Throwable) {
+}
+
 $user = $actors[0]['user'] ?? null;
 if ($user !== null) {
     $app['auth']->guard()->setUser($user);
@@ -250,8 +269,11 @@ $send = function (string $method, string $uri, array $data = []) use ($app, $ker
     try {
         $bag = $session()->get('errors');
         if ($bag instanceof ViewErrorBag) {
-            $errors = $bag->getBag('default')->all();
-            $fieldErrors = $bag->getBag('default')->messages();
+            // Semua bag (mis. Breeze memakai bag "updatePassword"), bukan hanya "default".
+            foreach ($bag->getBags() as $named) {
+                $errors = array_merge($errors, $named->all());
+                $fieldErrors = array_merge_recursive($fieldErrors, $named->messages());
+            }
         }
     } catch (Throwable) {
     }
