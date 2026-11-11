@@ -1,6 +1,5 @@
 {{-- Aksi sprint: rumuskan goal, setujui scope, mulai sprint. --}}
 <div class="sprint-goal-actions">
-                    <a class="button button-ghost" href="{{ route('chat.index', ['sprint' => $sprint->id]) }}">Chat dengan Scrum Master</a>
                     @if ($sprintSchemaReady)
                     @if ($sprint->stories->isNotEmpty())
                         <form method="POST" action="{{ route('sprints.goal.generate', $sprint) }}">@csrf<button class="button button-ghost" type="submit">{{ $sprint->goal ? 'Buat ulang draf Sprint Goal dengan Scrum Master AI' : 'Buat Sprint Goal dengan Scrum Master AI' }}</button></form>

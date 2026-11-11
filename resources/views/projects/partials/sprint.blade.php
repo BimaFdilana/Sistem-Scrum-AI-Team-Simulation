@@ -15,6 +15,18 @@
     </summary>
 
     <div class="bk-sprint-body">
+        <div class="sprint-tools">
+            <details class="sprint-rename">
+                <summary class="button button-ghost">Ubah nama sprint</summary>
+                <form method="POST" action="{{ route('sprints.update', $sprint) }}" class="sprint-rename-form">
+                    @csrf @method('PATCH')
+                    <label class="sr-only" for="sprint-name-{{ $sprint->id }}">Nama sprint</label>
+                    <input id="sprint-name-{{ $sprint->id }}" type="text" name="name" value="{{ $sprint->name }}" maxlength="120" required>
+                    <button class="button button-primary" type="submit">Simpan</button>
+                </form>
+            </details>
+            <a class="button button-ghost" href="{{ route('chat.index', ['sprint' => $sprint->id]) }}">Chat dengan Scrum Master</a>
+        </div>
         @if ($sprint->goal)
             <div class="sprint-goal-box"><strong>Sprint Goal · {{ $sprint->goal_source === 'AI_DRAFT' ? 'draf Scrum Master AI' : 'goal lama, perlu dirumuskan ulang oleh AI' }}</strong><p>{{ $sprint->goal }}</p></div>
         @endif

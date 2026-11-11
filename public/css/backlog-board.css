@@ -337,3 +337,15 @@
     text-transform: uppercase;
     color: var(--muted, #94a3b8);
 }
+.board-more{margin-top:2px}
+.board-more>summary{cursor:pointer;list-style:none;padding:7px 10px;border:1px dashed var(--line-strong);border-radius:8px;color:var(--muted);font-size:12px;text-align:center}
+.board-more>summary::-webkit-details-marker{display:none}
+.board-more>summary:hover{background:var(--panel-hover);color:var(--text)}
+.board-more[open]>summary{margin-bottom:8px}
+.board-more[open]>summary::after{content:" · tutup"}
+.board-more-body{display:grid;gap:8px}
+.sprint-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;margin-bottom:12px}
+.sprint-rename>summary{list-style:none;cursor:pointer;display:inline-flex}
+.sprint-rename>summary::-webkit-details-marker{display:none}
+.sprint-rename-form{display:flex;gap:8px;margin-top:8px}
+.sprint-rename-form input{min-width:260px;padding:8px 10px;border:1px solid var(--line-strong);border-radius:9px;background:var(--input-bg);color:var(--text);font:inherit}

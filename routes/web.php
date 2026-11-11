@@ -101,6 +101,7 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/projects/{project}/sprints/create', [SprintController::class, 'create'])->name('projects.sprints.create');
     Route::post('/projects/{project}/sprints', [SprintController::class, 'store'])->name('projects.sprints.store');
     Route::get('/sprints/{sprint}', [SprintController::class, 'show'])->name('sprints.show');
+    Route::patch('/sprints/{sprint}', [SprintController::class, 'update'])->name('sprints.update');
     Route::put('/sprints/{sprint}/scope', [SprintController::class, 'updateScope'])->name('sprints.scope.update');
     Route::post('/sprints/{sprint}/approve-scope', [SprintController::class, 'approveScope'])->name('sprints.scope.approve');
     Route::post('/sprints/{sprint}/start', [SprintController::class, 'start'])->name('sprints.start');

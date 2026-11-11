@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreSprintRequest;
+use App\Http\Requests\UpdateSprintRequest;
 use App\Http\Requests\UpdateSprintScopeRequest;
 use App\Models\Project;
 use App\Models\Sprint;
@@ -101,6 +102,17 @@ class SprintController extends Controller
     }
 
     /** Detail sprint kini bagian dari halaman Project. */
+    /** Ubah nama sprint (semua status); riwayat chat SM ikut memakai nama baru. */
+    public function update(UpdateSprintRequest $request, Sprint $sprint): RedirectResponse
+    {
+        $name = trim($request->validated('name'));
+        $sprint->update(['name' => $name]);
+        \App\Models\ChatConversation::query()->where('sprint_id', $sprint->id)->update(['title' => $name]);
+
+        return redirect(route('projects.show', $sprint->project_id).'#sprint-'.$sprint->id)
+            ->with('status', 'Nama sprint diubah menjadi "'.$name.'".');
+    }
+
     public function show(Sprint $sprint): RedirectResponse
     {
         return redirect()->route('projects.show', $sprint->project_id);
