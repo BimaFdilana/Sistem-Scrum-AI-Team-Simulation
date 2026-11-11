@@ -141,7 +141,7 @@
         </form>
         <form method="POST" action="{{ route('stories.executions.accept', [$story, $run]) }}">
             @csrf
-            <button class="button button-danger" type="submit" name="status" value="GAGAL" onclick="return handleConfirm(event, {title: 'Tandai sebagai Gagal?', message: 'Tandai story ini sebagai GAGAL? Story akan terkunci dari eksekusi ulang.', confirmLabel: 'Ya, tandai gagal', danger: true})">Tandai Gagal</button>
+            <button class="button button-danger" type="submit" name="status" value="GAGAL" onclick="return handleConfirm(event, {title: 'Tandai sebagai Gagal?', message: 'Tandai story ini sebagai GAGAL? Hasilnya tidak digabung ke kode utama, dan story bisa dieksekusi ulang.', confirmLabel: 'Ya, tandai gagal', danger: true})">Tandai Gagal</button>
         </form>
     </div>
 @elseif ($run->status === 'BLOCKED')
