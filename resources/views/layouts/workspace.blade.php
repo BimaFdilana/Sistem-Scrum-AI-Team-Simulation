@@ -68,7 +68,8 @@
             <nav class="nav-group">
                 <p class="nav-caption">WORKSPACE</p>
                 <a class="nav-link {{ $activePage === 'dashboard' ? 'is-active' : '' }}" href="{{ route('dashboard') }}"><span class="nav-dot"></span>Ringkasan</a>
-                <a class="nav-link {{ in_array(($activePage ?? ''), ['agents', 'agent-chat', 'agent-activity', 'chat'], true) ? 'is-active' : '' }}" href="{{ route('agents.index') }}"><span class="nav-dot"></span>Agent</a>
+                <a class="nav-link {{ in_array(($activePage ?? ''), ['agents', 'agent-chat', 'agent-activity'], true) ? 'is-active' : '' }}" href="{{ route('agents.index') }}"><span class="nav-dot"></span>Agent</a>
+                <a class="nav-link {{ $activePage === 'chat' ? 'is-active' : '' }}" href="{{ route('chat.index') }}"><span class="nav-dot"></span>Chat Scrum Master</a>
                 <a class="nav-link {{ $activePage === 'ai-providers' ? 'is-active' : '' }}" href="{{ route('ai-providers.index') }}"><span class="nav-dot"></span>AI Providers</a>
                 <a class="nav-link {{ in_array(($activePage ?? ''), ['projects', 'backlog', 'sprints', 'discussion'], true) ? 'is-active' : '' }}" href="{{ route('projects.index') }}"><span class="nav-dot"></span>Projects</a>
                 <a class="nav-link {{ $activePage === 'actors' ? 'is-active' : '' }}" href="{{ route('actors.index') }}"><span class="nav-dot"></span>Aktor</a>

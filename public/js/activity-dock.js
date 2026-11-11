@@ -12,6 +12,7 @@
     var KEY_DISMISSED = 'scrumspace-dock-dismissed';
 
     var runs = [];
+    var chatUrl = root.dataset.chatUrl || '/chat';
     // Di layar kecil panel menutupi halaman: selalu mulai terlipat walau terakhir terbuka.
     var open = read(KEY_OPEN) === '1' && !(window.matchMedia && window.matchMedia('(max-width: 600px)').matches);
     var dismissed = parse(read(KEY_DISMISSED), []);
@@ -73,16 +74,14 @@
 
     function render() {
         var list = visibleRuns();
-        root.hidden = list.length === 0;
-        if (list.length === 0) { updateTitle(0); return; }
-
-        var state = overall(list);
+        root.hidden = false;
+        var state = list.length === 0 ? 'idle' : overall(list);
         var active = list.filter(function (r) { return r.state !== 'done'; }).length;
         pill.className = 'dock-pill dock-state-' + state;
         pill.setAttribute('aria-expanded', String(open));
         pill.replaceChildren();
         pill.append(el('span', 'dock-dot'));
-        pill.append(el('span', 'dock-pill-text', pillText(list, state)));
+        pill.append(el('span', 'dock-pill-text', list.length === 0 ? 'Progres · tidak ada proses' : pillText(list, state)));
         if (list.length > 1) { pill.append(el('span', 'dock-pill-count', String(list.length))); }
 
         panel.hidden = !open;
@@ -112,7 +111,14 @@
         close.addEventListener('click', function () { setOpen(false); pill.focus(); });
         head.append(close);
 
+        var chat = el('a', 'dock-close', 'Chat Scrum Master');
+        chat.href = chatUrl;
+        head.insertBefore(chat, close);
+
         var nodes = [head];
+        if (list.length === 0) {
+            nodes.push(el('p', 'dock-empty', 'Tidak ada estimasi atau eksekusi yang berjalan. Proses yang Anda mulai akan muncul di sini, dan hasilnya dilaporkan Scrum Master di chat sprint.'));
+        }
         list.forEach(function (run) { nodes.push(renderRun(run)); });
         panel.replaceChildren.apply(panel, nodes);
     }
@@ -161,6 +167,11 @@
             var link = el('a', 'dock-btn', 'Buka diskusi');
             link.href = run.detail_url;
             actions.append(link);
+        }
+        if (run.chat_url) {
+            var ask = el('a', 'dock-btn', 'Chat SM');
+            ask.href = run.chat_url;
+            actions.append(ask);
         }
         if (run.state === 'done') {
             var dismiss = el('button', 'dock-btn', 'Tutup');
@@ -229,6 +240,11 @@
             var link = el('a', 'dock-btn', 'Buka detail');
             link.href = run.detail_url;
             actions.append(link);
+        }
+        if (run.chat_url) {
+            var ask = el('a', 'dock-btn', 'Chat SM');
+            ask.href = run.chat_url;
+            actions.append(ask);
         }
         if (run.state === 'done') {
             var dismiss = el('button', 'dock-btn', 'Tutup');

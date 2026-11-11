@@ -134,6 +134,7 @@ class ActivityController extends Controller
             ])->values()->all(),
             'points' => $run->consensus_points,
             'detail_url' => route('stories.discussion.show', $run->story),
+            'chat_url' => route('chat.index', array_filter(['sprint' => $run->story->sprint_id]), false),
             'actions' => $actions,
         ];
     }
@@ -190,6 +191,7 @@ class ActivityController extends Controller
                 'text' => Str::limit((string) $m->content, 140),
             ])->values()->all(),
             'detail_url' => $detailUrl,
+            'chat_url' => route('chat.index', array_filter(['sprint' => $run->story?->sprint_id]), false),
             'actions' => $actions,
         ];
     }

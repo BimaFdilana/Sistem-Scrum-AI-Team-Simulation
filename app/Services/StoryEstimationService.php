@@ -12,6 +12,7 @@ use App\Models\StoryEstimationAgentRun;
 use App\Models\StoryEstimationRun;
 use App\Models\User;
 use App\Support\Agents\AgentSoul;
+use App\Support\Chat\SprintChat;
 use App\Support\Workspace\ProjectInspector;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Client\ConnectionException;
@@ -534,14 +535,7 @@ class StoryEstimationService
                 // Specialist originals are addressed to the Scrum Master on receipt.
                 throw new RuntimeException('No report evidence.');
             }
-            $conversation = ChatConversation::query()->where('user_id', $requester->id)
-                ->where('agent_profile', 'scrum-master')->latest('updated_at')->first()
-                ?? ChatConversation::query()->create([
-                    'user_id' => $requester->id,
-                    'uuid' => (string) Str::uuid(),
-                    'title' => 'Refinement Fibonacci '.$snapshot['story_id'],
-                    'agent_profile' => 'scrum-master',
-                ]);
+            $conversation = SprintChat::forStory($requester, $story, 'Refinement Fibonacci '.$snapshot['story_id']);
             $transcript = $evidence->map(fn ($message) => [
                 'round' => $message->round,
                 'sender' => $message->sender_slug,
@@ -644,13 +638,14 @@ class StoryEstimationService
                     $methodLabel = $locked->consensus_method === 'deadlock_max'
                         ? 'Deadlock — Scrum Master menerapkan maksimum'
                         : 'Mufakat bulat tim';
-                    $conversation->messages()->create([
-                        'role' => 'assistant',
-                        'content' => 'Refinement Fibonacci — '.$snapshot['story_id'].' · revisi '.$snapshot['revision']
+                    SprintChat::report(
+                        $conversation,
+                        'Refinement Fibonacci — '.$snapshot['story_id'].' · revisi '.$snapshot['revision']
                             ."\nHasil final: ".$locked->consensus_points.' poin ('.self::category($locked->consensus_points).') · '.$methodLabel."\n"
                             .$summary,
-                    ]);
-                    $conversation->touch();
+                        route('stories.discussion.show', $story, false),
+                        'Lihat diskusi tim',
+                    );
                     $storyFill = ['estimate_points' => $locked->consensus_points];
                     if ($refined !== null) {
                         $storyFill += [

@@ -71,7 +71,6 @@
                         if (!response.ok) throw new Error(data.message || 'Diskusi tidak dapat dimulai.');
                         say('Diskusi dimulai. Pantau progresnya di panel mengambang kanan bawah; muat ulang halaman setelah selesai untuk melihat poin final.', false);
                         if (window.scrumDock) {
-                            window.scrumDock.open();
                             window.scrumDock.refresh();
                         }
                     } catch (exception) {

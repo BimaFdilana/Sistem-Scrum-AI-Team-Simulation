@@ -2,13 +2,13 @@
 
 namespace App\Jobs;
 
-use App\Models\ChatConversation;
 use App\Models\ExecutionRun;
 use App\Services\ChatDisclosurePolicy;
 use App\Services\GithubProjectService;
 use App\Services\HermesClient;
 use App\Services\TestGate;
 use App\Support\Agents\AgentSoul;
+use App\Support\Chat\SprintChat;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -17,7 +17,6 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
 
@@ -204,16 +203,7 @@ class MergeExecutionJob implements ShouldQueue
     private function summarize(ExecutionRun $run, HermesClient $scrumMaster, ChatDisclosurePolicy $disclosure): string
     {
         $taskLines = $run->tasks->map(fn ($task) => '- '.$task->title.' ('.$task->assigneeName().', revisi QA: '.$task->revision_count.')')->implode("\n");
-        $conversation = ChatConversation::query()->where('user_id', $run->requested_by)
-            ->where('agent_profile', 'scrum-master')->latest('updated_at')->first();
-        if (! $conversation) {
-            $conversation = ChatConversation::query()->create([
-                'user_id' => $run->requested_by,
-                'uuid' => (string) Str::uuid(),
-                'title' => 'Eksekusi '.$run->subjectLabel(),
-                'agent_profile' => 'scrum-master',
-            ]);
-        }
+        $conversation = SprintChat::forStory($run->requested_by, $run->story, 'Eksekusi '.$run->subjectLabel());
         $prompt = AgentSoul::promptLine('scrum-master')."\n\n"
             .'Sebagai Scrum Master, buat ringkasan progress eksekusi untuk PO. Singkat, tanpa informasi internal.'
             ."\nSubjek: ".$run->subjectLabel()
@@ -225,11 +215,12 @@ class MergeExecutionJob implements ShouldQueue
                 || $disclosure->containsSensitiveDisclosure($text)) {
                 throw new RuntimeException('Invalid summary.');
             }
-            $conversation->messages()->create([
-                'role' => 'assistant',
-                'content' => 'Eksekusi '.$run->subjectLabel()." selesai.\n".$text,
-            ]);
-            $conversation->touch();
+            SprintChat::report(
+                $conversation,
+                'Eksekusi '.$run->subjectLabel()." selesai.\n".$text,
+                route('stories.executions.show', [$run->story, $run], false),
+                'Lihat hasil eksekusi',
+            );
 
             return $text;
         } catch (Throwable) {

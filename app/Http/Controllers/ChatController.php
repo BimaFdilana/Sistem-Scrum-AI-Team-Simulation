@@ -6,8 +6,10 @@ use App\Exceptions\AiUnavailableException;
 use App\Exceptions\ModelNotChosenException;
 use App\Models\ChatConversation;
 use App\Models\Project;
+use App\Models\Sprint;
 use App\Services\ChatDisclosurePolicy;
 use App\Services\HermesClient;
+use App\Support\Chat\SprintChat;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -20,25 +22,52 @@ class ChatController extends Controller
     public function index(Request $request, HermesClient $hermes, ChatDisclosurePolicy $disclosurePolicy): View
     {
         $agent = collect(config('agents.profiles'))->firstWhere('slug', 'scrum-master');
-        // Dropdown project di halaman chat: tiap project punya riwayat chat
-        // sendiri; tanpa project = chat umum (termasuk semua percakapan lama).
-        $projects = Project::query()->orderBy('name')->get(['id', 'name']);
-        $selectedProject = $request->query('project_id') !== null
-            ? $projects->firstWhere('id', (int) $request->query('project_id'))
-            : null;
-        $conversation = ChatConversation::query()
-            ->where('user_id', auth()->id())
-            ->where('agent_profile', 'scrum-master')
-            ->where('project_id', $selectedProject?->id)
-            ->latest('updated_at')
-            ->first();
+        $user = $request->user();
 
+        // Daftar percakapan: project → sprint. Tiap sprint punya satu thread
+        // sendiri; obrolan dan laporan SM tidak dicampur lintas sprint.
+        $projects = Project::query()->with(['sprints' => fn ($q) => $q->orderByDesc('id')])->orderBy('name')->get(['id', 'name']);
+        $sprints = $projects->flatMap(fn (Project $project) => $project->sprints);
+        $threads = ChatConversation::query()->where('user_id', $user->id)
+            ->where('agent_profile', 'scrum-master')->whereNotNull('sprint_id')
+            ->withCount(['messages as report_count' => fn ($q) => $q->where('kind', 'report')])
+            ->get()->keyBy('sprint_id');
+
+        // Arsip: percakapan lama yang belum terikat sprint (hanya baca).
+        $archive = ChatConversation::query()->where('user_id', $user->id)
+            ->where('agent_profile', 'scrum-master')->whereNull('sprint_id')
+            ->whereHas('messages')->latest('updated_at')->limit(15)->get(['id', 'uuid', 'title', 'project_id', 'updated_at']);
+        $archived = $request->query('arsip') !== null
+            ? $archive->firstWhere('uuid', (string) $request->query('arsip'))
+            : null;
+
+        $selectedSprint = null;
+        if ($archived === null) {
+            $selectedSprint = $request->query('sprint') !== null
+                ? $sprints->firstWhere('id', (int) $request->query('sprint'))
+                : null;
+            if ($selectedSprint === null && $request->query('project_id') !== null) {
+                $forProject = $projects->firstWhere('id', (int) $request->query('project_id'))?->sprints;
+                $selectedSprint = $forProject?->firstWhere('status', 'ACTIVE') ?? $forProject?->first();
+            }
+            if ($selectedSprint === null && $request->query('sprint') === null) {
+                $recent = $threads->sortByDesc('updated_at')->first();
+                $selectedSprint = ($recent ? $sprints->firstWhere('id', $recent->sprint_id) : null)
+                    ?? $sprints->firstWhere('status', 'ACTIVE')
+                    ?? $sprints->sortByDesc('id')->first();
+            }
+        }
+
+        $conversation = $archived ?? ($selectedSprint ? $threads->get($selectedSprint->id) : null);
         $messages = $conversation?->messages()->oldest('id')->get() ?? collect();
         $messages->each(function ($message) use ($disclosurePolicy): void {
             if ($message->role === 'assistant' && $disclosurePolicy->containsSensitiveDisclosure($message->content)) {
                 $message->content = ChatDisclosurePolicy::SAFE_RESPONSE;
             }
         });
+
+        $sprintProject = $selectedSprint ? $projects->firstWhere('id', $selectedSprint->project_id) : null;
+        $stories = $selectedSprint ? $selectedSprint->stories()->get() : collect();
 
         return view('workspace.chat', [
             'agent' => $agent,
@@ -47,7 +76,12 @@ class ChatController extends Controller
             'chatAvailable' => $hermes->isAvailable(),
             'chatAction' => route('chat.messages.store', [], false),
             'projects' => $projects,
-            'selectedProject' => $selectedProject,
+            'threads' => $threads,
+            'archive' => $archive,
+            'archived' => $archived,
+            'selectedSprint' => $selectedSprint,
+            'selectedProject' => $sprintProject,
+            'sprintStories' => $stories,
             'activePage' => 'chat',
         ]);
     }
@@ -70,6 +104,7 @@ class ChatController extends Controller
             'message' => ['required', 'string', 'max:8000'],
             'conversation_id' => ['nullable', 'uuid'],
             'project_id' => ['nullable', 'integer', 'exists:projects,id'],
+            'sprint_id' => ['nullable', 'integer', 'exists:sprints,id'],
             // Lampiran gambar: JPG/PNG maks 5MB. Disimpan permanen di storage
             // agar tidak hilang setelah dikirim ke AI sebagai prompt vision.
             'image' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png', 'max:5120'],
@@ -88,19 +123,27 @@ class ChatController extends Controller
         }
 
         $user = $request->user();
-        $conversation = isset($data['conversation_id'])
-            ? ChatConversation::query()
+        $sprint = isset($data['sprint_id']) ? Sprint::query()->find($data['sprint_id']) : null;
+        if (isset($data['conversation_id'])) {
+            $conversation = ChatConversation::query()
                 ->where('user_id', $user->id)
                 ->where('agent_profile', 'scrum-master')
                 ->where('uuid', $data['conversation_id'])
-                ->firstOrFail()
-            : ChatConversation::query()->create([
+                ->firstOrFail();
+            // Arsip lama tidak menerima pesan baru; sprint-nya harus dipilih.
+            abort_if($conversation->sprint_id === null && $sprint !== null, 422, 'Percakapan ini arsip lama; pilih sprint untuk melanjutkan.');
+            $sprint = $conversation->sprint_id !== null ? $conversation->sprint()->first() : null;
+        } elseif ($sprint !== null) {
+            $conversation = SprintChat::conversation($user, $sprint);
+        } else {
+            $conversation = ChatConversation::query()->create([
                 'user_id' => $user->id,
                 'uuid' => (string) Str::uuid(),
                 'title' => Str::limit(trim($data['message']), 160, ''),
                 'agent_profile' => 'scrum-master',
                 'project_id' => $data['project_id'] ?? null,
             ]);
+        }
 
         $userMessage = $conversation->messages()->create([
             'role' => 'user',
@@ -111,7 +154,7 @@ class ChatController extends Controller
         // Konteks project dari percakapan: tanpa project, pertanyaan soal
         // direktori/server hanya bisa bermakna platform (gerbang luas);
         // dengan project, hanya pertanyaan yang menunjuk platform yang ditolak.
-        $safeResponse = $disclosurePolicy->safeResponseFor($userMessage->content, null, $conversation->project_id !== null);
+        $safeResponse = $disclosurePolicy->safeResponseFor($userMessage->content, null, $conversation->project_id !== null || $sprint !== null);
 
         if ($safeResponse !== null) {
             $assistantMessage = $conversation->messages()->create([
@@ -127,12 +170,7 @@ class ChatController extends Controller
             // Konteks project hanya ditempel ke pesan yang dikirim ke AI,
             // bukan ke pesan tersimpan — riwayat chat tetap berisi kata-kata
             // pengguna apa adanya.
-            $aiMessage = $userMessage->content;
-            $project = $conversation->project;
-            if ($project !== null) {
-                $aiMessage = '[Konteks chat: project ScrumSpace "'.$project->name.'"'
-                    .($project->description ? ' — '.$project->description : '').". Jawablah dalam konteks project ini.]\n\n".$aiMessage;
-            }
+            $aiMessage = $this->aiMessage($conversation, $sprint, $userMessage);
             $content = $hermes->sendMessage($aiMessage, $conversation->uuid, $image);
         } catch (AiUnavailableException $e) {
             // MODEL_PROBLEMATIC: kembalikan pesan penggantian lengkap
@@ -161,6 +199,40 @@ class ChatController extends Controller
         $conversation->touch();
 
         return $this->messageResponse($conversation, $userMessage, $assistantMessage);
+    }
+
+    /**
+     * Pesan ke SM: konteks sprint + riwayat singkat + pertanyaan PO. Konteks
+     * hanya ditempel ke pesan yang dikirim ke AI, bukan ke pesan tersimpan.
+     */
+    private function aiMessage(ChatConversation $conversation, ?Sprint $sprint, $userMessage): string
+    {
+        $parts = [];
+        $project = $sprint?->project ?? $conversation->project;
+        if ($project !== null) {
+            $parts[] = '[Konteks chat: project ScrumSpace "'.$project->name.'"'
+                .($project->description ? ' — '.$project->description : '').'. Jawablah dalam konteks project ini.]';
+        }
+        if ($sprint !== null) {
+            $stories = $sprint->stories()->get()->map(fn ($story) => '- '.$story->display_id.' '.$story->effectiveTitle()
+                .' · '.($story->estimate_points !== null ? $story->estimate_points.' poin' : 'belum diestimasi')
+                .' · '.($story->acceptance_status ?? 'belum diterima'))->take(25)->implode("\n");
+            $parts[] = '[Sprint: "'.$sprint->name.'" (status '.$sprint->status.')'
+                .($sprint->goal ? ', goal: '.$sprint->goal : '')."\nStory di sprint ini:\n".($stories !== '' ? $stories : '(belum ada story)').']';
+        }
+        $history = $conversation->messages()->where('id', '<', $userMessage->id)
+            ->latest('id')->limit(8)->get()->reverse()
+            ->map(fn ($message) => ($message->role === 'user' ? 'PO' : 'SM').': '.Str::limit(preg_replace('/\s+/', ' ', (string) $message->content), 600))
+            ->implode("\n");
+        if ($history !== '') {
+            $parts[] = "[Riwayat percakapan sprint ini, dari yang lama ke baru]\n".$history;
+        }
+
+        if ($parts === []) {
+            return $userMessage->content;
+        }
+
+        return implode("\n\n", $parts)."\n\nPesan PO saat ini: ".$userMessage->content;
     }
 
     public function storeForProfile(Request $request, string $slug): JsonResponse

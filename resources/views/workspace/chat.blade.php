@@ -1,77 +1,176 @@
 @extends('layouts.workspace', ['title' => $agent['name'], 'breadcrumb' => $agent['name']])
 
+@php
+    $statusLabels = ['PLANNING' => 'Perencanaan', 'ACTIVE' => 'Berjalan', 'COMPLETED' => 'Selesai'];
+    $canSend = $chatAvailable && $selectedSprint !== null && $archived === null;
+    $estimated = $sprintStories->whereNotNull('estimate_points')->count();
+    $accepted = $sprintStories->where('acceptance_status', 'BERHASIL')->count();
+@endphp
+
 @section('content')
-    <section class="page-heading chat-heading">
-        <div>
-            <p class="eyebrow"><span class="eyebrow-line"></span>AI AGENT CHAT</p>
-            <h1>{{ $agent['name'] }}</h1>
-            <p class="page-subtitle">Konsultasi sesuai spesialisasi. Respons AI adalah masukan; chat ini tidak mengubah source code atau menjalankan task.</p>
-        </div>
-        <span class="chat-connection {{ $chatAvailable ? 'is-connected' : 'is-disconnected' }}">
-            <i></i>{{ $chatAvailable ? 'AI Agent terhubung' : 'AI Agent tidak terhubung' }}
-        </span>
-    </section>
+    <section class="chat-shell">
+        <aside class="chat-rail" aria-label="Percakapan per sprint">
+            <div class="chat-rail-head">
+                <strong>Percakapan</strong>
+                <span class="chat-connection {{ $chatAvailable ? 'is-connected' : 'is-disconnected' }}"><i></i>{{ $chatAvailable ? 'AI Agent terhubung' : 'AI Agent tidak terhubung' }}</span>
+            </div>
+            <p class="chat-rail-note">Satu sprint, satu percakapan. Laporan Scrum Master masuk ke sprint-nya sendiri.</p>
 
-    <section class="chat-project-picker" aria-label="Pilih project untuk chat ini">
-        <label for="projectSelect">Project</label>
-        <select id="projectSelect">
-            <option value="">Tanpa project (chat umum)</option>
-            @foreach ($projects as $project)
-                <option value="{{ $project->id }}" @selected($selectedProject?->id === $project->id)>{{ $project->name }}</option>
-            @endforeach
-        </select>
-        <span class="chat-project-note">{{ $selectedProject ? 'Riwayat chat project "'.$selectedProject->name.'".' : 'Riwayat chat umum — terpisah dari chat tiap project.' }}</span>
-    </section>
-
-    <section class="chat-panel" aria-label="Chat dengan {{ $agent['name'] }}">
-        <div class="chat-transcript" id="chatTranscript" aria-live="polite" aria-relevant="additions text">
-            @forelse ($messages as $message)
-                <article class="chat-message chat-message-{{ $message->role }}">
-                    <span class="chat-message-label">{{ $message->role === 'assistant' ? $agent['name'] : 'Anda' }}</span>
-                    @if($message->imageUrl())
-                        <img src="{{ $message->imageUrl() }}" alt="Gambar terlampir" class="chat-message-image">
-                    @endif
-                    <p>{{ $message->content }}</p>
-                </article>
+            @forelse ($projects as $project)
+                <details class="chat-group" @if ($project->id === $selectedProject?->id || $loop->first) open @endif>
+                    <summary>{{ $project->name }}</summary>
+                    @forelse ($project->sprints as $sprint)
+                        @php($thread = $threads->get($sprint->id))
+                        <a class="chat-thread {{ $selectedSprint?->id === $sprint->id && $archived === null ? 'is-active' : '' }}" href="{{ route('chat.index', ['sprint' => $sprint->id]) }}" @if ($selectedSprint?->id === $sprint->id && $archived === null) aria-current="page" @endif>
+                            <span class="chat-thread-name">{{ $sprint->name }}</span>
+                            <span class="chat-thread-meta">
+                                <span class="chat-chip chat-chip-{{ strtolower($sprint->status) }}">{{ $statusLabels[$sprint->status] ?? $sprint->status }}</span>
+                                @if ($thread && $thread->report_count > 0)<span class="chat-badge" title="Laporan Scrum Master">{{ $thread->report_count }} laporan</span>@endif
+                            </span>
+                        </a>
+                    @empty
+                        <p class="chat-rail-empty">Belum ada sprint.</p>
+                    @endforelse
+                </details>
             @empty
-                <div class="chat-empty" id="chatEmpty">
-                    <span class="chat-empty-mark">✦</span>
-                    <h2>Mulai percakapan</h2>
-                    <p>Tanyakan hal yang sesuai dengan peran {{ $agent['name'] }}.</p>
-                </div>
+                <p class="chat-rail-empty">Belum ada project. <a class="text-link" href="{{ route('projects.create') }}">Buat project</a> lalu sprint untuk mulai chat.</p>
             @endforelse
-        </div>
 
-        <form class="chat-composer" id="chatForm" action="{{ $chatAction }}" method="POST">
-            @csrf
-            <input type="hidden" id="conversationId" value="{{ $conversation?->uuid }}">
-            <label class="sr-only" for="chatInput">Pesan untuk {{ $agent['name'] }}</label>
-            <textarea id="chatInput" rows="3" maxlength="8000" placeholder="Tulis pesan untuk {{ $agent['name'] }}… (Enter untuk kirim, Shift+Enter baris baru)" required {{ $chatAvailable ? '' : 'disabled' }}></textarea>
-            <div class="chat-attach-preview" id="attachPreview" hidden>
-                <img id="attachThumb" alt="Pratinjau gambar terlampir">
-                <button type="button" class="chat-attach-remove" id="attachRemove" aria-label="Hapus gambar">×</button>
-            </div>
-            <input type="file" id="chatImage" accept="image/jpeg,image/png" hidden>
-            <div class="chat-composer-footer">
-                <span id="chatError" class="chat-error" role="status">{{ $chatAvailable ? 'Percakapan tersimpan di workspace.' : 'Chat AI Agent belum tersedia. Pesan belum dapat dikirim.' }}</span>
-                <span class="chat-composer-actions">
-                    <button type="button" class="button" id="attachButton" aria-label="Lampirkan gambar" title="Lampirkan gambar (JPG/PNG, maks 5 MB)" {{ $chatAvailable ? '' : 'disabled' }}>🖼️</button>
-                    <button class="button button-primary" id="chatSend" type="submit" {{ $chatAvailable ? '' : 'disabled' }}>
-                        Kirim <span aria-hidden="true">→</span>
-                    </button>
-                </span>
-            </div>
-        </form>
+            @if ($archive->isNotEmpty())
+                <details class="chat-group chat-archive" @if ($archived) open @endif>
+                    <summary>Arsip chat lama</summary>
+                    @foreach ($archive as $old)
+                        <a class="chat-thread {{ $archived?->id === $old->id ? 'is-active' : '' }}" href="{{ route('chat.index', ['arsip' => $old->uuid]) }}">
+                            <span class="chat-thread-name">{{ \Illuminate\Support\Str::limit($old->title ?: 'Percakapan', 38) }}</span>
+                            <span class="chat-thread-meta"><span class="chat-badge">{{ $old->updated_at->translatedFormat('d M Y') }}</span></span>
+                        </a>
+                    @endforeach
+                </details>
+            @endif
+        </aside>
+
+        <div class="chat-main">
+            <header class="chat-head">
+                @if ($archived)
+                    <p class="chat-crumb">Arsip chat lama</p>
+                    <h1>{{ \Illuminate\Support\Str::limit($archived->title ?: 'Percakapan', 80) }}</h1>
+                    <p class="chat-goal">Percakapan sebelum chat dipisah per sprint. Hanya bisa dibaca; lanjutkan di chat sprint.</p>
+                @elseif ($selectedSprint)
+                    <p class="chat-crumb">{{ $selectedProject?->name }} <span aria-hidden="true">/</span> Scrum Master</p>
+                    <div class="chat-head-row">
+                        <h1>{{ $selectedSprint->name }}</h1>
+                        <span class="chat-chip chat-chip-{{ strtolower($selectedSprint->status) }}">{{ $statusLabels[$selectedSprint->status] ?? $selectedSprint->status }}</span>
+                    </div>
+                    @if ($selectedSprint->goal)<p class="chat-goal">{{ \Illuminate\Support\Str::limit($selectedSprint->goal, 220) }}</p>@endif
+                    <div class="chat-stats">
+                        <span><b>{{ $sprintStories->count() }}</b> story</span>
+                        <span><b>{{ $estimated }}</b> diestimasi</span>
+                        <span><b>{{ $accepted }}</b> diterima</span>
+                        <a class="text-link" href="{{ route('sprints.show', $selectedSprint) }}">Buka sprint →</a>
+                    </div>
+                @else
+                    <h1>Scrum Master</h1>
+                    <p class="chat-goal">Pilih sprint di kiri untuk mulai berdiskusi dengan Scrum Master.</p>
+                @endif
+
+                <details class="chat-scope">
+                    <summary>Apa yang bisa dan tidak bisa dilakukan Scrum Master di sini?</summary>
+                    <div class="chat-scope-grid">
+                        <div>
+                            <strong>Bisa</strong>
+                            <ul>
+                                <li>Menjawab pertanyaan tentang sprint ini: story, poin, status penerimaan.</li>
+                                <li>Merangkum hasil estimasi tim dan hasil eksekusi untuk Anda.</li>
+                                <li>Membantu memperjelas story dan Sprint Goal.</li>
+                                <li>Menyarankan langkah berikutnya.</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <strong>Tidak bisa</strong>
+                            <ul>
+                                <li>Mengubah kode atau menjalankan task dari chat ini.</li>
+                                <li>Menyetujui izin eksekusi atau menerima story; itu keputusan Anda lewat tombol.</li>
+                                <li>Mengubah backlog atau memberi estimasi sendiri.</li>
+                                <li>Membuka detail server atau platform.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </details>
+            </header>
+
+            <section class="chat-panel" aria-label="Chat dengan {{ $agent['name'] }}">
+                <div class="chat-transcript" id="chatTranscript" aria-live="polite" aria-relevant="additions text">
+                    @forelse ($messages as $message)
+                        @if ($message->isReport())
+                            <article class="chat-report" id="laporan-{{ $message->id }}">
+                                <header>
+                                    <span class="chat-report-tag">LAPORAN SCRUM MASTER</span>
+                                    <time datetime="{{ $message->created_at->toIso8601String() }}">{{ $message->created_at->translatedFormat('d M, H:i') }}</time>
+                                </header>
+                                <p>{{ $message->content }}</p>
+                                @if ($message->link_url)<a class="text-link" href="{{ $message->link_url }}">{{ $message->link_label ?: 'Lihat detail' }} →</a>@endif
+                            </article>
+                        @else
+                            <article class="chat-message chat-message-{{ $message->role }}">
+                                <span class="chat-message-label">{{ $message->role === 'assistant' ? $agent['name'] : 'Anda' }}<time datetime="{{ $message->created_at->toIso8601String() }}">{{ $message->created_at->translatedFormat('d M, H:i') }}</time></span>
+                                @if($message->imageUrl())
+                                    <img src="{{ $message->imageUrl() }}" alt="Gambar terlampir" class="chat-message-image">
+                                @endif
+                                <p>{{ $message->content }}</p>
+                            </article>
+                        @endif
+                    @empty
+                        <div class="chat-empty" id="chatEmpty">
+                            <span class="chat-empty-mark">✦</span>
+                            <h2>{{ $selectedSprint ? 'Belum ada percakapan di sprint ini' : 'Pilih sprint untuk memulai' }}</h2>
+                            <p>{{ $selectedSprint ? 'Tanyakan status sprint, minta ringkasan, atau diskusikan story. Laporan hasil estimasi dan eksekusi juga akan muncul di sini.' : 'Percakapan dan laporan Scrum Master dipisah per sprint.' }}</p>
+                        </div>
+                    @endforelse
+                </div>
+
+                @if ($archived)
+                    <div class="chat-readonly">Arsip ini hanya bisa dibaca.@if ($selectedProject === null) Pilih sprint di kiri untuk berdiskusi.@endif</div>
+                @else
+                    <form class="chat-composer" id="chatForm" action="{{ $chatAction }}" method="POST">
+                        @csrf
+                        <input type="hidden" id="conversationId" value="{{ $conversation?->uuid }}">
+                        <input type="hidden" id="sprintId" value="{{ $selectedSprint?->id }}">
+                        @if ($canSend)
+                            <div class="chat-quick" aria-label="Pertanyaan cepat">
+                                <button type="button" class="chat-quick-btn" data-prompt="Ringkas status sprint ini untuk saya.">Ringkas status sprint</button>
+                                <button type="button" class="chat-quick-btn" data-prompt="Story mana yang perlu perhatian atau keputusan saya sekarang?">Apa yang perlu keputusan saya?</button>
+                                <button type="button" class="chat-quick-btn" data-prompt="Apa langkah berikutnya yang kamu sarankan untuk sprint ini?">Langkah berikutnya</button>
+                            </div>
+                        @endif
+                        <label class="sr-only" for="chatInput">Pesan untuk {{ $agent['name'] }}</label>
+                        <textarea id="chatInput" rows="3" maxlength="8000" placeholder="{{ $selectedSprint ? 'Tulis pesan untuk Scrum Master…' : 'Pilih sprint terlebih dahulu' }} (Enter kirim, Shift+Enter baris baru)" required {{ $canSend ? '' : 'disabled' }}></textarea>
+                        <div class="chat-attach-preview" id="attachPreview" hidden>
+                            <img id="attachThumb" alt="Pratinjau gambar terlampir">
+                            <button type="button" class="chat-attach-remove" id="attachRemove" aria-label="Hapus gambar">×</button>
+                        </div>
+                        <input type="file" id="chatImage" accept="image/jpeg,image/png" hidden>
+                        <div class="chat-composer-footer">
+                            <span id="chatError" class="chat-error" role="status">{{ ! $chatAvailable ? 'Scrum Master belum terhubung. Pilih model di menu AI Providers.' : ($selectedSprint ? 'Tersimpan di percakapan sprint ini.' : '') }}</span>
+                            <span class="chat-composer-actions">
+                                <button type="button" class="button" id="attachButton" aria-label="Lampirkan gambar" title="Lampirkan gambar (JPG/PNG, maks 5 MB)" {{ $canSend ? '' : 'disabled' }}>🖼️</button>
+                                <button class="button button-primary" id="chatSend" type="submit" {{ $canSend ? '' : 'disabled' }}>
+                                    Kirim <span aria-hidden="true">→</span>
+                                </button>
+                            </span>
+                        </div>
+                    </form>
+                @endif
+            </section>
+        </div>
     </section>
 
     <script src="{{ asset('js/chat-markdown.js') }}?v={{ filemtime(public_path('js/chat-markdown.js')) }}"></script>
     <script>
         (() => {
-            // Balasan AI lama (dari server) diformat saat halaman dimuat:
-            // Markdown mentah diubah jadi heading/tabel/daftar yang rapi.
+            // Balasan & laporan SM dari server diformat saat dimuat (Markdown → HTML).
             // Pesan pengguna tidak disentuh — tetap teks biasa.
             if (window.ScrumChatMarkdown) {
-                document.querySelectorAll('.chat-message-assistant').forEach((article) => {
+                document.querySelectorAll('.chat-message-assistant, .chat-report').forEach((article) => {
                     const p = article.querySelector(':scope > p');
                     if (!p) return;
                     const div = document.createElement('div');
@@ -83,25 +182,25 @@
 
             const agentName = @json($agent['name']);
             const form = document.getElementById('chatForm');
+            const transcriptEl = document.getElementById('chatTranscript');
+            transcriptEl.scrollTop = transcriptEl.scrollHeight;
+            // Tautan ke laporan tertentu (#laporan-N): sorot dan gulir ke sana.
+            if (location.hash.startsWith('#laporan-')) {
+                const target = document.querySelector(location.hash);
+                if (target) { target.classList.add('is-target'); target.scrollIntoView({ block: 'center' }); }
+            }
+            if (!form) return;
             const input = document.getElementById('chatInput');
             const transcript = document.getElementById('chatTranscript');
             const conversationId = document.getElementById('conversationId');
             const sendButton = document.getElementById('chatSend');
             const error = document.getElementById('chatError');
             const csrf = document.querySelector('meta[name="csrf-token"]').content;
-            // Dropdown project: pindah ke riwayat chat project itu (atau
-            // chat umum bila "Tanpa project"). Satu project = satu riwayat.
-            const projectSelect = document.getElementById('projectSelect');
-            projectSelect.addEventListener('change', () => {
-                const value = projectSelect.value;
-                const url = new URL(window.location.href);
-                if (value) {
-                    url.searchParams.set('project_id', value);
-                } else {
-                    url.searchParams.delete('project_id');
-                }
-                window.location.href = url.toString();
-            });
+            const sprintId = document.getElementById('sprintId');
+            document.querySelectorAll('.chat-quick-btn').forEach((btn) => btn.addEventListener('click', () => {
+                input.value = btn.dataset.prompt;
+                form.requestSubmit();
+            }));
 
             const attachButton = document.getElementById('attachButton');
             const attachInput = document.getElementById('chatImage');
@@ -230,7 +329,7 @@
                         payload.append('message', message);
                         payload.append('image', fileToSend);
                         if (conversationId.value) payload.append('conversation_id', conversationId.value);
-                        if (projectSelect.value) payload.append('project_id', projectSelect.value);
+                        if (sprintId.value) payload.append('sprint_id', sprintId.value);
                         response = await fetch(form.action, {
                             method: 'POST',
                             headers: { 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf },
@@ -247,7 +346,7 @@
                             body: JSON.stringify({
                                 message,
                                 conversation_id: conversationId.value || null,
-                                project_id: projectSelect.value ? Number(projectSelect.value) : null,
+                                sprint_id: sprintId.value ? Number(sprintId.value) : null,
                             }),
                         });
                     }
@@ -280,7 +379,6 @@
                 }
             });
 
-            transcript.scrollTop = transcript.scrollHeight;
         })();
     </script>
 @endsection

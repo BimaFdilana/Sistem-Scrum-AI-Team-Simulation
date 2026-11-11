@@ -58,3 +58,9 @@
 .dock-agents{display:flex;flex-wrap:wrap;gap:6px 14px;margin:10px 0 0;padding:0;list-style:none}
 .dock-agents li{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px}
 @media (prefers-reduced-motion:reduce){.dock-bar span{transition:none}}
+
+/* Dock permanen: selalu tampil di kanan bawah; beri ruang agar tidak menutup konten. */
+.dock-state-idle .dock-dot{background:var(--quiet)}
+.dock-empty{margin:0;padding:16px 14px;color:var(--muted);font-size:12px;line-height:1.55}
+a.dock-close,a.dock-btn{text-decoration:none}
+.workspace-body .page-content{padding-bottom:88px}

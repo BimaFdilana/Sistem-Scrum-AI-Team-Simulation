@@ -4,14 +4,23 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Storage;
 
 class ChatMessage extends Model
 {
     protected $fillable = [
         'role',
+        'kind',
         'content',
         'image_path',
+        'link_url',
+        'link_label',
     ];
+
+    public function isReport(): bool
+    {
+        return $this->kind === 'report';
+    }
 
     /**
      * URL publik gambar lampiran (null bila tidak ada).
@@ -22,7 +31,7 @@ class ChatMessage extends Model
             return null;
         }
 
-        return \Illuminate\Support\Facades\Storage::disk('public')->url($this->image_path);
+        return Storage::disk('public')->url($this->image_path);
     }
 
     public function conversation(): BelongsTo

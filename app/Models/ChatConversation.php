@@ -17,6 +17,7 @@ class ChatConversation extends Model
         'title',
         'agent_profile',
         'project_id',
+        'sprint_id',
     ];
 
     public function user(): BelongsTo
@@ -27,6 +28,11 @@ class ChatConversation extends Model
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class);
+    }
+
+    public function sprint(): BelongsTo
+    {
+        return $this->belongsTo(Sprint::class);
     }
 
     public function messages(): HasMany

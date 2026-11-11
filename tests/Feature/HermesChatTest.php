@@ -92,7 +92,7 @@ class HermesChatTest extends TestCase
         $this->actingAs($user)
             ->get('/chat?project_id='.$project->id)
             ->assertOk()
-            ->assertSee('Tanpa project (chat umum)', false)
+            ->assertSee('Arsip chat lama', false)
             ->assertSee('Toko Online', false);
     }
 
@@ -116,12 +116,13 @@ class HermesChatTest extends TestCase
             ->assertSee(route('chat.index'), false);
     }
 
-    public function test_workspace_sidebar_does_not_show_a_separate_chat_link(): void
+    public function test_workspace_sidebar_links_straight_to_the_scrum_master_chat(): void
     {
         $this->actingAs(User::factory()->create())
             ->get('/dashboard')
             ->assertOk()
-            ->assertDontSee('href="'.route('chat.index').'"', false);
+            ->assertSee('href="'.route('chat.index').'"', false)
+            ->assertSee('Chat Scrum Master');
     }
 
     public function test_agents_page_shows_per_profile_chat_status(): void

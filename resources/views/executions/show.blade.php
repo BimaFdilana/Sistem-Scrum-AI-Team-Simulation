@@ -60,6 +60,7 @@
 <div class="page-head">
     <div>
         <p class="section-kicker">EKSEKUSI USER STORY</p>
+        @if ($story->sprint_id)<p><a class="text-link" href="{{ route('chat.index', ['sprint' => $story->sprint_id]) }}">Tanya Scrum Master tentang sprint ini →</a></p>@endif
         <h1>{{ $story->display_id }} — {{ $story->effectiveTitle() }}</h1>
         <p class="muted">
             {{ $story->estimate_points }} poin · {{ $story->hasRefinement() ? 'Hasil Diskusi SM' : 'Data Asli' }}

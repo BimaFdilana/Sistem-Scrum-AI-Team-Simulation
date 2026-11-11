@@ -15,6 +15,7 @@
                                         <p class="estimation-stale">Poin lama belum terbukti sebagai kesepakatan tim untuk revisi ini; Eksekusi tetap terkunci.</p>
                                     @endif
                                     <a class="button button-ghost" href="{{ route('stories.discussion.show', $story) }}">Lihat Diskusi Tim</a>
+                                    @if ($story->sprint_id)<a class="button button-ghost" href="{{ route('chat.index', ['sprint' => $story->sprint_id]) }}">Tanya Scrum Master</a>@endif
                                 </div>
 
                                 <div class="story-section"><p class="story-section-label">Kriteria</p>
@@ -55,7 +56,7 @@
                                                         <p class="field-help"><strong>{{ strtoupper($failedAgent->profile_slug) }} · Putaran {{ $failedAgent->round }}:</strong> {{ $failureText }}. Periksa konfigurasi/koneksi, lalu gunakan Retry bila tersedia.</p>
                                                     @endif
                                                     @if ($latestEstimationRun->status === 'COMPLETED')
-                                                        <a class="text-link" href="{{ route('chat.index') }}">Buka laporan di chat Scrum Master →</a>
+                                                        <a class="text-link" href="{{ route('chat.index', array_filter(['sprint' => $story->sprint_id])) }}">Buka laporan di chat Scrum Master →</a>
                                                     @elseif ($latestEstimationRun->status === 'RUNNING' && $latestEstimationRun->created_at?->lte(now()->subMinutes(30)) && (int) $latestEstimationRun->requested_by === (int) auth()->id())
                                                         <form method="POST" action="{{ route('stories.estimations.cancel', [$story, $latestEstimationRun]) }}">@csrf<button class="button button-ghost" type="submit">Hentikan run lama (lebih dari 30 menit)</button></form>
                                                     @elseif ($latestEstimationRun->status === 'REPORT_PENDING')

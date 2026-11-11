@@ -14,6 +14,7 @@
     <section class="dc-head">
         <div class="dc-head-main">
             <a class="text-link" href="{{ route('projects.show', $story->project_id) }}">← Kembali ke project</a>
+            @if ($story->sprint_id) · <a class="text-link" href="{{ route('chat.index', ['sprint' => $story->sprint_id]) }}">Laporan di chat Scrum Master</a>@endif
             <h1><span class="dc-id">{{ $story->display_id }}</span> Diskusi Tim</h1>
             <p class="page-subtitle">{{ $story->title }}</p>
             <div class="dc-chips">
