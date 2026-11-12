@@ -77,8 +77,7 @@ class DirectChangeJob implements ShouldQueue
             $git->createBranchAndCheckout($path, $branch, $base);
             $change->forceFill(['base_branch' => $base, 'branch' => $branch, 'commit_before' => $before])->save();
 
-            // Batas 15 menit: di bawah retry_after antrean (960 dtk) agar job tidak diambil ganda.
-            $result = $runner->run($path, $this->prompt($change, $facts->section($project)), 900);
+            $result = $runner->run($path, $this->prompt($change, $facts->section($project)));
             $files = $git->dirtyFiles($path);
 
             if (! $result['ok']) {

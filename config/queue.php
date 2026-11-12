@@ -40,7 +40,9 @@ return [
             'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
-            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 960),
+            // Harus > --timeout worker (1800) dan > batas OpenCode/Hermes (1500), agar
+            // job panjang tidak dianggap macet lalu diambil ganda di tengah jalan.
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 2100),
             'after_commit' => false,
         ],
 
