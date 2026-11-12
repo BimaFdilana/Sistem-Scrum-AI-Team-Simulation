@@ -135,7 +135,6 @@
                         <input type="hidden" id="conversationId" value="{{ $conversation?->uuid }}">
                         <input type="hidden" id="sprintId" value="{{ $selectedSprint?->id }}">
                         @if ($canSend)
-                            <p class="chat-mode-note" id="commandNote" hidden>Tulis perintah untuk tim. Scrum Master membagi tugas ke <strong>Backend</strong> dan <strong>Frontend</strong>, <strong>QA</strong> memeriksa hasilnya, lalu Scrum Master melapor di chat ini. Tanpa backlog, estimasi, atau persetujuan sprint; Anda cukup memutuskan Terima atau Gagal di akhir.</p>
                             <div class="chat-quick" aria-label="Pertanyaan cepat">
                                 <button type="button" class="chat-quick-btn" data-prompt="Ringkas status sprint ini untuk saya.">Ringkas status sprint</button>
                                 <button type="button" class="chat-quick-btn" data-prompt="Story mana yang perlu perhatian atau keputusan saya sekarang?">Apa yang perlu keputusan saya?</button>
@@ -240,7 +239,7 @@
             // Kotak pesan mengikuti tab aktif: Laporan (tanya status/ringkasan) atau Tanya (perintah ke tim).
             const syncMode = (focus) => {
                 const command = mode() === 'command';
-                commandNote.hidden = !command;
+                if (commandNote) commandNote.hidden = !command;
                 if (quick) quick.hidden = command;
                 document.getElementById('attachButton').hidden = command;
                 form.classList.toggle('is-command', command);
