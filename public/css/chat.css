@@ -72,25 +72,16 @@
 .chat-mode-opt input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
 .chat-mode-note{margin:0 0 10px;padding:9px 12px;border-left:3px solid var(--amber);border-radius:0 8px 8px 0;background:rgba(var(--amber-rgb),.08);color:var(--text);font-size:12.5px;line-height:1.55}
 .chat-mode-note[hidden],.chat-quick[hidden],#attachButton[hidden]{display:none}
-.chat-composer.is-change textarea{border-color:rgba(var(--amber-rgb),.55)}
-.chat-message-change{border-color:rgba(var(--amber-rgb),.35);background:rgba(var(--amber-rgb),.08)}
-.chat-message-change .chat-message-label{color:var(--amber)}
-/* Kartu perubahan kode langsung */
-.chat-change{align-self:stretch;padding:14px 16px;border:1px solid var(--line-strong);border-left:3px solid var(--amber);border-radius:10px;background:var(--panel-raised)}
-.chat-change.is-done{border-left-color:var(--accent)}
-.chat-change.is-failed{border-left-color:var(--danger)}
-.chat-change.is-reverted,.chat-change.is-no_changes{border-left-color:var(--quiet)}
-.chat-change header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
-.chat-change-tag{font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--amber)}
-.chat-change-status{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600}
-.chat-change.is-done .chat-change-status{color:var(--accent-strong)}
-.chat-change.is-failed .chat-change-status{color:var(--danger)}
-.chat-change-spin{width:12px;height:12px;border:2px solid rgba(var(--amber-rgb),.3);border-top-color:var(--amber);border-radius:50%;animation:chat-spin .8s linear infinite}
+/* Perintah untuk tim (Tanya Scrum Master) */
+.chat-composer.is-command textarea{border-color:rgba(var(--accent-rgb),.55)}
+.chat-message-command{border-color:rgba(var(--accent-rgb),.35);background:rgba(var(--accent-rgb),.1)}
+.chat-command-status{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line-strong);color:var(--muted);font-size:12px}
+.chat-command-status a{color:var(--accent)}
+.chat-command-status.is-completed .chat-command-label{color:var(--accent-strong);font-weight:600}
+.chat-command-status.is-needs_po .chat-command-label,.chat-command-status.is-failed .chat-command-label,.chat-command-status.is-blocked .chat-command-label{color:var(--danger);font-weight:600}
+.chat-command-spin{width:11px;height:11px;border:2px solid rgba(var(--accent-rgb),.3);border-top-color:var(--accent);border-radius:50%;animation:chat-spin .8s linear infinite}
 @keyframes chat-spin{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.chat-change-spin{animation:none}}
-.chat-change p{margin:0 0 8px;font-size:13.5px;overflow-wrap:anywhere}
-.chat-change-error{color:var(--danger)}
-.chat-change-hint{color:var(--muted);font-size:12px!important}
-.chat-change-files{margin:0 0 10px;font-size:12px}
-.chat-change-files summary{cursor:pointer;color:var(--accent);font-weight:600}
-.chat-change-files ul{margin:6px 0 0;padding-left:18px;display:grid;gap:3px}
+@media (prefers-reduced-motion:reduce){.chat-command-spin{animation:none}}
+.chat-report-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.chat-report-actions form{display:inline-flex;gap:8px}
+.chat-report-decided{margin:10px 0 0!important;color:var(--muted);font-size:12px!important}

@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Story extends Model
 {
@@ -13,6 +14,7 @@ class Story extends Model
 
     protected $fillable = [
         'project_id',
+        'origin',
         'sprint_id',
         'title',
         'description',
@@ -133,7 +135,22 @@ class Story extends Model
 
     public function getDisplayIdAttribute(): string
     {
+        if ($this->isChatCommand()) {
+            return 'PERINTAH-'.str_pad((string) $this->getKey(), 2, '0', STR_PAD_LEFT);
+        }
+
         return $this->user_story_key ?? 'US-'.str_pad((string) $this->getKey(), 2, '0', STR_PAD_LEFT);
+    }
+
+    /** Perintah PO dari chat (Tanya Scrum Master), bukan story backlog. */
+    public function isChatCommand(): bool
+    {
+        return $this->origin === 'CHAT';
+    }
+
+    public function chatCommand(): HasOne
+    {
+        return $this->hasOne(ChatCommand::class);
     }
 
     public function scopeApprover(): BelongsTo

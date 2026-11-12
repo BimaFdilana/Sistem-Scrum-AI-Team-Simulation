@@ -28,7 +28,7 @@ class ExecutionController extends Controller
         if ($story->isLockedFromExecution()) {
             return back()->withErrors(['execution' => 'Story sudah diterima PO ('.$story->acceptanceLabel().') dan tidak bisa dieksekusi lagi.']);
         }
-        if (! $story->estimate_points) {
+        if (! $story->estimate_points && ! $story->isChatCommand()) {
             return back()->withErrors(['execution' => 'Story belum memiliki estimasi Fibonacci.']);
         }
         if (! $story->project?->workspace_path || ! is_dir($story->project->workspace_path)) {

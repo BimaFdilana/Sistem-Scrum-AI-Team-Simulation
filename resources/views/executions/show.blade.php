@@ -60,10 +60,11 @@
 <div class="page-head">
     <div>
         <p class="section-kicker">EKSEKUSI USER STORY</p>
-        @if ($story->sprint_id)<p><a class="text-link" href="{{ route('chat.index', ['sprint' => $story->sprint_id]) }}">Tanya Scrum Master tentang sprint ini →</a></p>@endif
+        @php $chatSprintId = $story->sprint_id ?? $story->chatCommand?->sprint_id; @endphp
+        @if ($chatSprintId)<p><a class="text-link" href="{{ route('chat.index', ['sprint' => $chatSprintId]) }}">{{ $story->isChatCommand() ? '← Kembali ke chat Scrum Master' : 'Tanya Scrum Master tentang sprint ini →' }}</a></p>@endif
         <h1>{{ $story->display_id }} — {{ $story->effectiveTitle() }}</h1>
         <p class="muted">
-            {{ $story->estimate_points }} poin · {{ $story->hasRefinement() ? 'Hasil Diskusi SM' : 'Data Asli' }}
+            {{ $story->isChatCommand() ? 'Perintah PO dari chat' : $story->estimate_points.' poin · '.($story->hasRefinement() ? 'Hasil Diskusi SM' : 'Data Asli') }}
             · <span class="exec-chip {{ $run->mode === 'direct' ? 'exec-chip--ok' : '' }}">{{ $run->mode === 'direct' ? 'direct · sekuensial' : 'worktree · paralel' }}</span>
             · <span class="exec-chip">{{ ($run->qa_mode ?? 'per_task') === 'batch' ? 'QA sekali di akhir' : 'QA per task' }}</span>
         </p>

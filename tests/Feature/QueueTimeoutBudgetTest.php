@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Jobs\DirectChangeJob;
 use Tests\TestCase;
 
 /**
@@ -19,6 +18,5 @@ class QueueTimeoutBudgetTest extends TestCase
         $this->assertGreaterThan($workerTimeout, $retryAfter);
         $this->assertLessThan($workerTimeout, (int) config('ai.opencode.timeout'));
         $this->assertLessThan($workerTimeout, (int) config('ai.hermes.timeout', 1500));
-        $this->assertLessThanOrEqual($workerTimeout, (new DirectChangeJob(1))->timeout);
     }
 }

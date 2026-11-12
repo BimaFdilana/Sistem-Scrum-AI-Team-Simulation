@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\Chat\ChatCommandReporter;
 use App\Support\Execution\BatchQa;
 use App\Support\Execution\ExecutionScheduler;
 use Illuminate\Database\Eloquent\Model;
@@ -127,6 +128,7 @@ class ExecutionRun extends Model
 
         if ($updated > 0) {
             $this->refresh();
+            ChatCommandReporter::statusChanged($this);
         }
 
         return $updated > 0;
@@ -192,6 +194,13 @@ class ExecutionRun extends Model
             $current = static::query()->whereKey($run->getKey())->value('status');
             if ($current === self::NEEDS_PO) {
                 $run->status = self::NEEDS_PO;
+            }
+        });
+
+        // Perintah chat (Tanya Scrum Master): SM melapor ke chat tiap kali tahap berubah.
+        static::updated(function (ExecutionRun $run): void {
+            if ($run->wasChanged('status')) {
+                ChatCommandReporter::statusChanged($run);
             }
         });
     }

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Exceptions\AiUnavailableException;
 use App\Exceptions\ModelNotChosenException;
 use App\Models\ChatConversation;
+use App\Models\ExecutionRun;
 use App\Models\Project;
 use App\Models\Sprint;
 use App\Services\ChatDisclosurePolicy;
@@ -59,7 +60,14 @@ class ChatController extends Controller
         }
 
         $conversation = $archived ?? ($selectedSprint ? $threads->get($selectedSprint->id) : null);
-        $messages = $conversation?->messages()->with('directChange')->oldest('id')->get() ?? collect();
+        $messages = $conversation?->messages()->with('executionRun.story')->oldest('id')->get() ?? collect();
+        // Tombol keputusan hanya pada laporan terbaru tiap run, dan hanya untuk run terbaru tiap perintah.
+        $latestReportIds = $messages->where('kind', 'report')->whereNotNull('execution_run_id')
+            ->groupBy('execution_run_id')->map(fn ($group) => $group->max('id'))->all();
+        $commandStoryIds = $messages->pluck('executionRun.story_id')->filter()->unique()->values();
+        $latestRunIds = $commandStoryIds->isEmpty() ? [] : ExecutionRun::query()
+            ->whereIn('story_id', $commandStoryIds)->selectRaw('story_id, max(id) as id')->groupBy('story_id')
+            ->pluck('id', 'story_id')->all();
         $messages->each(function ($message) use ($disclosurePolicy): void {
             if ($message->role === 'assistant' && $disclosurePolicy->containsSensitiveDisclosure($message->content)) {
                 $message->content = ChatDisclosurePolicy::SAFE_RESPONSE;
@@ -82,6 +90,8 @@ class ChatController extends Controller
             'selectedSprint' => $selectedSprint,
             'selectedProject' => $sprintProject,
             'sprintStories' => $stories,
+            'latestReportIds' => $latestReportIds,
+            'latestRunIds' => $latestRunIds,
             'activePage' => 'chat',
         ]);
     }

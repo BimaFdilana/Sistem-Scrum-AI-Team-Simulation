@@ -6,7 +6,7 @@ use App\Http\Controllers\AiProviderController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\DemoController;
-use App\Http\Controllers\DirectChangeController;
+use App\Http\Controllers\ChatCommandController;
 use App\Http\Controllers\ExecutionController;
 use App\Http\Controllers\GithubSettingsController;
 use App\Http\Controllers\NotificationController;
@@ -36,9 +36,8 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/chat/messages', [ChatController::class, 'store'])
         ->middleware('throttle:30,1')
         ->name('chat.messages.store');
-    Route::post('/chat/changes', [DirectChangeController::class, 'store'])->middleware('throttle:6,1')->name('chat.changes.store');
-    Route::get('/chat/changes/{change}', [DirectChangeController::class, 'status'])->name('chat.changes.status');
-    Route::post('/chat/changes/{change}/revert', [DirectChangeController::class, 'revert'])->middleware('throttle:6,1')->name('chat.changes.revert');
+    Route::post('/chat/commands', [ChatCommandController::class, 'store'])->middleware('throttle:6,1')->name('chat.commands.store');
+    Route::get('/chat/commands/{run}', [ChatCommandController::class, 'status'])->name('chat.commands.status');
     Route::get('/agents', [WorkspaceController::class, 'agents'])->name('agents.index');
     Route::get('/ai-providers', [AiProviderController::class, 'index'])->name('ai-providers.index');
     // Satu model untuk semua peran agent, dipilih di halaman AI Providers.

@@ -3,20 +3,17 @@
 namespace Tests\Feature;
 
 use App\Jobs\AdvanceStoryEstimationJob;
-use App\Jobs\DirectChangeJob;
-use App\Models\DirectChange;
+use App\Jobs\BreakdownExecutionJob;
+use App\Models\ChatMessage;
 use App\Models\ExecutionRun;
 use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\Story;
 use App\Models\StoryEstimationRun;
 use App\Models\User;
-use App\Support\Chat\SprintChat;
 use App\Support\Execution\DirectWorkspace;
-use App\Support\Execution\OpenCodeRunner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
-use Mockery\MockInterface;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
@@ -176,112 +173,87 @@ class Sprint2FixesTest extends TestCase
         $this->actingAs($user)->post(route('stories.estimations.reestimate', $story))->assertSessionHasErrors('estimation');
     }
 
-    // ---------- 3. Ubah kode langsung dari chat ----------
+    // ---------- 3. Tanya Scrum Master: perintah chat ke tim ----------
 
-    public function test_change_request_creates_chat_messages_and_queues_developer(): void
+    public function test_chat_command_starts_team_execution_without_backlog(): void
     {
-        Bus::fake([DirectChangeJob::class]);
+        Bus::fake([BreakdownExecutionJob::class]);
         $user = User::factory()->create();
         $sprint = $this->sprint($this->project());
 
-        $this->actingAs($user)->postJson(route('chat.changes.store'), ['message' => 'Ganti teks awal', 'sprint_id' => $sprint->id])
-            ->assertStatus(202)->assertJsonPath('change.status', 'QUEUED');
+        $this->actingAs($user)->postJson(route('chat.commands.store'), ['message' => "Tambahkan kolom Pagu di daftar unit\nUrutkan berdasarkan nama", 'sprint_id' => $sprint->id])
+            ->assertStatus(202);
 
-        Bus::assertDispatched(DirectChangeJob::class);
-        $this->assertDatabaseHas('chat_messages', ['kind' => 'change', 'role' => 'user', 'content' => 'Ganti teks awal']);
+        $story = Story::query()->where('origin', 'CHAT')->firstOrFail();
+        $this->assertNull($story->sprint_id); // tidak masuk Sprint Backlog
+        $this->assertStringStartsWith('PERINTAH-', $story->display_id);
+        $this->assertSame(1, ExecutionRun::query()->where('story_id', $story->id)->where('status', 'QUEUED')->count());
+        Bus::assertDispatched(BreakdownExecutionJob::class);
+        $this->assertDatabaseHas('chat_messages', ['kind' => 'command', 'role' => 'user']);
+
         $this->actingAs($user)->get('/chat?sprint='.$sprint->id)->assertOk()
-            ->assertSee('DEVELOPER · UBAH KODE LANGSUNG')->assertSee('Ubah kode langsung');
+            ->assertSee('Laporan Scrum Master')->assertSee('Tanya Scrum Master')
+            ->assertSee('perintah untuk tim')->assertDontSee('Ubah kode langsung');
+        $this->actingAs($user)->get(route('projects.show', $sprint->project_id))->assertOk()->assertDontSee('Tambahkan kolom Pagu di daftar unit');
     }
 
-    public function test_change_request_is_refused_while_an_execution_runs_in_the_project(): void
+    public function test_chat_command_is_refused_while_team_is_busy_in_the_project(): void
     {
         $user = User::factory()->create();
         $project = $this->project();
         $sprint = $this->sprint($project);
         $this->makeRun($project, 'EXECUTING', 'scrum/run-1');
 
-        $this->actingAs($user)->postJson(route('chat.changes.store'), ['message' => 'Ganti teks awal', 'sprint_id' => $sprint->id])
+        $this->actingAs($user)->postJson(route('chat.commands.store'), ['message' => 'Ganti judul halaman', 'sprint_id' => $sprint->id])
             ->assertStatus(409);
     }
 
-    private function fakeDeveloper(callable $edit, bool $ok = true): void
-    {
-        $this->mock(OpenCodeRunner::class, function (MockInterface $mock) use ($edit, $ok) {
-            $mock->shouldReceive('run')->andReturnUsing(function (string $path) use ($edit, $ok) {
-                $edit($path);
-
-                return ['ok' => $ok, 'exit' => $ok ? 0 : 1, 'output' => $ok ? 'ok' : 'timeout'];
-            });
-        });
-    }
-
-    private function change(Project $project, User $user): DirectChange
-    {
-        $sprint = $this->sprint($project);
-        $conversation = SprintChat::conversation($user, $sprint);
-        $change = DirectChange::query()->create(['project_id' => $project->id, 'sprint_id' => $sprint->id, 'user_id' => $user->id, 'chat_conversation_id' => $conversation->id, 'request' => 'Ganti teks awal', 'status' => 'QUEUED']);
-        $conversation->messages()->create(['role' => 'assistant', 'kind' => 'change', 'content' => 'x', 'direct_change_id' => $change->id]);
-
-        return $change;
-    }
-
-    public function test_developer_change_is_merged_to_main_and_can_be_reverted(): void
+    public function test_scrum_master_reports_each_stage_once_with_decision_buttons(): void
     {
         $user = User::factory()->create();
-        $project = $this->project();
-        $change = $this->change($project, $user);
-        $this->fakeDeveloper(fn (string $path) => file_put_contents($path.'/app.php', "<?php\necho 'baru';\n"));
+        $sprint = $this->sprint($this->project());
+        Bus::fake([BreakdownExecutionJob::class]);
+        $this->actingAs($user)->postJson(route('chat.commands.store'), ['message' => 'Ganti judul halaman', 'sprint_id' => $sprint->id])->assertStatus(202);
+        $run = ExecutionRun::query()->latest('id')->firstOrFail();
+        $run->tasks()->create(['title' => 'Ganti judul di layout', 'assignee' => 'frontend-developer', 'status' => 'PENDING', 'sort_order' => 0]);
 
-        app()->call([new DirectChangeJob($change->id), 'handle']);
+        $run->forceFill(['status' => 'EXECUTING'])->save();
+        $run->forceFill(['status' => 'EXECUTING', 'summary' => 'x'])->save(); // tidak dobel
+        $run->forceFill(['status' => 'COMPLETED', 'summary' => 'Lulus review gabungan.'])->save();
 
-        $change->refresh();
-        $this->assertSame('DONE', $change->status, (string) $change->error);
-        $this->assertSame(['app.php'], $change->files);
-        $this->assertSame('main', $this->git('branch', '--show-current'));
-        $this->assertStringContainsString('baru', file_get_contents($this->repo.'/app.php'));
-        $this->assertDatabaseHas('chat_messages', ['direct_change_id' => $change->id, 'content' => 'Perubahan kode selesai diterapkan.']);
+        $reports = ChatMessage::query()->where('kind', 'report')->where('execution_run_id', $run->id)->pluck('content');
+        $this->assertCount(2, $reports);
+        $this->assertStringContainsString('[FE] Ganti judul di layout', $reports[0]);
+        $this->assertStringContainsString('lolos pemeriksaan QA', $reports[1]);
 
-        $this->actingAs($user)->postJson(route('chat.changes.revert', $change))->assertOk()->assertJsonPath('status', 'REVERTED');
-        $this->assertStringContainsString('awal', file_get_contents($this->repo.'/app.php'));
+        $this->actingAs($user)->get('/chat?sprint='.$sprint->id)->assertOk()
+            ->assertSee('✓ Terima')->assertSee('Tandai Gagal')
+            ->assertSee(route('stories.executions.accept', [$run->story_id, $run]), false);
     }
 
-    public function test_invalid_php_is_never_applied_to_main(): void
+    public function test_failed_chat_command_offers_rerun_without_estimate(): void
     {
+        Bus::fake([BreakdownExecutionJob::class]);
         $user = User::factory()->create();
-        $project = $this->project();
-        $change = $this->change($project, $user);
-        $this->fakeDeveloper(fn (string $path) => file_put_contents($path.'/app.php', "<?php\necho 'rusak'\n"));
+        $sprint = $this->sprint($this->project());
+        $this->actingAs($user)->postJson(route('chat.commands.store'), ['message' => 'Ganti judul halaman', 'sprint_id' => $sprint->id])->assertStatus(202);
+        $run = ExecutionRun::query()->latest('id')->firstOrFail();
+        $run->forceFill(['status' => 'FAILED', 'summary' => 'Task #1 gagal: timeout'])->save();
 
-        app()->call([new DirectChangeJob($change->id), 'handle']);
-
-        $change->refresh();
-        $this->assertSame('FAILED', $change->status);
-        $this->assertStringContainsString('tidak valid', (string) $change->error);
-        $this->assertSame('main', $this->git('branch', '--show-current'));
-        $this->assertSame('', $this->git('status', '--porcelain'));
-        $this->assertStringContainsString('awal', file_get_contents($this->repo.'/app.php'));
+        $this->actingAs($user)->get('/chat?sprint='.$sprint->id)->assertOk()->assertSee('Jalankan ulang')->assertSee('Task #1 gagal: timeout');
+        $this->actingAs($user)->post(route('stories.executions.store', $run->story_id))->assertRedirect();
+        $this->assertSame(2, ExecutionRun::query()->where('story_id', $run->story_id)->count());
     }
 
-    public function test_failed_developer_leaves_main_untouched(): void
+    public function test_status_of_a_command_is_private(): void
     {
-        $user = User::factory()->create();
-        $project = $this->project();
-        $change = $this->change($project, $user);
-        $this->fakeDeveloper(fn (string $path) => file_put_contents($path.'/app.php', "<?php\necho 'separuh';\n"), false);
-
-        app()->call([new DirectChangeJob($change->id), 'handle']);
-
-        $this->assertSame('FAILED', $change->fresh()->status);
-        $this->assertSame('', $this->git('status', '--porcelain'));
-        $this->assertStringContainsString('awal', file_get_contents($this->repo.'/app.php'));
-    }
-
-    public function test_other_users_cannot_read_or_revert_a_change(): void
-    {
+        Bus::fake([BreakdownExecutionJob::class]);
         $owner = User::factory()->create();
-        $change = $this->change($this->project(), $owner);
+        $sprint = $this->sprint($this->project());
+        $this->actingAs($owner)->postJson(route('chat.commands.store'), ['message' => 'Ganti judul halaman', 'sprint_id' => $sprint->id]);
+        $run = ExecutionRun::query()->latest('id')->firstOrFail();
 
-        $this->actingAs(User::factory()->create())->getJson(route('chat.changes.status', $change))->assertForbidden();
-        $this->actingAs(User::factory()->create())->postJson(route('chat.changes.revert', $change))->assertForbidden();
+        $this->actingAs($owner)->getJson(route('chat.commands.status', $run))->assertOk()->assertJsonPath('active', true);
+        $this->actingAs(User::factory()->create())->getJson(route('chat.commands.status', $run))->assertNotFound();
     }
 }

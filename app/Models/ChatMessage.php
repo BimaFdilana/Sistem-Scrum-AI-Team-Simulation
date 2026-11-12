@@ -15,7 +15,7 @@ class ChatMessage extends Model
         'image_path',
         'link_url',
         'link_label',
-        'direct_change_id',
+        'execution_run_id',
     ];
 
     public function isReport(): bool
@@ -35,9 +35,9 @@ class ChatMessage extends Model
         return Storage::disk('public')->url($this->image_path);
     }
 
-    public function directChange(): BelongsTo
+    public function executionRun(): BelongsTo
     {
-        return $this->belongsTo(DirectChange::class);
+        return $this->belongsTo(ExecutionRun::class);
     }
 
     public function conversation(): BelongsTo
