@@ -90,6 +90,9 @@ class ChatController extends Controller
             'selectedSprint' => $selectedSprint,
             'selectedProject' => $sprintProject,
             'sprintStories' => $stories,
+            // Dua transkrip terpisah: perintah ke tim (Tanya) dan sisanya (Laporan).
+            'commandMessages' => $messages->filter(fn ($m) => $m->kind === 'command' || ($m->execution_run_id && $m->executionRun?->story?->isChatCommand()))->values(),
+            'reportMessages' => $messages->reject(fn ($m) => $m->kind === 'command' || ($m->execution_run_id && $m->executionRun?->story?->isChatCommand()))->values(),
             'latestReportIds' => $latestReportIds,
             'latestRunIds' => $latestRunIds,
             'activePage' => 'chat',

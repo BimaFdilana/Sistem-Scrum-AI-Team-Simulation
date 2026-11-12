@@ -11,9 +11,11 @@ use App\Models\Sprint;
 use App\Models\Story;
 use App\Models\StoryEstimationRun;
 use App\Models\User;
+use App\Support\Chat\SprintChat;
 use App\Support\Execution\DirectWorkspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
@@ -194,6 +196,16 @@ class Sprint2FixesTest extends TestCase
         $this->actingAs($user)->get('/chat?sprint='.$sprint->id)->assertOk()
             ->assertSee('Laporan Scrum Master')->assertSee('Tanya Scrum Master')
             ->assertSee('perintah untuk tim')->assertDontSee('Ubah kode langsung');
+
+        // Transkrip terpisah: perintah hanya di tab Tanya, obrolan/laporan sprint di tab Laporan.
+        SprintChat::report(SprintChat::conversation($user, $sprint), 'Hasil estimasi US-01: 5 poin');
+        $html = $this->actingAs($user)->get('/chat?sprint='.$sprint->id)->getContent();
+        $reportPane = Str::between($html, 'id="chatTranscript"', 'id="commandTranscript"');
+        $commandPane = Str::after($html, 'id="commandTranscript"');
+        $this->assertStringNotContainsString('Tambahkan kolom Pagu di daftar unit', $reportPane);
+        $this->assertStringContainsString('Hasil estimasi US-01', $reportPane);
+        $this->assertStringContainsString('Tambahkan kolom Pagu di daftar unit', $commandPane);
+        $this->assertStringNotContainsString('Hasil estimasi US-01', $commandPane);
         $this->actingAs($user)->get(route('projects.show', $sprint->project_id))->assertOk()->assertDontSee('Tambahkan kolom Pagu di daftar unit');
     }
 

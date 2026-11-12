@@ -100,63 +100,29 @@
             </header>
 
             <section class="chat-panel" aria-label="Chat dengan {{ $agent['name'] }}">
-                <div class="chat-transcript" id="chatTranscript" aria-live="polite" aria-relevant="additions text">
-                    @forelse ($messages as $message)
-                        @if ($message->kind === 'command' && $message->role === 'user')
-                            @php($cmdRun = $message->executionRun)
-                            <article class="chat-message chat-message-user chat-message-command">
-                                <span class="chat-message-label">Anda · perintah untuk tim<time datetime="{{ $message->created_at->toIso8601String() }}">{{ $message->created_at->translatedFormat('d M, H:i') }}</time></span>
-                                <p>{{ $message->content }}</p>
-                                @if ($cmdRun)
-                                    @php($cmdActive = in_array($cmdRun->status, \App\Support\Execution\DirectWorkspace::ACTIVE, true))
-                                    <span class="chat-command-status is-{{ $cmdActive ? 'running' : strtolower($cmdRun->status) }}" @if ($cmdActive) data-command-active data-status-url="{{ route('chat.commands.status', $cmdRun, false) }}" @endif>
-                                        @if ($cmdActive)<span class="chat-command-spin" aria-hidden="true"></span>@endif
-                                        <span class="chat-command-label">{{ \App\Http\Controllers\ChatCommandController::label($cmdRun->status) }}</span>
-                                        · <a href="{{ route('stories.executions.show', [$cmdRun->story_id, $cmdRun]) }}">lihat proses</a>
-                                    </span>
-                                @endif
-                            </article>
-                        @elseif ($message->isReport())
-                            <article class="chat-report" id="laporan-{{ $message->id }}">
-                                <header>
-                                    <span class="chat-report-tag">LAPORAN SCRUM MASTER</span>
-                                    <time datetime="{{ $message->created_at->toIso8601String() }}">{{ $message->created_at->translatedFormat('d M, H:i') }}</time>
-                                </header>
-                                <p>{{ $message->content }}</p>
-                                @if ($message->link_url)<a class="text-link" href="{{ $message->link_url }}">{{ $message->link_label ?: 'Lihat detail' }} →</a>@endif
-                                @php($rRun = $message->executionRun)
-                                @if ($rRun && $message->id === ($latestReportIds[$rRun->id] ?? null) && $rRun->story && ! $rRun->story->isAccepted())
-                                    <div class="chat-report-actions">
-                                        @if ($rRun->status === 'COMPLETED' && $rRun->id === ($latestRunIds[$rRun->story_id] ?? null))
-                                            <form method="POST" action="{{ route('stories.executions.accept', [$rRun->story_id, $rRun]) }}">@csrf
-                                                <button class="button button-primary" type="submit" name="status" value="BERHASIL" onclick="return handleConfirm(event, {title: 'Terima hasil perintah?', message: 'Hasil dianggap berhasil dan masuk ke kode utama. Sistem memeriksa demo dan uji jalan dulu.', confirmLabel: 'Ya, terima'})">✓ Terima</button>
-                                                <button class="button button-danger" type="submit" name="status" value="GAGAL" onclick="return handleConfirm(event, {title: 'Tandai gagal?', message: 'Hasil tidak digabung ke kode utama. Anda bisa menjalankan ulang perintah ini.', confirmLabel: 'Ya, tandai gagal', danger: true})">Tandai Gagal</button>
-                                            </form>
-                                        @elseif ($rRun->status === 'NEEDS_PO')
-                                            <form method="POST" action="{{ route('stories.executions.resume', [$rRun->story_id, $rRun]) }}">@csrf<button class="button button-primary" type="submit">Lanjutkan</button></form>
-                                            <form method="POST" action="{{ route('stories.executions.accept', [$rRun->story_id, $rRun]) }}">@csrf<button class="button button-danger" type="submit" name="status" value="GAGAL">Tandai Gagal</button></form>
-                                        @elseif (in_array($rRun->status, ['FAILED', 'BLOCKED'], true) && $rRun->id === ($latestRunIds[$rRun->story_id] ?? null))
-                                            <form method="POST" action="{{ route('stories.executions.store', $rRun->story_id) }}">@csrf<button class="button button-primary" type="submit">↻ Jalankan ulang</button></form>
-                                        @endif
-                                    </div>
-                                @elseif ($rRun && $rRun->story && $rRun->story->isAccepted() && $message->id === ($latestReportIds[$rRun->id] ?? null))
-                                    <p class="chat-report-decided">Keputusan Anda: <strong>{{ $rRun->story->acceptanceLabel() }}</strong>.</p>
-                                @endif
-                            </article>
-                        @else
-                            <article class="chat-message chat-message-{{ $message->role }}">
-                                <span class="chat-message-label">{{ $message->role === 'assistant' ? $agent['name'] : 'Anda' }}<time datetime="{{ $message->created_at->toIso8601String() }}">{{ $message->created_at->translatedFormat('d M, H:i') }}</time></span>
-                                @if($message->imageUrl())
-                                    <img src="{{ $message->imageUrl() }}" alt="Gambar terlampir" class="chat-message-image">
-                                @endif
-                                <p>{{ $message->content }}</p>
-                            </article>
-                        @endif
+                <div class="chat-tabs" role="tablist" aria-label="Jenis percakapan">
+                    <button type="button" role="tab" class="chat-tab" id="tab-report" data-tab="report" aria-controls="chatTranscript" aria-selected="true">📋 Laporan Scrum Master @if ($reportMessages->isNotEmpty())<span class="chat-tab-count">{{ $reportMessages->count() }}</span>@endif</button>
+                    <button type="button" role="tab" class="chat-tab" id="tab-command" data-tab="command" aria-controls="commandTranscript" aria-selected="false">🧭 Tanya Scrum Master @if ($commandMessages->isNotEmpty())<span class="chat-tab-count">{{ $commandMessages->where('kind', 'command')->count() }} perintah</span>@endif</button>
+                </div>
+                <div class="chat-transcript" id="chatTranscript" data-pane="report" role="tabpanel" aria-labelledby="tab-report" aria-live="polite" aria-relevant="additions text">
+                    @forelse ($reportMessages as $message)
+                        @include('workspace.partials.chat-message', ['message' => $message])
                     @empty
                         <div class="chat-empty" id="chatEmpty">
                             <span class="chat-empty-mark">✦</span>
                             <h2>{{ $selectedSprint ? 'Belum ada percakapan di sprint ini' : 'Pilih sprint untuk memulai' }}</h2>
                             <p>{{ $selectedSprint ? 'Tanyakan status sprint, minta ringkasan, atau diskusikan story. Laporan hasil estimasi dan eksekusi juga akan muncul di sini.' : 'Percakapan dan laporan Scrum Master dipisah per sprint.' }}</p>
+                        </div>
+                    @endforelse
+                </div>
+                <div class="chat-transcript" id="commandTranscript" data-pane="command" role="tabpanel" aria-labelledby="tab-command" hidden>
+                    @forelse ($commandMessages as $message)
+                        @include('workspace.partials.chat-message', ['message' => $message])
+                    @empty
+                        <div class="chat-empty">
+                            <span class="chat-empty-mark">🧭</span>
+                            <h2>Belum ada perintah</h2>
+                            <p>Tulis perintah di bawah. Scrum Master membagi tugas ke Backend dan Frontend, QA memeriksa, lalu hasilnya dilaporkan di sini.</p>
                         </div>
                     @endforelse
                 </div>
@@ -169,10 +135,6 @@
                         <input type="hidden" id="conversationId" value="{{ $conversation?->uuid }}">
                         <input type="hidden" id="sprintId" value="{{ $selectedSprint?->id }}">
                         @if ($canSend)
-                            <div class="chat-mode" role="radiogroup" aria-label="Jenis pesan">
-                                <label class="chat-mode-opt"><input type="radio" name="chat_mode" value="report" checked><span>📋 Laporan Scrum Master</span></label>
-                                <label class="chat-mode-opt"><input type="radio" name="chat_mode" value="command"><span>🧭 Tanya Scrum Master</span></label>
-                            </div>
                             <p class="chat-mode-note" id="commandNote" hidden>Tulis perintah untuk tim. Scrum Master membagi tugas ke <strong>Backend</strong> dan <strong>Frontend</strong>, <strong>QA</strong> memeriksa hasilnya, lalu Scrum Master melapor di chat ini. Tanpa backlog, estimasi, atau persetujuan sprint; Anda cukup memutuskan Terima atau Gagal di akhir.</p>
                             <div class="chat-quick" aria-label="Pertanyaan cepat">
                                 <button type="button" class="chat-quick-btn" data-prompt="Ringkas status sprint ini untuk saya.">Ringkas status sprint</button>
@@ -202,6 +164,41 @@
         </div>
     </section>
 
+    <script>
+        // Tab percakapan: Laporan Scrum Master dan Tanya Scrum Master punya transkrip sendiri.
+        (() => {
+            const tabs = document.querySelectorAll('.chat-tab');
+            const panes = { report: document.getElementById('chatTranscript'), command: document.getElementById('commandTranscript') };
+            if (!tabs.length) return;
+            let initial = new URLSearchParams(location.search).get('tab') === 'tanya' ? 'command' : 'report';
+            if (location.hash && panes.command && panes.command.querySelector(location.hash)) initial = 'command';
+            const apply = (tab, focus) => {
+                window.chatTab = tab;
+                tabs.forEach((t) => {
+                    const on = t.dataset.tab === tab;
+                    t.setAttribute('aria-selected', String(on));
+                    t.tabIndex = on ? 0 : -1;
+                });
+                Object.entries(panes).forEach(([key, el]) => { if (el) el.hidden = key !== tab; });
+                const pane = panes[tab];
+                if (pane && !location.hash) pane.scrollTop = pane.scrollHeight;
+                const url = new URL(location.href);
+                if (tab === 'command') { url.searchParams.set('tab', 'tanya'); } else { url.searchParams.delete('tab'); }
+                history.replaceState(null, '', url);
+                document.dispatchEvent(new CustomEvent('chat:tab', { detail: { tab, focus } }));
+            };
+            tabs.forEach((t) => {
+                t.addEventListener('click', () => apply(t.dataset.tab, true));
+                t.addEventListener('keydown', (event) => {
+                    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                    const next = t.dataset.tab === 'report' ? 'command' : 'report';
+                    apply(next, false);
+                    document.querySelector('.chat-tab[data-tab="' + next + '"]').focus();
+                });
+            });
+            apply(initial, false);
+        })();
+    </script>
     <script src="{{ asset('js/chat-markdown.js') }}?v={{ filemtime(public_path('js/chat-markdown.js')) }}"></script>
     <script>
         (() => {
@@ -239,8 +236,9 @@
             const commandNote = document.getElementById('commandNote');
             const quick = document.querySelector('.chat-quick');
             const askPlaceholder = input.placeholder;
-            const mode = () => (document.querySelector('input[name="chat_mode"]:checked') || {}).value || 'report';
-            document.querySelectorAll('input[name="chat_mode"]').forEach((radio) => radio.addEventListener('change', () => {
+            const mode = () => window.chatTab || 'report';
+            // Kotak pesan mengikuti tab aktif: Laporan (tanya status/ringkasan) atau Tanya (perintah ke tim).
+            const syncMode = (focus) => {
                 const command = mode() === 'command';
                 commandNote.hidden = !command;
                 if (quick) quick.hidden = command;
@@ -250,7 +248,10 @@
                 input.placeholder = command
                     ? 'Tulis perintah untuk tim. Contoh: "Di halaman daftar unit kerja, tambahkan kolom Pagu dan urutkan berdasarkan nama."'
                     : askPlaceholder;
-                input.focus();            }));
+                if (focus) input.focus();
+            };
+            document.addEventListener('chat:tab', (event) => syncMode(event.detail.focus));
+            syncMode(false);
             document.querySelectorAll('.chat-quick-btn').forEach((btn) => btn.addEventListener('click', () => {
                 input.value = btn.dataset.prompt;
                 form.requestSubmit();
