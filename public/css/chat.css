@@ -85,3 +85,9 @@
 .chat-report-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .chat-report-actions form{display:inline-flex;gap:8px}
 .chat-report-decided{margin:10px 0 0!important;color:var(--muted);font-size:12px!important}
+/* Pilihan mode selebar kotak pesan; label tidak terlipat. */
+.chat-mode{display:flex;width:100%}
+.chat-mode-opt{flex:1;min-width:0}
+.chat-mode-opt span{display:block;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Area konten sempit (sidebar + panel): daftar percakapan pindah ke atas agar chat tetap lega. */
+@media(max-width:1180px){.chat-shell{grid-template-columns:1fr}.chat-rail{position:static;max-height:220px}.chat-shell .chat-transcript{max-height:calc(100vh - 360px)}}
