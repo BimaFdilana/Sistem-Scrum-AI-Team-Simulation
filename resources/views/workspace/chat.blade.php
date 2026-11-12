@@ -88,7 +88,7 @@
                         <div>
                             <strong>Tidak bisa</strong>
                             <ul>
-                                <li>Mengubah kode atau menjalankan task dari chat ini.</li>
+                                <li>Mengubah kode sendiri. Untuk itu pilih mode <strong>Ubah kode langsung</strong>: permintaan dikerjakan Developer, bukan Scrum Master.</li>
                                 <li>Menyetujui izin eksekusi atau menerima story; itu keputusan Anda lewat tombol.</li>
                                 <li>Mengubah backlog atau memberi estimasi sendiri.</li>
                                 <li>Membuka detail server atau platform.</li>
@@ -101,7 +101,39 @@
             <section class="chat-panel" aria-label="Chat dengan {{ $agent['name'] }}">
                 <div class="chat-transcript" id="chatTranscript" aria-live="polite" aria-relevant="additions text">
                     @forelse ($messages as $message)
-                        @if ($message->isReport())
+                        @if ($message->kind === 'change' && $message->role === 'user')
+                            <article class="chat-message chat-message-user chat-message-change">
+                                <span class="chat-message-label">Anda · permintaan ubah kode<time datetime="{{ $message->created_at->toIso8601String() }}">{{ $message->created_at->translatedFormat('d M, H:i') }}</time></span>
+                                <p>{{ $message->content }}</p>
+                            </article>
+                        @elseif ($message->kind === 'change' && $message->directChange)
+                            @php($change = $message->directChange)
+                            <article class="chat-change is-{{ strtolower($change->status) }}" id="perubahan-{{ $change->id }}"
+                                @if ($change->isActive()) data-change-active data-status-url="{{ route('chat.changes.status', $change, false) }}" @endif>
+                                <header>
+                                    <span class="chat-change-tag">DEVELOPER · UBAH KODE LANGSUNG</span>
+                                    <span class="chat-change-status">@if ($change->isActive())<span class="chat-change-spin" aria-hidden="true"></span>@endif{{ $change->statusLabel() }}</span>
+                                </header>
+                                @if ($change->summary)<p>{{ $change->summary }}</p>@endif
+                                @if ($change->error)<p class="chat-change-error">{{ $change->error }}</p>@endif
+                                @if (! empty($change->files))
+                                    <details class="chat-change-files" @if ($change->status === 'DONE') open @endif>
+                                        <summary>{{ count($change->files) }} file {{ $change->status === 'DONE' ? 'diubah' : 'disentuh (tidak diterapkan)' }}</summary>
+                                        <ul>@foreach ($change->files as $file)<li><code>{{ $file }}</code></li>@endforeach</ul>
+                                    </details>
+                                @endif
+                                @if ($change->isActive())
+                                    <p class="chat-change-hint">Halaman diperbarui otomatis saat selesai. Biasanya 2–10 menit.</p>
+                                @elseif ($change->status === 'DONE')
+                                    <p class="chat-change-hint">Sudah masuk ke kode utama. Buka demo untuk mencoba; bila tampilan tidak berubah, klik "Bangun ulang aset" di Pengaturan &amp; Demo.</p>
+                                @endif
+                                @if ($change->canRevert())
+                                    <button type="button" class="button button-ghost chat-change-revert" data-revert-url="{{ route('chat.changes.revert', $change, false) }}">↩ Batalkan perubahan ini</button>
+                                @elseif ($change->status === 'REVERTED')
+                                    <p class="chat-change-hint">Dibatalkan {{ $change->reverted_at?->translatedFormat('d M, H:i') }}.</p>
+                                @endif
+                            </article>
+                        @elseif ($message->isReport())
                             <article class="chat-report" id="laporan-{{ $message->id }}">
                                 <header>
                                     <span class="chat-report-tag">LAPORAN SCRUM MASTER</span>
@@ -136,6 +168,11 @@
                         <input type="hidden" id="conversationId" value="{{ $conversation?->uuid }}">
                         <input type="hidden" id="sprintId" value="{{ $selectedSprint?->id }}">
                         @if ($canSend)
+                            <div class="chat-mode" role="radiogroup" aria-label="Jenis pesan">
+                                <label class="chat-mode-opt"><input type="radio" name="chat_mode" value="ask" checked><span>💬 Tanya Scrum Master</span></label>
+                                <label class="chat-mode-opt"><input type="radio" name="chat_mode" value="change"><span>🛠 Ubah kode langsung</span></label>
+                            </div>
+                            <p class="chat-mode-note" id="changeNote" hidden>Developer langsung mengubah kode project sesuai permintaan Anda, <strong>tanpa alur Scrum</strong> (tanpa estimasi, izin, dan QA). Hasilnya langsung masuk ke kode utama dan bisa dibatalkan dengan satu klik.</p>
                             <div class="chat-quick" aria-label="Pertanyaan cepat">
                                 <button type="button" class="chat-quick-btn" data-prompt="Ringkas status sprint ini untuk saya.">Ringkas status sprint</button>
                                 <button type="button" class="chat-quick-btn" data-prompt="Story mana yang perlu perhatian atau keputusan saya sekarang?">Apa yang perlu keputusan saya?</button>
@@ -197,6 +234,23 @@
             const error = document.getElementById('chatError');
             const csrf = document.querySelector('meta[name="csrf-token"]').content;
             const sprintId = document.getElementById('sprintId');
+            const changeUrl = @json(route('chat.changes.store', [], false));
+            const changeNote = document.getElementById('changeNote');
+            const quick = document.querySelector('.chat-quick');
+            const askPlaceholder = input.placeholder;
+            const mode = () => (document.querySelector('input[name="chat_mode"]:checked') || {}).value || 'ask';
+            document.querySelectorAll('input[name="chat_mode"]').forEach((radio) => radio.addEventListener('change', () => {
+                const change = mode() === 'change';
+                changeNote.hidden = !change;
+                if (quick) quick.hidden = change;
+                document.getElementById('attachButton').hidden = change;
+                form.classList.toggle('is-change', change);
+                sendButton.firstChild.textContent = change ? 'Kirim ke Developer ' : 'Kirim ';
+                input.placeholder = change
+                    ? 'Jelaskan perubahan kode yang Anda inginkan. Contoh: "Di halaman daftar unit, tambahkan kolom Pagu dan urutkan berdasarkan nama."'
+                    : askPlaceholder;
+                input.focus();
+            }));
             document.querySelectorAll('.chat-quick-btn').forEach((btn) => btn.addEventListener('click', () => {
                 input.value = btn.dataset.prompt;
                 form.requestSubmit();
@@ -310,6 +364,33 @@
                 event.preventDefault();
                 const message = input.value.trim();
                 if (!message || sendButton.disabled) return;
+                if (mode() === 'change') {
+                    const ok = await new Promise((resolve) => {
+                        if (typeof window.showConfirm === 'function') {
+                            window.showConfirm({ title: 'Ubah kode langsung?', message: 'Developer akan langsung mengubah kode project tanpa estimasi, izin, dan QA. Perubahan bisa dibatalkan setelah selesai.', confirmLabel: 'Ya, kerjakan' }).then(resolve);
+                        } else {
+                            resolve(window.confirm('Developer akan langsung mengubah kode project tanpa alur Scrum. Lanjutkan?'));
+                        }
+                    });
+                    if (!ok) return;
+                    sendButton.disabled = true;
+                    error.textContent = 'Mengirim permintaan ke Developer…';
+                    try {
+                        const response = await fetch(changeUrl, {
+                            method: 'POST',
+                            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf },
+                            body: JSON.stringify({ message, sprint_id: sprintId.value ? Number(sprintId.value) : null }),
+                        });
+                        const payload = await response.json().catch(() => null);
+                        if (!response.ok) throw new Error((payload && payload.message) || 'Permintaan gagal dikirim (kode ' + response.status + ').');
+                        window.location.hash = 'perubahan-' + payload.change.id;
+                        window.location.reload();
+                    } catch (exception) {
+                        error.textContent = exception.message;
+                        sendButton.disabled = false;
+                    }
+                    return;
+                }
 
                 addMessage('user', message, attachedUrl);
                 attachedUrl = null; // URL dipakai bubble pesan; jangan revoke di clearAttachment
@@ -379,6 +460,38 @@
                 }
             });
 
+        })();
+
+        // Kartu perubahan kode: pantau yang sedang berjalan, dan tombol batalkan.
+        (() => {
+            const csrf = document.querySelector('meta[name="csrf-token"]').content;
+            const active = document.querySelectorAll('[data-change-active]');
+            if (active.length) {
+                const tick = async () => {
+                    for (const card of active) {
+                        try {
+                            const res = await fetch(card.dataset.statusUrl, { headers: { Accept: 'application/json' } });
+                            const data = await res.json();
+                            if (!data.active) { window.location.hash = 'perubahan-' + data.id; window.location.reload(); return; }
+                            const label = card.querySelector('.chat-change-status');
+                            if (label && label.lastChild) label.lastChild.textContent = data.label;
+                        } catch (e) { /* coba lagi pada putaran berikutnya */ }
+                    }
+                    setTimeout(tick, 5000);
+                };
+                setTimeout(tick, 5000);
+            }
+            document.querySelectorAll('.chat-change-revert').forEach((btn) => btn.addEventListener('click', async () => {
+                const ok = typeof window.showConfirm === 'function'
+                    ? await window.showConfirm({ title: 'Batalkan perubahan ini?', message: 'Kode dikembalikan seperti sebelum permintaan ini. Perubahan lain sesudahnya tidak ikut dibatalkan.', confirmLabel: 'Ya, batalkan', danger: true })
+                    : window.confirm('Batalkan perubahan kode ini?');
+                if (!ok) return;
+                btn.disabled = true;
+                const res = await fetch(btn.dataset.revertUrl, { method: 'POST', headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf } });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) { alert(data.message || 'Gagal membatalkan perubahan.'); btn.disabled = false; return; }
+                window.location.reload();
+            }));
         })();
     </script>
 @endsection

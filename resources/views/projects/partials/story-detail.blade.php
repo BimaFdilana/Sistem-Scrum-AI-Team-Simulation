@@ -27,10 +27,20 @@
                                         <div class="story-estimation-panel">
                                             <form method="POST" action="{{ route('stories.estimations.store', $story) }}" data-fibonacci-form data-story-label="{{ $story->display_id }}">
                                                 @csrf
-                                                <button class="button button-ghost" type="submit" @disabled($latestEstimationRun?->status === 'RUNNING')>Diskusi Fibonacci via Scrum Master</button>
+                                                @if ($story->estimate_points && $latestEstimationRun?->status === 'COMPLETED' && $latestEstimationRun->story_revision === $story->revision)
+                                                    <span class="estimate-current">Poin saat ini: <strong>{{ $story->estimate_points }}</strong></span>
+                                                @else
+                                                    <button class="button button-ghost" type="submit" @disabled(in_array($latestEstimationRun?->status, ['QUEUED', 'RUNNING', 'REPORT_PENDING'], true))>Diskusi Fibonacci via Scrum Master</button>
+                                                @endif
                                                 <p class="field-help">FE, BE dan QA memberi usulan keseluruhan story, saling menanggapi, lalu secara eksplisit menyepakati poin yang sama dalam maksimal dua putaran. Tanpa kesepakatan, tidak ada poin final.</p>
                                             <p class="field-help" data-fibonacci-note role="status" hidden></p>
                                             </form>
+                                            @if ($story->estimate_points && ! $story->isLockedFromExecution() && ! in_array($latestEstimationRun?->status, ['QUEUED', 'RUNNING', 'REPORT_PENDING'], true))
+                                                <form method="POST" action="{{ route('stories.estimations.reestimate', $story) }}" class="reestimate-form">
+                                                    @csrf
+                                                    <button class="button button-ghost" type="submit" onclick="return handleConfirm(event, {title: 'Minta estimasi ulang?', message: 'Backend, Frontend, dan QA akan mendiskusikan poin {{ $story->display_id }} lagi. Poin lama ({{ $story->estimate_points }}) tetap berlaku sampai hasil baru selesai.', confirmLabel: 'Ya, estimasi ulang'})">↻ Minta estimasi ulang</button>
+                                                </form>
+                                            @endif
                                             @if ($latestEstimationRun)
                                                 @if ($latestEstimationRun->story_revision !== $story->revision)
                                                     <p class="estimation-stale">Run #{{ $latestEstimationRun->id }} kedaluwarsa karena User Story berubah.</p>
@@ -69,7 +79,7 @@
                                             @endif
                                         </div>
                                     @else
-                                        <p class="field-help">Estimasi hanya bisa dijalankan saat sprint berstatus PLANNING.</p>
+                                        <p class="field-help">@if ($story->estimate_points)Poin saat ini: <strong>{{ $story->estimate_points }}</strong>. @endif Estimasi (termasuk estimasi ulang) hanya bisa saat sprint dalam Perencanaan.@if ($sprint->status === 'ACTIVE') Klik <strong>Buka kunci sprint</strong> di atas untuk membukanya.@endif</p>
                                     @endif
                                 </div>
 

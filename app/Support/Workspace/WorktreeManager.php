@@ -398,6 +398,31 @@ class WorktreeManager
         }
     }
 
+    /**
+     * Batalkan satu commit dengan commit pembalik (git revert), tanpa menulis
+     * ulang riwayat. Commit merge dibalik relatif ke induk pertamanya.
+     */
+    public function revertCommit(string $path, string $sha): void
+    {
+        $parents = preg_split('/\s+/', trim($this->git($path, ['rev-list', '--parents', '-n', '1', $sha]))) ?: [];
+        $args = ['-c', 'user.email=scrumspace@local', '-c', 'user.name=ScrumSpace', 'revert', '--no-edit'];
+        if (count($parents) > 2) {
+            $args[] = '-m';
+            $args[] = '1';
+        }
+        $args[] = $sha;
+        try {
+            $this->git($path, $args);
+        } catch (RuntimeException $exception) {
+            try {
+                $this->git($path, ['revert', '--abort']);
+            } catch (RuntimeException) {
+                // tidak ada revert yang perlu dibatalkan
+            }
+            throw $exception;
+        }
+    }
+
     /** Hapus worktree + branch task. */
     public function remove(string $baselinePath, string $worktreePath, string $branch): void
     {

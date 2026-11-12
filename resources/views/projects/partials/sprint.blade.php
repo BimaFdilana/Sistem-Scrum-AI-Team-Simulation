@@ -26,7 +26,16 @@
                 </form>
             </details>
             <a class="button button-ghost" href="{{ route('chat.index', ['sprint' => $sprint->id]) }}">Chat dengan Scrum Master</a>
+            @if ($sprint->status === 'ACTIVE')
+                <form method="POST" action="{{ route('sprints.reopen', $sprint) }}">
+                    @csrf
+                    <button class="button button-ghost" type="submit" onclick="return handleConfirm(event, {title: 'Buka kunci sprint?', message: 'Sprint kembali ke Perencanaan: Anda bisa menambah atau mengubah story dan meminta estimasi ulang. Story yang sudah diterima tetap terkunci. Setelah selesai, setujui lagi lalu klik Mulai Sprint.', confirmLabel: 'Ya, buka kunci'})">🔓 Buka kunci sprint</button>
+                </form>
+            @endif
         </div>
+        @if ($sprint->status === 'ACTIVE')
+            <p class="sprint-lock-note">Sprint ini terkunci karena sedang berjalan. Untuk menambah story atau estimasi ulang, klik <strong>Buka kunci sprint</strong>.</p>
+        @endif
         @if ($sprint->goal)
             <div class="sprint-goal-box"><strong>Sprint Goal · {{ $sprint->goal_source === 'AI_DRAFT' ? 'draf Scrum Master AI' : 'goal lama, perlu dirumuskan ulang oleh AI' }}</strong><p>{{ $sprint->goal }}</p></div>
         @endif

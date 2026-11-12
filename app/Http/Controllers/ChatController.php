@@ -59,7 +59,7 @@ class ChatController extends Controller
         }
 
         $conversation = $archived ?? ($selectedSprint ? $threads->get($selectedSprint->id) : null);
-        $messages = $conversation?->messages()->oldest('id')->get() ?? collect();
+        $messages = $conversation?->messages()->with('directChange')->oldest('id')->get() ?? collect();
         $messages->each(function ($message) use ($disclosurePolicy): void {
             if ($message->role === 'assistant' && $disclosurePolicy->containsSensitiveDisclosure($message->content)) {
                 $message->content = ChatDisclosurePolicy::SAFE_RESPONSE;

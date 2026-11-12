@@ -26,6 +26,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Symfony\Component\Process\Exception\ProcessSignaledException;
 use Throwable;
@@ -95,6 +96,17 @@ class ExecuteExecutionTaskJob implements ShouldQueue
 
             if ($directMode) {
                 $direct = app(DirectWorkspace::class);
+                // Sisa perubahan run lain (mis. task yang timeout) dipindahkan ke
+                // cabangnya sendiri, bukan lagi menggagalkan semua eksekusi berikutnya.
+                $recovered = $direct->recoverLeftovers($project, $run);
+                if ($recovered !== null) {
+                    $run->messages()->create([
+                        'execution_task_id' => $task->id,
+                        'sender_slug' => 'scrum-master',
+                        'recipient_slug' => 'product-owner',
+                        'content' => 'Baseline dirapikan otomatis: '.$recovered,
+                    ]);
+                }
                 $direct->assertClean($project);
                 $direct->beginRun($project, $run);
 
@@ -772,7 +784,32 @@ class ExecuteExecutionTaskJob implements ShouldQueue
     private function failRun(ExecutionRun $run, ExecutionTask $task, string $code, ?WorktreeManager $worktrees = null, ?string $baseline = null, ?string $errorMessage = null): void
     {
         $task->forceFill(['status' => 'FAILED', 'last_error' => $errorMessage ?: $code])->save();
-        $run->forceFill(['status' => 'FAILED', 'error_code' => $code, 'completed_at' => now()])->save();
+        $run->forceFill([
+            'status' => 'FAILED',
+            'error_code' => $code,
+            // Alasan yang bisa dibaca PO; dulu kosong sehingga layar hanya
+            // menampilkan kode EXECUTION_FAILED tanpa penjelasan.
+            'summary' => 'Task #'.$task->id.' ('.$task->title.') gagal: '.Str::limit((string) ($errorMessage ?: $code), 600),
+            'completed_at' => now(),
+        ])->save();
+
+        // Mode langsung: simpan pekerjaan setengah jadi di cabang run ini dan
+        // kembalikan baseline ke cabang basis agar eksekusi berikutnya bisa jalan.
+        if (($run->mode ?: config('execution.mode', 'worktree')) === 'direct' && ($project = $run->project()) !== null) {
+            try {
+                $note = app(DirectWorkspace::class)->releaseAfterFailure($project, $run);
+                if ($note !== null) {
+                    $run->messages()->create([
+                        'execution_task_id' => $task->id,
+                        'sender_slug' => 'scrum-master',
+                        'recipient_slug' => 'product-owner',
+                        'content' => 'Eksekusi dihentikan. '.$note,
+                    ]);
+                }
+            } catch (Throwable) {
+                // Best-effort: eksekusi berikutnya tetap memulihkan lewat recoverLeftovers().
+            }
+        }
 
         // Notifikasi ke PO untuk SEMUA kegagalan eksekusi (AI error, JSON invalid,
         // patch ditolak, write error) — PO tidak boleh dibiarkan tanpa kabar.

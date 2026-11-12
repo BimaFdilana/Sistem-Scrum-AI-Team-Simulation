@@ -344,8 +344,3 @@
 .board-more[open]>summary{margin-bottom:8px}
 .board-more[open]>summary::after{content:" · tutup"}
 .board-more-body{display:grid;gap:8px}
-.sprint-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;margin-bottom:12px}
-.sprint-rename>summary{list-style:none;cursor:pointer;display:inline-flex}
-.sprint-rename>summary::-webkit-details-marker{display:none}
-.sprint-rename-form{display:flex;gap:8px;margin-top:8px}
-.sprint-rename-form input{min-width:260px;padding:8px 10px;border:1px solid var(--line-strong);border-radius:9px;background:var(--input-bg);color:var(--text);font:inherit}

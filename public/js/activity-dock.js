@@ -63,7 +63,7 @@
     }
 
     function visibleRuns() {
-        return runs.filter(function (r) { return !(r.state === 'done' && dismissed.indexOf(keyOf(r)) !== -1); });
+        return runs.filter(function (r) { return !(r.state !== 'running' && r.kind === 'change' && dismissed.indexOf(keyOf(r)) !== -1) && !(r.state === 'done' && dismissed.indexOf(keyOf(r)) !== -1); });
     }
 
     function overall(list) {
@@ -99,6 +99,7 @@
             return attention > 0 ? attention + ' perlu tindakan' : list.length + ' proses';
         }
         if (focus.kind === 'estimation') { return 'Fibonacci · ' + focus.headline; }
+        if (focus.kind === 'change') { return 'Ubah kode · ' + focus.headline; }
         var progress = focus.progress.total > 0 ? ' · ' + focus.progress.done + '/' + focus.progress.total + ' task' : '';
         return focus.headline + progress;
     }
@@ -188,8 +189,38 @@
         return card;
     }
 
+    function renderChange(run) {
+        var card = el('article', 'dock-run is-' + run.state);
+        var top = el('div', 'dock-run-top');
+        var titleWrap = el('div');
+        titleWrap.append(el('h3', 'dock-run-title', run.label), el('p', 'dock-run-headline', run.headline));
+        var badgeText = run.state === 'running' ? 'BERJALAN' : (run.state === 'attention' ? 'GAGAL' : 'SELESAI');
+        top.append(titleWrap, el('span', 'dock-badge is-' + run.state, badgeText));
+        card.append(top);
+        var actions = el('div', 'dock-actions');
+        if (run.detail_url) {
+            var link = el('a', 'dock-btn', 'Lihat di chat');
+            link.href = run.detail_url;
+            actions.append(link);
+        }
+        if (run.state !== 'running') {
+            var dismiss = el('button', 'dock-btn', 'Tutup');
+            dismiss.type = 'button';
+            dismiss.addEventListener('click', function () {
+                dismissed.push(keyOf(run));
+                write(KEY_DISMISSED, JSON.stringify(dismissed.slice(-50)));
+                render();
+            });
+            actions.append(dismiss);
+        }
+        card.append(actions);
+
+        return card;
+    }
+
     function renderRun(run) {
         if (run.kind === 'estimation') { return renderEstimation(run); }
+        if (run.kind === 'change') { return renderChange(run); }
         var card = el('article', 'dock-run is-' + run.state);
         var top = el('div', 'dock-run-top');
         var titleWrap = el('div');
@@ -322,7 +353,7 @@
             if (signature === lastSignature) { return; }
             lastSignature = signature;
             var combined = (data.runs || []).map(function (r) { r.kind = r.kind || 'execution'; return r; })
-                .concat(data.estimations || []);
+                .concat(data.estimations || []).concat(data.changes || []);
             detectChanges(combined);
             runs = combined;
             render();

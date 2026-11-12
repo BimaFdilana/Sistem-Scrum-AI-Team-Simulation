@@ -147,7 +147,10 @@
 @elseif ($run->status === 'BLOCKED')
     <p class="discussion-banner discussion-banner--danger"><strong>Eksekusi diblokir.</strong> {{ $run->summary }}</p>
 @elseif ($run->status === 'FAILED')
-    <p class="discussion-banner discussion-banner--danger"><strong>Eksekusi gagal.</strong> {{ $run->error_code }}</p>
+    <div class="discussion-banner discussion-banner--danger">
+        <p><strong>Eksekusi gagal ({{ $run->error_code }}).</strong> {{ $run->summary ?: 'Penyebab tidak tercatat.' }}</p>
+        <p>Pekerjaan yang setengah jadi disimpan di cabang {{ $run->work_branch ?: 'run ini' }} dan tidak ikut ke kode utama. Baseline sudah dikembalikan bersih, jadi Anda bisa langsung menjalankan <strong>Eksekusi User Story</strong> lagi dari halaman project.</p>
+    </div>
 @endif
 
 @if ($run->findings->isNotEmpty())

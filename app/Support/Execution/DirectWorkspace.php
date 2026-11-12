@@ -22,6 +22,98 @@ class DirectWorkspace
 {
     public function __construct(private readonly WorktreeManager $git) {}
 
+    /** Status run yang masih memakai baseline; sisa perubahannya tidak boleh disentuh. */
+    public const ACTIVE = ['QUEUED', 'BREAKDOWN', 'AWAITING_PERMISSION', 'EXECUTING', 'REVIEWING', 'QA_REVIEW', 'MERGING'];
+
+    /**
+     * Pulihkan baseline yang kotor TANPA menghapus apa pun.
+     *
+     * Penyebab nyata (Sprint 2, US-37): task OpenCode timeout di tengah jalan
+     * sehingga 2 file setengah jadi tertinggal. Setiap eksekusi berikutnya lalu
+     * gagal "Baseline project tidak bersih" tanpa jalan keluar bagi PO.
+     *
+     * Kini sisa perubahan di-commit ke cabangnya sendiri (cabang run yang gagal,
+     * atau cabang penyimpanan scrumspace/sisa-*), lalu baseline kembali ke
+     * cabang basis. Tidak ada reset/clean: pekerjaan tetap bisa dipulihkan.
+     *
+     * @return string|null catatan untuk PO, atau null bila baseline sudah bersih
+     */
+    public function recoverLeftovers(Project $project, ?ExecutionRun $current = null): ?string
+    {
+        $path = $this->path($project);
+        $this->restoreLockfileNoise($path);
+        $dirty = $this->git->dirtyFiles($path);
+        if ($dirty === []) {
+            return null;
+        }
+
+        $branch = $this->git->currentBranch($path);
+        $list = implode(', ', array_slice($dirty, 0, 5)).(count($dirty) > 5 ? ', ...' : '');
+        $owner = str_starts_with($branch, 'scrum/run-')
+            ? ExecutionRun::query()->where('work_branch', $branch)->first()
+            : null;
+
+        if ($owner !== null && $current !== null && (int) $owner->id === (int) $current->id) {
+            // Sisa percobaan sebelumnya dari run yang sama: simpan sebagai checkpoint.
+            $this->git->commit($path, 'wip(run-'.$owner->id.'): sisa percobaan task sebelumnya');
+
+            return null;
+        }
+        if ($owner !== null && in_array($owner->status, self::ACTIVE, true)) {
+            throw new RuntimeException('Eksekusi #'.$owner->id.' masih memakai baseline project. Tunggu sampai selesai, lalu coba lagi.');
+        }
+        if ($owner !== null) {
+            $this->git->commit($path, 'wip(run-'.$owner->id.'): sisa pekerjaan yang tidak selesai');
+            $base = $owner->base_branch ?: 'main';
+            $this->git->checkoutBranch($path, $base);
+
+            return count($dirty).' file sisa eksekusi #'.$owner->id.' ('.$list.') disimpan di cabang '.$branch.'; baseline kembali bersih di '.$base.'.';
+        }
+
+        $rescue = 'scrumspace/sisa-'.now()->format('Ymd-His');
+        $this->git->createBranchAndCheckout($path, $rescue, 'HEAD');
+        $this->git->commit($path, 'Sisa perubahan yang belum di-commit, dipindahkan otomatis oleh ScrumSpace');
+        $this->git->checkoutBranch($path, $branch !== '' && $branch !== 'HEAD' ? $branch : 'main');
+
+        return count($dirty).' file yang belum di-commit ('.$list.') dipindahkan ke cabang '.$rescue.' agar baseline bersih.';
+    }
+
+    /**
+     * Run gagal: simpan pekerjaan setengah jadi di cabang run itu dan kembalikan
+     * baseline ke cabang basis, supaya eksekusi berikutnya tidak tertahan.
+     */
+    public function releaseAfterFailure(Project $project, ExecutionRun $run): ?string
+    {
+        if (! $run->work_branch) {
+            return null;
+        }
+        $path = $this->path($project);
+        if ($this->git->currentBranch($path) !== $run->work_branch) {
+            return null;
+        }
+        $this->restoreLockfileNoise($path);
+        $dirty = $this->git->dirtyFiles($path);
+        if ($dirty !== []) {
+            $this->git->commit($path, 'wip(run-'.$run->id.'): pekerjaan setengah jadi saat eksekusi gagal');
+        }
+        $base = $run->base_branch ?: 'main';
+        $this->git->checkoutBranch($path, $base);
+
+        return $dirty !== []
+            ? count($dirty).' file setengah jadi disimpan di cabang '.$run->work_branch.'; baseline kembali ke '.$base.'.'
+            : 'Baseline kembali ke '.$base.'.';
+    }
+
+    private function restoreLockfileNoise(string $path): void
+    {
+        $dirty = $this->git->dirtyFiles($path);
+        $lockfiles = ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml'];
+        $noise = array_values(array_intersect($dirty, $lockfiles));
+        if ($noise !== []) {
+            $this->git->restoreFiles($path, $noise);
+        }
+    }
+
     /** Pastikan baseline bersih; kalau tidak, jangan menimpa pekerjaan siapa pun. */
     public function assertClean(Project $project): void
     {

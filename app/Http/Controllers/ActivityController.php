@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\DirectChange;
 use App\Models\ExecutionRun;
 use App\Models\StoryEstimationRun;
 use App\Services\StoryEstimationService;
@@ -43,8 +44,9 @@ class ActivityController extends Controller
         $payload = [
             'runs' => $runs->map(fn (ExecutionRun $run) => $this->present($run))->values()->all(),
             'estimations' => $this->estimations($request),
+            'changes' => $this->changes($request),
         ];
-        $all = collect($payload['runs'])->concat($payload['estimations']);
+        $all = collect($payload['runs'])->concat($payload['estimations'])->concat($payload['changes']);
         $payload['attention'] = $all->where('state', 'attention')->count();
         $payload['running'] = $all->where('state', 'running')->count();
 
@@ -82,6 +84,38 @@ class ActivityController extends Controller
             ->map(fn (StoryEstimationRun $run) => $this->presentEstimation($run))
             ->values()
             ->all();
+    }
+
+    /**
+     * Perubahan kode langsung dari chat: yang berjalan atau selesai 30 menit terakhir.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function changes(Request $request): array
+    {
+        if (! Schema::hasTable('direct_changes') || ! $request->user()) {
+            return [];
+        }
+
+        return DirectChange::query()
+            ->where('user_id', $request->user()->id)
+            ->where(fn ($q) => $q->whereIn('status', DirectChange::ACTIVE)
+                ->orWhere('updated_at', '>=', now()->subMinutes(30)))
+            ->latest('updated_at')->limit(5)->get()
+            ->map(fn (DirectChange $change) => [
+                'id' => $change->id,
+                'kind' => 'change',
+                'label' => Str::limit('Ubah kode: '.preg_replace('/\s+/', ' ', $change->request), 70),
+                'status' => $change->status,
+                'state' => match ($change->status) {
+                    'QUEUED', 'RUNNING' => 'running',
+                    'FAILED' => 'attention',
+                    default => 'done',
+                },
+                'headline' => $change->statusLabel(),
+                'detail_url' => route('chat.index', array_filter(['sprint' => $change->sprint_id]), false).'#perubahan-'.$change->id,
+                'actions' => [],
+            ])->values()->all();
     }
 
     /** @return array<string, mixed> */

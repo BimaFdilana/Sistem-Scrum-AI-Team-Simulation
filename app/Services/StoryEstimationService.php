@@ -364,6 +364,30 @@ class StoryEstimationService
         }
     }
 
+    /**
+     * PO meminta estimasi ulang untuk story yang sudah punya poin: hasil lama
+     * ditandai SUPERSEDED (tetap tersimpan sebagai riwayat), lalu run baru
+     * dibuat. Poin lama tetap berlaku sampai estimasi baru selesai.
+     *
+     * @return array{0: StoryEstimationRun, 1: bool}
+     */
+    public function requestReestimate(Story $story, User $requester): array
+    {
+        DB::transaction(function () use ($story): void {
+            $active = StoryEstimationRun::query()->where('story_id', $story->id)
+                ->whereIn('status', ['QUEUED', 'RUNNING', 'REPORT_PENDING'])->lockForUpdate()->exists();
+            if ($active) {
+                abort(409, 'Diskusi estimasi story ini masih berjalan.');
+            }
+            StoryEstimationRun::query()->where('story_id', $story->id)
+                ->where('story_revision', $story->revision)
+                ->where('status', 'COMPLETED')
+                ->update(['status' => 'SUPERSEDED']);
+        });
+
+        return $this->claimRun($story, $requester);
+    }
+
     public function estimateExisting(StoryEstimationRun $run, User $requester): StoryEstimationRun
     {
         $run->refresh();

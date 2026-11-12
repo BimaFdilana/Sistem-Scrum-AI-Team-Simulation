@@ -6,6 +6,7 @@ use App\Http\Controllers\AiProviderController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\DemoController;
+use App\Http\Controllers\DirectChangeController;
 use App\Http\Controllers\ExecutionController;
 use App\Http\Controllers\GithubSettingsController;
 use App\Http\Controllers\NotificationController;
@@ -35,6 +36,9 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/chat/messages', [ChatController::class, 'store'])
         ->middleware('throttle:30,1')
         ->name('chat.messages.store');
+    Route::post('/chat/changes', [DirectChangeController::class, 'store'])->middleware('throttle:6,1')->name('chat.changes.store');
+    Route::get('/chat/changes/{change}', [DirectChangeController::class, 'status'])->name('chat.changes.status');
+    Route::post('/chat/changes/{change}/revert', [DirectChangeController::class, 'revert'])->middleware('throttle:6,1')->name('chat.changes.revert');
     Route::get('/agents', [WorkspaceController::class, 'agents'])->name('agents.index');
     Route::get('/ai-providers', [AiProviderController::class, 'index'])->name('ai-providers.index');
     // Satu model untuk semua peran agent, dipilih di halaman AI Providers.
@@ -68,6 +72,7 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/sprints/{sprint}/stories/create', [StoryController::class, 'createForSprint'])->name('sprints.stories.create');
     Route::post('/sprints/{sprint}/stories', [StoryController::class, 'storeForSprint'])->name('sprints.stories.store');
     Route::post('/stories/{story}/estimation-runs', [StoryEstimationController::class, 'store'])->middleware('throttle:6,1')->name('stories.estimations.store');
+    Route::post('/stories/{story}/re-estimate', [StoryEstimationController::class, 'reestimate'])->middleware('throttle:6,1')->name('stories.estimations.reestimate');
     Route::post('/stories/{story}/estimation-runs/{run}/retry', [StoryEstimationController::class, 'retry'])->middleware('throttle:6,1')->name('stories.estimations.retry');
     Route::post('/stories/{story}/estimation-runs/{run}/agents/{agentRun}/retry', [StoryEstimationController::class, 'retryAgent'])->middleware('throttle:6,1')->name('stories.estimations.agents.retry');
     Route::get('/stories/{story}/discussion', [StoryEstimationController::class, 'discussion'])->name('stories.discussion.show');
@@ -104,6 +109,7 @@ Route::middleware('auth')->group(function (): void {
     Route::patch('/sprints/{sprint}', [SprintController::class, 'update'])->name('sprints.update');
     Route::put('/sprints/{sprint}/scope', [SprintController::class, 'updateScope'])->name('sprints.scope.update');
     Route::post('/sprints/{sprint}/approve-scope', [SprintController::class, 'approveScope'])->name('sprints.scope.approve');
+    Route::post('/sprints/{sprint}/reopen', [SprintController::class, 'reopen'])->name('sprints.reopen');
     Route::post('/sprints/{sprint}/start', [SprintController::class, 'start'])->name('sprints.start');
     Route::post('/sprints/{sprint}/generate-goal', [SprintController::class, 'generateGoal'])->name('sprints.goal.generate');
 });

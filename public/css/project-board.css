@@ -96,3 +96,14 @@
 .bk-contents-list small{color:var(--muted);font-size:10px}
 .bk-contents-list .bk-chip{flex:0 0 auto}
 
+
+/* Alat sprint: ubah nama, chat, buka kunci; estimasi ulang story. */
+.sprint-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;margin-bottom:12px}
+.sprint-rename>summary{list-style:none;cursor:pointer;display:inline-flex}
+.sprint-rename>summary::-webkit-details-marker{display:none}
+.sprint-rename-form{display:flex;gap:8px;margin-top:8px}
+.sprint-rename-form input{min-width:260px;padding:8px 10px;border:1px solid var(--line-strong);border-radius:9px;background:var(--input-bg);color:var(--text);font:inherit}
+.sprint-tools form{display:inline-flex}
+.sprint-lock-note{margin:-4px 0 12px;padding:8px 12px;border-left:3px solid var(--amber);border-radius:0 8px 8px 0;background:rgba(var(--amber-rgb),.08);color:var(--muted);font-size:12px}
+.estimate-current{display:inline-block;margin-right:8px;padding:6px 10px;border:1px solid rgba(var(--accent-rgb),.35);border-radius:8px;background:rgba(var(--accent-rgb),.08);font-size:12px}
+.reestimate-form{margin-top:8px}

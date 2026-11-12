@@ -12,6 +12,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class StoryEstimationController extends Controller
 {
@@ -49,6 +50,35 @@ class StoryEstimationController extends Controller
         return $this->backToBacklog($story)->with('status', $created
             ? 'Diskusi Fibonacci sedang diproses di latar belakang. Status run: QUEUED.'
             : 'Diskusi Fibonacci untuk revisi ini sudah berjalan atau selesai. Status run: '.$run->status.'.');
+    }
+
+    /** PO meminta estimasi ulang story yang sudah punya poin. */
+    public function reestimate(Request $request, Story $story, StoryEstimationService $estimator): RedirectResponse|JsonResponse
+    {
+        if (! $this->schemaReady()) {
+            return $this->backToBacklog($story)->withErrors(['estimation' => 'Diskusi Fibonacci menunggu migrasi database estimasi.']);
+        }
+        if (! $story->sprint_id || $story->sprint?->status !== 'PLANNING') {
+            return $this->backToBacklog($story)->withErrors(['estimation' => 'Estimasi ulang hanya bisa saat sprint dalam Perencanaan. Buka kunci sprint terlebih dahulu.']);
+        }
+        if ($story->isLockedFromExecution()) {
+            return $this->backToBacklog($story)->withErrors(['estimation' => 'Story sudah diterima dan terkunci; estimasi ulang tidak diperlukan.']);
+        }
+
+        try {
+            [$run, $created] = $estimator->requestReestimate($story->load('actor'), $request->user());
+        } catch (HttpException $exception) {
+            return $this->backToBacklog($story)->withErrors(['estimation' => $exception->getMessage() ?: 'Estimasi ulang belum bisa dimulai.']);
+        }
+        if ($created) {
+            AdvanceStoryEstimationJob::dispatch($run->id);
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json(['run_id' => $run->id, 'status' => $run->status], $created ? 202 : 200);
+        }
+
+        return $this->backToBacklog($story)->with('status', 'Estimasi ulang '.$story->display_id.' dimulai. Poin lama tetap berlaku sampai hasil baru selesai; pantau di panel progres kanan bawah.');
     }
 
     public function retry(Request $request, Story $story, StoryEstimationRun $run, StoryEstimationService $estimator): RedirectResponse

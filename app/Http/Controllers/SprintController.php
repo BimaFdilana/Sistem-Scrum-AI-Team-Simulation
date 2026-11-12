@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreSprintRequest;
 use App\Http\Requests\UpdateSprintRequest;
 use App\Http\Requests\UpdateSprintScopeRequest;
+use App\Models\ChatConversation;
 use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\Story;
@@ -107,10 +108,33 @@ class SprintController extends Controller
     {
         $name = trim($request->validated('name'));
         $sprint->update(['name' => $name]);
-        \App\Models\ChatConversation::query()->where('sprint_id', $sprint->id)->update(['title' => $name]);
+        ChatConversation::query()->where('sprint_id', $sprint->id)->update(['title' => $name]);
 
         return redirect(route('projects.show', $sprint->project_id).'#sprint-'.$sprint->id)
             ->with('status', 'Nama sprint diubah menjadi "'.$name.'".');
+    }
+
+    /**
+     * Buka kunci sprint yang sedang berjalan: kembali ke Perencanaan agar PO bisa
+     * menambah/mengubah story dan meminta estimasi lagi. Story yang sudah
+     * diterima tetap terkunci; persetujuan scope harus diberikan ulang sebelum
+     * sprint dimulai lagi.
+     */
+    public function reopen(Request $request, Sprint $sprint): RedirectResponse
+    {
+        if ($sprint->status !== 'ACTIVE') {
+            return back()->withErrors(['scope' => 'Hanya sprint yang sedang berjalan yang bisa dibuka kuncinya.']);
+        }
+
+        $sprint->forceFill([
+            'status' => 'PLANNING',
+            'scope_approved_revision' => null,
+            'scope_approved_by' => null,
+            'scope_approved_at' => null,
+        ])->save();
+
+        return redirect(route('projects.show', $sprint->project_id).'#sprint-'.$sprint->id)
+            ->with('status', 'Kunci '.$sprint->name.' dibuka. Anda bisa menambah atau mengubah story dan meminta estimasi ulang. Setujui lagi lalu klik Mulai Sprint bila sudah siap.');
     }
 
     public function show(Sprint $sprint): RedirectResponse
@@ -256,7 +280,7 @@ class SprintController extends Controller
 
         return redirect()
             ->route('projects.show', $sprint->project_id)
-            ->with('status', 'Sprint scope disetujui untuk revision '.$sprint->revision.'.');
+            ->with('status', 'Isi sprint disetujui. Klik Mulai Sprint bila sudah siap.');
     }
 
     public function start(Request $request, Sprint $sprint): RedirectResponse
@@ -279,7 +303,7 @@ class SprintController extends Controller
 
         return redirect()
             ->route('projects.show', $sprint->project_id)
-            ->with('status', 'Sprint dimulai. Estimasi agent dan task execution belum aktif.');
+            ->with('status', 'Sprint dimulai. Isi sprint kini dikunci; jalankan Eksekusi User Story pada tiap story.');
     }
 
     private function detailsSchemaReady(): bool
