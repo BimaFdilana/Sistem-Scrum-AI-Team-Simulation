@@ -6,6 +6,7 @@ use App\Models\ExecutionRun;
 use App\Models\Project;
 use App\Models\Story;
 use App\Models\User;
+use App\Support\Demo\DemoContents;
 use App\Support\Demo\DemoServerManager;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -124,5 +125,25 @@ class DemoIsolationTest extends TestCase
         $events = collect(app(Schedule::class)->events());
 
         $this->assertTrue($events->contains(fn ($event) => $event->description === 'demo-prune'));
+    }
+
+    public function test_accepted_story_stays_listed_in_demo_after_its_merged_branch_is_deleted(): void
+    {
+        $project = $this->project();
+        $this->git('checkout', '-q', '-b', 'scrum/run-1');
+        file_put_contents($this->repo.'/fitur.txt', 'US-01');
+        $this->git('add', '.');
+        $this->git('commit', '-qm', 'Task #1');
+        $this->git('checkout', '-q', 'main');
+        $this->git('merge', '--no-ff', '-q', '-m', 'Merge scrum/run-1', 'scrum/run-1');
+        $this->git('branch', '-D', 'scrum/run-1');
+        $run = $this->runOn($project, 'scrum/run-1', 'COMPLETED');
+        $run->story->forceFill(['acceptance_status' => 'BERHASIL', 'accepted_execution_run_id' => $run->id])->save();
+        app(DemoServerManager::class)->syncDemoTree($project);
+
+        $contents = DemoContents::for($project);
+
+        $this->assertTrue($contents['accepted'][0]['included']);
+        $this->assertStringContainsString('kode utama', (string) $contents['branch']);
     }
 }

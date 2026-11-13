@@ -63,7 +63,7 @@
         @php($contents = $demoContents ?? ['branch' => null, 'accepted' => [], 'pending' => []])
         <div class="bk-demo-contents" aria-label="Isi demo">
             <h3>Isi demo</h3>
-            <p class="field-help">Demo menyajikan cabang <code>{{ $contents['branch'] ?? '—' }}</code>. Story yang sudah Anda terima harus ada di sini.</p>
+            <p class="field-help">Demo menyajikan <strong>{{ $contents['branch'] ?? '—' }}</strong>. Eksekusi yang sedang berjalan tidak pernah tampil di demo. Story yang sudah Anda terima harus ada di sini.</p>
             <ul class="bk-contents-list">
                 @forelse ($contents['accepted'] as $item)
                     <li>

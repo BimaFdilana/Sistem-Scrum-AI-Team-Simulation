@@ -2,16 +2,20 @@
 
 namespace App\Support\Demo;
 
+use App\Models\ExecutionRun;
 use App\Models\Project;
 use App\Models\Story;
-use App\Support\Workspace\WorktreeManager;
+use Symfony\Component\Process\Process;
 use Throwable;
 
 /**
  * Isi demo: story yang sudah diterima PO harus ada di kode yang disajikan demo.
- * Demo membaca folder baseline project, jadi yang tampil adalah cabang yang sedang aktif di sana.
- * Daftar ini memperlihatkan story diterima mana yang benar-benar ikut, dan mana yang belum
- * (mis. penerimaan yang gagal digabung karena konflik), supaya celahnya terlihat, bukan ditebak.
+ * Demo menyajikan folder kodenya sendiri (lihat DemoServerManager::syncDemoTree).
+ *
+ * Cek "sudah ada" tidak lagi bergantung pada cabang scrum/run-N: cabang yang sudah
+ * tergabung boleh dihapus, sementara jejaknya tetap ada sebagai commit
+ * "Merge scrum/run-N" di riwayat kode. Dulu penghapusan cabang membuat panel ini
+ * keliru melaporkan US-01..06 "belum ada di demo".
  */
 class DemoContents
 {
@@ -25,22 +29,37 @@ class DemoContents
     public static function for(Project $project): array
     {
         $empty = ['branch' => null, 'accepted' => [], 'pending' => []];
-        $path = rtrim((string) $project->workspace_path, '/');
-        if ($path === '' || ! is_dir($path)) {
+        $baseline = rtrim((string) $project->workspace_path, '/');
+        if ($baseline === '' || ! is_dir($baseline)) {
             return $empty;
         }
 
-        $git = app(WorktreeManager::class);
+        // Folder kode demo (sama dengan DemoServerManager::demoTreePath).
+        $tree = dirname($baseline).'/demo';
+        $root = file_exists($tree.'/.git') ? $tree : $baseline;
 
         try {
-            $head = $git->currentBranch($path);
+            $label = $root === $tree
+                ? app(DemoServerManager::class)->demoTarget($project)['label']
+                : trim(self::git($baseline, ['branch', '--show-current']));
+            $merged = array_flip(array_filter(array_map('trim', explode("\n", self::git($root, ['log', '--merges', '--format=%s', 'HEAD'])))));
+            $head = trim(self::git($root, ['rev-parse', 'HEAD']));
         } catch (Throwable) {
             return $empty;
         }
 
-        $contains = function (string $branch) use ($git, $path): bool {
+        $contains = function (string $branch) use ($baseline, $head, $merged): bool {
+            if (isset($merged['Merge '.$branch])) {
+                return true;
+            }
             try {
-                return $git->branchExists($path, $branch) && $git->isAncestor($path, $branch, 'HEAD');
+                $tip = trim(self::git($baseline, ['rev-parse', '--verify', '--quiet', 'refs/heads/'.$branch]));
+                if ($tip === '') {
+                    return false;
+                }
+                self::git($baseline, ['merge-base', '--is-ancestor', $tip, $head]);
+
+                return true;
             } catch (Throwable) {
                 return false;
             }
@@ -51,22 +70,35 @@ class DemoContents
         $stories = Story::query()->where('project_id', $project->id)->with('executionRuns')->orderBy('id')->get();
 
         foreach ($stories as $story) {
-            $label = $story->display_id.' '.$story->effectiveTitle();
-            $run = $story->executionRuns->where('status', 'COMPLETED')->sortBy('id')->last();
-            $branch = $run?->work_branch;
+            $text = $story->display_id.' '.$story->effectiveTitle();
+            $run = $story->accepted_execution_run_id
+                ? $story->executionRuns->firstWhere('id', $story->accepted_execution_run_id)
+                : $story->executionRuns->where('status', 'COMPLETED')->sortBy('id')->last();
+            $run ??= $story->executionRuns->where('status', 'COMPLETED')->sortBy('id')->last();
+            $branch = $run instanceof ExecutionRun ? $run->work_branch : null;
 
             if ($story->acceptance_status === 'BERHASIL') {
                 $accepted[] = [
-                    'label' => $label,
+                    'label' => $text,
                     'branch' => $branch,
                     // Tanpa cabang run = era commit langsung ke main: kodenya sudah ada di main.
                     'included' => $branch === null ? true : $contains($branch),
                 ];
-            } elseif ($story->acceptance_status === null && $run !== null && $branch !== null) {
-                $pending[] = ['label' => $label, 'branch' => $branch, 'shown' => $contains($branch)];
+            } elseif ($story->acceptance_status === null && $run !== null && $branch !== null && $run->status === 'COMPLETED') {
+                $pending[] = ['label' => $text, 'branch' => $branch, 'shown' => $contains($branch)];
             }
         }
 
-        return ['branch' => $head, 'accepted' => $accepted, 'pending' => $pending];
+        return ['branch' => $label !== '' ? $label : null, 'accepted' => $accepted, 'pending' => $pending];
+    }
+
+    /** @param  array<int, string>  $args */
+    private static function git(string $cwd, array $args): string
+    {
+        $process = new Process(['git', '-c', 'credential.helper=', ...$args], $cwd, ['GIT_TERMINAL_PROMPT' => '0']);
+        $process->setTimeout(20);
+        $process->mustRun();
+
+        return $process->getOutput();
     }
 }
