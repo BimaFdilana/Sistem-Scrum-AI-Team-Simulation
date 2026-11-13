@@ -189,7 +189,8 @@ class ExecutionController extends Controller
         }
 
         // Hasil yang baru disetujui harus langsung tampil di demo yang sedang berjalan.
-        if ($status === 'BERHASIL' && $story->project_id !== null) {
+        if ($story->project_id !== null) {
+            // Berhasil: demo menampilkan kode utama terbaru. Gagal: demo kembali ke kode utama.
             RefreshDemoJob::dispatch($story->project_id);
         }
 

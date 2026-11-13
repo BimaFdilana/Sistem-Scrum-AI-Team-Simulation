@@ -138,7 +138,7 @@ class DemoContentsTest extends TestCase
         Queue::assertPushed(RefreshDemoJob::class, fn ($job) => $job->projectId === $project->id);
     }
 
-    public function test_rejecting_a_story_does_not_refresh_the_demo(): void
+    public function test_rejecting_a_story_refreshes_the_demo_back_to_main_code(): void
     {
         Queue::fake();
         $project = $this->project();
@@ -147,7 +147,8 @@ class DemoContentsTest extends TestCase
 
         $this->actingAs(User::factory()->create())->post(route('stories.executions.accept', [$story, $story->executionRuns()->first()]), ['status' => 'GAGAL']);
 
-        Queue::assertNotPushed(RefreshDemoJob::class);
+        // Hasil yang ditolak tidak boleh tetap tampil di demo: demo dikembalikan ke kode utama.
+        Queue::assertPushed(RefreshDemoJob::class);
     }
 
     public function test_refresh_job_never_breaks_when_the_refresh_itself_fails(): void

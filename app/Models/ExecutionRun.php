@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Jobs\RefreshDemoJob;
 use App\Support\Chat\ChatCommandReporter;
 use App\Support\Execution\BatchQa;
 use App\Support\Execution\ExecutionScheduler;
@@ -201,6 +202,10 @@ class ExecutionRun extends Model
         static::updated(function (ExecutionRun $run): void {
             if ($run->wasChanged('status')) {
                 ChatCommandReporter::statusChanged($run);
+                // Hasil yang selesai langsung bisa dicoba PO di demo (folder demo pindah ke hasil itu).
+                if ($run->status === 'COMPLETED' && ($projectId = $run->story()->value('project_id')) !== null) {
+                    RefreshDemoJob::dispatch((int) $projectId);
+                }
             }
         });
     }

@@ -3,6 +3,7 @@
 namespace App\Support\Demo;
 
 use App\Models\DemoServer;
+use App\Models\ExecutionRun;
 use App\Models\Project;
 use App\Services\GithubApiClient;
 use App\Services\GithubProjectService;
@@ -14,12 +15,101 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Symfony\Component\Process\Process;
+use Throwable;
 
 /**
  * Menjalankan demo sementara project (php -S) di port unik per project.
  */
 class DemoServerManager
 {
+    /** True bila demoEnvironment() terakhir membangun ulang database demo dari nol. */
+    private bool $databaseWasReset = false;
+
+    /**
+     * Folder kode khusus demo (worktree git terpisah dari folder kerja agen).
+     *
+     * Dulu demo membaca langsung folder kerja agen, sehingga selama eksekusi
+     * demo menampilkan kode setengah jadi, dan migrasi cabang eksekusi yang
+     * kemudian gagal ikut masuk ke database demo (kasus tabel pagu_units).
+     */
+    public function demoTreePath(Project $project): string
+    {
+        return dirname(rtrim((string) $project->workspace_path, '/')).'/demo';
+    }
+
+    /**
+     * Kode yang disajikan demo: hasil eksekusi yang selesai dan menunggu
+     * keputusan PO (supaya PO bisa mencobanya), selain itu kode utama.
+     * Eksekusi yang masih berjalan TIDAK PERNAH disajikan.
+     *
+     * @return array{ref: string, label: string}
+     */
+    public function demoTarget(Project $project): array
+    {
+        $baseline = rtrim((string) $project->workspace_path, '/');
+        $current = trim($this->git($baseline, ['branch', '--show-current']));
+        if (str_starts_with($current, 'scrum/run-')) {
+            $run = ExecutionRun::query()->with('story')->where('work_branch', $current)->first();
+            if ($run !== null && $run->status === 'COMPLETED' && $run->story !== null && $run->story->acceptance_status === null) {
+                return ['ref' => $current, 'label' => 'hasil '.$run->subjectLabel().' (menunggu keputusan Anda)'];
+            }
+            $base = $run?->base_branch ?: 'main';
+
+            return ['ref' => $base, 'label' => 'kode utama ('.$base.')'];
+        }
+
+        $base = $current !== '' ? $current : 'main';
+
+        return ['ref' => $base, 'label' => 'kode utama ('.$base.')'];
+    }
+
+    /**
+     * Siapkan/perbarui folder kode demo ke target terbaru. Aman diulang:
+     * folder ini hanya milik demo, jadi checkout paksa tidak menimpa kerja siapa pun.
+     * vendor/ dan node_modules/ ditautkan dari folder kerja agar tidak memakan disk.
+     */
+    public function syncDemoTree(Project $project): string
+    {
+        $baseline = rtrim((string) $project->workspace_path, '/');
+        $tree = $this->demoTreePath($project);
+        $target = $this->demoTarget($project);
+        $sha = trim($this->git($baseline, ['rev-parse', $target['ref']]));
+
+        if (! file_exists($tree.'/.git')) {
+            $this->git($baseline, ['worktree', 'prune']);
+            if (is_dir($tree)) {
+                @rmdir($tree);
+            }
+            $this->git($baseline, ['worktree', 'add', '--detach', '--force', $tree, $sha]);
+        } elseif (trim($this->git($tree, ['rev-parse', 'HEAD'])) !== $sha) {
+            $this->git($tree, ['checkout', '--detach', '--force', $sha]);
+        }
+
+        foreach (['vendor', 'node_modules'] as $shared) {
+            if (! file_exists($tree.'/'.$shared) && is_dir($baseline.'/'.$shared)) {
+                @symlink($baseline.'/'.$shared, $tree.'/'.$shared);
+            }
+        }
+        if (! is_file($tree.'/.env') && is_file($baseline.'/.env')) {
+            @copy($baseline.'/.env', $tree.'/.env');
+        }
+        foreach (['storage/framework/cache/data', 'storage/framework/sessions', 'storage/framework/views', 'storage/logs', 'bootstrap/cache'] as $dir) {
+            if (! is_dir($tree.'/'.$dir)) {
+                @mkdir($tree.'/'.$dir, 0775, true);
+            }
+        }
+
+        return $tree;
+    }
+
+    /** Akar aplikasi Laravel demo (memperhitungkan monorepo/subdir). */
+    private function demoAppRoot(Project $project, string $baseRoot): string
+    {
+        $profile = $project->profile;
+
+        return $profile?->subdir ? rtrim($baseRoot, '/').'/'.$profile->subdir : rtrim($baseRoot, '/');
+    }
+
     public function runningFor(Project $project): ?DemoServer
     {
         $demo = DemoServer::query()->where('project_id', $project->id)
@@ -49,13 +139,15 @@ class DemoServerManager
             return;
         }
 
-        $baseRoot = $demo->worktree_path ? rtrim($demo->worktree_path, '/') : rtrim((string) $project->workspace_path, '/');
-        $profile = $project->profile;
-        $projectRoot = $profile?->subdir ? $baseRoot.'/'.$profile->subdir : $baseRoot;
+        $baseRoot = $demo->worktree_path ? rtrim($demo->worktree_path, '/') : $this->syncDemoTree($project);
+        $projectRoot = $this->demoAppRoot($project, $baseRoot);
         $log = storage_path('logs/demo-project-'.$project->id.'.log');
 
         app(ProjectProvisioner::class)->ensure($project);
-        $this->demoEnvironment($projectRoot, $project, $log);
+        $env = $this->demoEnvironment($projectRoot, $project, $log);
+        if ($this->databaseWasReset) {
+            $demo->forceFill(['credentials' => app(DemoAccounts::class)->provision((string) ($env['DB_DATABASE'] ?? ''))])->save();
+        }
         $this->ensureFrontendBuild($projectRoot, $log);
     }
 
@@ -65,18 +157,28 @@ class DemoServerManager
             throw new RuntimeException('Demo project ini sudah berjalan.');
         }
 
+        // Satu demo aktif: alamat demo publik diarahkan nginx ke satu port, jadi
+        // demo project lain dimatikan agar alamat itu selalu menampilkan project ini.
+        foreach (DemoServer::query()->where('status', 'RUNNING')->where('project_id', '!=', $project->id)->get() as $other) {
+            $this->stop($other, 'STOPPED');
+        }
+
         // Fase 3 GitHub: bila project terhubung GitHub dan branch integration ada,
         // demo jalan dari kode integration terbaru (worktree terpisah).
         // Bila tidak, perilaku lama: dari baseline lokal.
         $worktreePath = $this->prepareIntegrationWorktree($project);
-        $baseRoot = $worktreePath !== null ? rtrim($worktreePath, '/') : rtrim((string) $project->workspace_path, '/');
+        try {
+            $baseRoot = $worktreePath !== null ? rtrim($worktreePath, '/') : $this->syncDemoTree($project);
+        } catch (Throwable $exception) {
+            throw new RuntimeException('Folder kode demo tidak bisa disiapkan: '.mb_substr($exception->getMessage(), 0, 200));
+        }
 
         // Profil runtime: versi PHP project dan letak Laravel (monorepo).
         $profile = $project->profile;
         if ($profile === null) {
             try {
                 $profile = app(ProjectProfiler::class)->profile($project);
-            } catch (\Throwable) {
+            } catch (Throwable) {
                 $profile = null;
             }
         }
@@ -95,7 +197,7 @@ class DemoServerManager
         // langkah ini project hasil clone tanpa vendor/ selalu berakhir 500.
         try {
             app(ProjectProvisioner::class)->ensure($project);
-        } catch (\Throwable $exception) {
+        } catch (Throwable $exception) {
             if ($worktreePath !== null) {
                 $this->removeWorktree($project, $worktreePath);
             }
@@ -183,6 +285,16 @@ class DemoServerManager
         }
 
         $database = $dir.'/project-'.$project->id.'.sqlite';
+        $this->databaseWasReset = false;
+        $orphans = $this->orphanMigrations($database, $projectRoot);
+        if ($orphans !== []) {
+            // Database demo memuat migrasi yang tidak ada di kode yang disajikan
+            // (sisa eksekusi yang gagal/ditolak). Bangun ulang dari nol agar
+            // skema demo selalu sama dengan kodenya; data project asli tidak tersentuh.
+            file_put_contents($log, '['.date('c').'] database demo dibangun ulang; migrasi yatim: '.implode(', ', $orphans)."\n", FILE_APPEND);
+            @unlink($database);
+            $this->databaseWasReset = true;
+        }
         if (! file_exists($database)) {
             @touch($database);
         }
@@ -210,15 +322,44 @@ class DemoServerManager
     }
 
     /**
+     * Migrasi yang tercatat di database demo tetapi file-nya tidak ada di kode.
+     *
+     * @return array<int, string>
+     */
+    public function orphanMigrations(string $database, string $projectRoot): array
+    {
+        if (! is_file($database) || filesize($database) === 0 || ! is_dir($projectRoot.'/database/migrations')) {
+            return [];
+        }
+        try {
+            $pdo = new \PDO('sqlite:'.$database);
+            $exists = $pdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name='migrations'")->fetchColumn();
+            if (! $exists) {
+                return [];
+            }
+            $recorded = $pdo->query('SELECT migration FROM migrations')->fetchAll(\PDO::FETCH_COLUMN);
+        } catch (Throwable) {
+            return [];
+        }
+        $files = array_map(fn ($file) => basename($file, '.php'), glob($projectRoot.'/database/migrations/*.php') ?: []);
+
+        return array_values(array_diff($recorded, $files));
+    }
+
+    /**
      * Bangun ulang aset frontend project (dipakai tombol di UI setelah task FE).
      *
      * @return array{ok: bool, message: string}
      */
     public function rebuildAssets(Project $project): array
     {
-        $root = rtrim((string) $project->workspace_path, '/');
-        if ($root === '' || ! is_dir($root)) {
+        if (! is_dir((string) $project->workspace_path)) {
             return ['ok' => false, 'message' => 'Baseline project belum ada.'];
+        }
+        try {
+            $root = $this->demoAppRoot($project, $this->syncDemoTree($project));
+        } catch (Throwable $exception) {
+            return ['ok' => false, 'message' => 'Folder kode demo tidak bisa disiapkan: '.mb_substr($exception->getMessage(), 0, 200)];
         }
 
         $manifest = $root.'/public/build/manifest.json';
@@ -389,19 +530,22 @@ class DemoServerManager
      */
     public function prepareDatabase(Project $project): array
     {
-        $root = rtrim((string) $project->workspace_path, '/');
-        if ($root === '' || ! is_dir($root)) {
+        $baseline = rtrim((string) $project->workspace_path, '/');
+        if ($baseline === '' || ! is_dir($baseline)) {
             return ['ok' => false, 'database' => '', 'message' => 'Baseline project belum ada.'];
         }
 
         $log = storage_path('logs/demo-project-'.$project->id.'.log');
 
         try {
+            // Migrasi database demo HANYA dari folder demo (kode utama / hasil yang
+            // menunggu keputusan), tidak pernah dari cabang eksekusi yang berjalan.
+            $root = $this->demoAppRoot($project, $this->syncDemoTree($project));
             $env = $this->demoEnvironment($root, $project, $log);
             $database = (string) ($env['DB_DATABASE'] ?? '');
 
             return ['ok' => $database !== '' && is_file($database), 'database' => $database, 'message' => 'Database demo siap.'];
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             return ['ok' => false, 'database' => '', 'message' => 'Persiapan database demo gagal: '.mb_substr($e->getMessage(), 0, 300)];
         }
     }
@@ -452,7 +596,7 @@ class DemoServerManager
                 $batch = (int) $pdo->query('SELECT COALESCE(MAX(batch),0)+1 FROM migrations')->fetchColumn();
                 $statement = $pdo->prepare('INSERT INTO migrations (migration, batch) VALUES (?, ?)');
                 $statement->execute([$failing, $batch]);
-            } catch (\Throwable $exception) {
+            } catch (Throwable $exception) {
                 throw new RuntimeException('Demo tidak bisa disiapkan: gagal menandai migrasi MySQL-only ('.$exception->getMessage().').');
             }
 
@@ -517,7 +661,7 @@ class DemoServerManager
                 if ($attempt >= 4) {
                     return 'Demo menjawab HTTP '.$status.' — project gagal boot. Log: '.$this->logTail($log);
                 }
-            } catch (\Throwable) {
+            } catch (Throwable) {
                 // Belum siap (connection refused) — coba lagi.
             }
         }
@@ -572,7 +716,7 @@ class DemoServerManager
             $this->git($workspace, ['worktree', 'add', '--detach', $worktreePath, 'integration']);
 
             return $worktreePath;
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             Log::warning('Demo worktree integration gagal, pakai baseline', [
                 'project_id' => $project->id,
                 'error' => $e->getMessage(),
@@ -592,7 +736,7 @@ class DemoServerManager
             if ($workspace !== '' && is_dir($workspace) && is_dir($worktreePath)) {
                 $this->git($workspace, ['worktree', 'remove', '--force', $worktreePath]);
             }
-        } catch (\Throwable) {
+        } catch (Throwable) {
             // Abaikan — best effort.
         }
         if (is_dir($worktreePath)) {
@@ -648,6 +792,19 @@ class DemoServerManager
             }
         }
 
+        // Demo harus menyajikan kode yang sedang diputuskan (hasil eksekusi yang
+        // menunggu keputusan), bukan versi lama. Tanpa membangun aset ulang di sini.
+        if (! $demo->worktree_path) {
+            try {
+                $root = $this->demoAppRoot($project, $this->syncDemoTree($project));
+                $env = $this->demoEnvironment($root, $project, storage_path('logs/demo-project-'.$project->id.'.log'));
+                if ($this->databaseWasReset) {
+                    $demo->forceFill(['credentials' => app(DemoAccounts::class)->provision((string) ($env['DB_DATABASE'] ?? ''))])->save();
+                }
+            } catch (Throwable $exception) {
+                Log::warning('Sinkron demo sebelum verifikasi gagal', ['project' => $project->id, 'error' => $exception->getMessage()]);
+            }
+        }
         $url = 'http://127.0.0.1:'.$demo->port.'/';
         $status = null;
         $error = null;
