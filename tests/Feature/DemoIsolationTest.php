@@ -104,6 +104,21 @@ class DemoIsolationTest extends TestCase
         $this->assertNotNull($project);
     }
 
+    public function test_migration_with_same_name_but_changed_content_is_detected(): void
+    {
+        $this->project();
+        $database = $this->root.'/demo.sqlite';
+        $pdo = new \PDO('sqlite:'.$database);
+        $pdo->exec('CREATE TABLE migrations (id INTEGER PRIMARY KEY, migration TEXT, batch INTEGER)');
+        $pdo->exec("INSERT INTO migrations (migration, batch) VALUES ('2024_01_01_000000_create_units_table', 1)");
+        $pdo->exec('CREATE TABLE scrumspace_migration_hashes (migration TEXT PRIMARY KEY, hash TEXT NOT NULL)');
+        $pdo->exec("INSERT INTO scrumspace_migration_hashes VALUES ('2024_01_01_000000_create_units_table', 'versi-lama')");
+
+        $problems = app(DemoServerManager::class)->orphanMigrations($database, $this->repo);
+
+        $this->assertSame(['2024_01_01_000000_create_units_table (isi berubah)'], $problems);
+    }
+
     public function test_demo_prune_is_scheduled(): void
     {
         $events = collect(app(Schedule::class)->events());

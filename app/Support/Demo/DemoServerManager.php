@@ -314,6 +314,7 @@ class DemoServerManager
         // Saat sudah mutakhir, perintah ini hanya beberapa detik.
         $fresh = filesize($database) === 0;
         $this->migrateDemoDatabase($projectRoot, $database, $env, $log);
+        $this->recordMigrationHashes($database, $projectRoot);
         if ($fresh) {
             $this->seedDemoDatabase($projectRoot, $env, $log);
         }
@@ -341,9 +342,48 @@ class DemoServerManager
         } catch (Throwable) {
             return [];
         }
-        $files = array_map(fn ($file) => basename($file, '.php'), glob($projectRoot.'/database/migrations/*.php') ?: []);
+        $files = [];
+        foreach (glob($projectRoot.'/database/migrations/*.php') ?: [] as $file) {
+            $files[basename($file, '.php')] = sha1_file($file);
+        }
+        $problems = array_values(array_diff($recorded, array_keys($files)));
 
-        return array_values(array_diff($recorded, $files));
+        // Migrasi bernama sama tetapi isinya berubah (mis. eksekusi gagal dan eksekusi
+        // ulang sama-sama membuat create_pagu_units_table dengan isi berbeda): versi
+        // yang tercatat di database demo bukan versi yang ada di kode sekarang.
+        try {
+            $hasHashes = $pdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name='scrumspace_migration_hashes'")->fetchColumn();
+            if ($hasHashes) {
+                foreach ($pdo->query('SELECT migration, hash FROM scrumspace_migration_hashes')->fetchAll(\PDO::FETCH_KEY_PAIR) as $name => $hash) {
+                    if (isset($files[$name]) && $files[$name] !== $hash) {
+                        $problems[] = $name.' (isi berubah)';
+                    }
+                }
+            }
+        } catch (Throwable) {
+            // tanpa catatan sidik jari: hanya deteksi migrasi yatim
+        }
+
+        return $problems;
+    }
+
+    /** Simpan sidik jari isi tiap migrasi yang sudah dijalankan di database demo. */
+    private function recordMigrationHashes(string $database, string $projectRoot): void
+    {
+        try {
+            $pdo = new \PDO('sqlite:'.$database);
+            $pdo->exec('CREATE TABLE IF NOT EXISTS scrumspace_migration_hashes (migration TEXT PRIMARY KEY, hash TEXT NOT NULL)');
+            $ran = array_flip($pdo->query('SELECT migration FROM migrations')->fetchAll(\PDO::FETCH_COLUMN));
+            $insert = $pdo->prepare('INSERT INTO scrumspace_migration_hashes (migration, hash) VALUES (?, ?) ON CONFLICT(migration) DO NOTHING');
+            foreach (glob($projectRoot.'/database/migrations/*.php') ?: [] as $file) {
+                $name = basename($file, '.php');
+                if (isset($ran[$name])) {
+                    $insert->execute([$name, sha1_file($file)]);
+                }
+            }
+        } catch (Throwable) {
+            // catatan sidik jari hanya pengaman tambahan
+        }
     }
 
     /**
