@@ -118,14 +118,24 @@
     </div>
 </section>
 
-@if ($story->isAccepted())
+@if ($story->isAccepted() && $story->accepted_execution_run_id && (int) $story->accepted_execution_run_id !== (int) $run->id)
+    {{-- Keputusan story diambil pada eksekusi lain: jangan tampil seolah eksekusi ini yang diterima. --}}
+    <div class="notice-bar"><span class="notice-icon">i</span><p>Story ini sudah diputuskan <strong>{{ $story->acceptanceLabel() }}</strong> pada <a class="text-link" href="{{ route('stories.executions.show', [$story, $story->accepted_execution_run_id]) }}">eksekusi #{{ $story->accepted_execution_run_id }}</a> ({{ $story->accepted_at?->format('d M Y H:i') }}). Eksekusi #{{ $run->id }} ini {{ $run->status === 'COMPLETED' ? 'tidak dipakai' : 'tidak berhasil dan tidak ikut ke kode utama' }}.</p></div>
+@elseif ($story->isAccepted())
     <div class="notice-bar"><span class="notice-icon">✓</span><p><strong>Keputusan final PO: {{ $story->acceptanceLabel() }}</strong> ({{ $story->accepted_at?->format('d M Y H:i') }}). {{ $story->isLockedFromExecution() ? 'Story terkunci.' : 'Story bisa dieksekusi ulang dari halaman project.' }}</p></div>
-@elseif ($run->isTerminal())
-    <div class="notice-bar"><span class="notice-icon">★</span><p><strong>Eksekusi selesai ({{ str_replace('_', ' ', $run->status) }}).</strong> Beri keputusan final sebagai Product Owner:</p></div>
+@elseif ($run->status === 'COMPLETED')
+    <div class="notice-bar"><span class="notice-icon">★</span><p><strong>Eksekusi selesai dan lolos QA.</strong> Coba hasilnya di demo, lalu beri keputusan final sebagai Product Owner:</p></div>
     <form method="POST" action="{{ route('stories.executions.accept', [$story, $run]) }}" style="display:flex;gap:.5rem;margin-bottom:1rem">
         @csrf
         <button class="button button-primary" type="submit" name="status" value="BERHASIL" onclick="return handleConfirm(event, {title: 'Terima sebagai Berhasil?', message: 'Terima story ini sebagai BERHASIL? Story akan terkunci dari eksekusi ulang.', confirmLabel: 'Ya, terima'})">Terima sebagai Berhasil</button>
         <button class="button button-danger" type="submit" name="status" value="GAGAL" onclick="return handleConfirm(event, {title: 'Tandai sebagai Gagal?', message: 'Tandai eksekusi ini sebagai GAGAL? Hasilnya tidak digabung ke kode utama, dan story bisa dieksekusi ulang.', confirmLabel: 'Ya, tandai gagal', danger: true})">Tandai Gagal</button>
+    </form>
+@elseif (in_array($run->status, ['FAILED', 'BLOCKED'], true))
+    {{-- Eksekusi gagal tidak bisa diterima Berhasil: hanya Tandai Gagal, lalu eksekusi ulang. --}}
+    <div class="notice-bar"><span class="notice-icon">!</span><p><strong>Eksekusi ini {{ $run->status === 'FAILED' ? 'gagal' : 'diblokir' }}, jadi tidak bisa diterima sebagai Berhasil.</strong> Tandai Gagal, lalu jalankan Eksekusi User Story lagi.</p></div>
+    <form method="POST" action="{{ route('stories.executions.accept', [$story, $run]) }}" style="display:flex;gap:.5rem;margin-bottom:1rem">
+        @csrf
+        <button class="button button-danger" type="submit" name="status" value="GAGAL" onclick="return handleConfirm(event, {title: 'Tandai sebagai Gagal?', message: 'Hasil tidak digabung ke kode utama, dan story bisa dieksekusi ulang.', confirmLabel: 'Ya, tandai gagal', danger: true})">Tandai Gagal</button>
     </form>
 @endif
 

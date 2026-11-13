@@ -33,6 +33,7 @@ class Story extends Model
         'refined_from_run_id',
         'acceptance_status',
         'accepted_at',
+        'accepted_execution_run_id',
     ];
 
     protected static function booted(): void
@@ -60,6 +61,7 @@ class Story extends Model
                 // Keputusan final ikut ter-reset: revisi baru = pekerjaan baru.
                 $story->acceptance_status = null;
                 $story->accepted_at = null;
+                $story->accepted_execution_run_id = null;
             }
         });
     }

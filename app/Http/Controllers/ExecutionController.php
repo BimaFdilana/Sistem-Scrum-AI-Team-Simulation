@@ -47,7 +47,7 @@ class ExecutionController extends Controller
 
         // Story yang ditandai GAGAL dibuka lagi: keputusan PO berikutnya untuk run baru ini.
         if ($story->acceptance_status === 'GAGAL') {
-            $story->forceFill(['acceptance_status' => null, 'accepted_at' => null])->save();
+            $story->forceFill(['acceptance_status' => null, 'accepted_at' => null, 'accepted_execution_run_id' => null])->save();
         }
 
         $run = ExecutionRun::query()->create([
@@ -110,6 +110,16 @@ class ExecutionController extends Controller
         if ($story->isAccepted()) {
             return back()->withErrors(['acceptance' => 'Story sudah diterima sebelumnya.']);
         }
+        // BERHASIL hanya untuk eksekusi yang benar-benar selesai dan lolos QA.
+        // Eksekusi gagal/diblokir/berhenti hanya bisa ditandai GAGAL lalu dijalankan ulang.
+        if ($status === 'BERHASIL' && $run->status !== 'COMPLETED') {
+            return back()->withErrors(['acceptance' => 'Eksekusi ini '.match ($run->status) {
+                'FAILED' => 'gagal',
+                'BLOCKED' => 'diblokir',
+                ExecutionRun::NEEDS_PO => 'berhenti menunggu keputusan',
+                default => 'belum selesai',
+            }.', jadi tidak bisa diterima sebagai Berhasil. Tandai Gagal, lalu jalankan Eksekusi User Story lagi.']);
+        }
         // Run yang menunggu PO (NEEDS_PO) boleh ditutup sebagai GAGAL, tidak sebagai BERHASIL.
         $closableByPo = $run->isTerminal() || ($run->isWaitingForPo() && $status === 'GAGAL');
         if (! $closableByPo) {
@@ -163,6 +173,7 @@ class ExecutionController extends Controller
 
         $story->forceFill([
             'acceptance_status' => $status,
+            'accepted_execution_run_id' => $run->id,
             'accepted_at' => now(),
         ])->save();
 
