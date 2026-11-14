@@ -14,6 +14,7 @@ use App\Http\Controllers\PermissionRequestController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ProjectDownloadController;
 use App\Http\Controllers\ProjectPagesController;
+use App\Http\Controllers\ReleaseController;
 use App\Http\Controllers\SprintController;
 use App\Http\Controllers\StoryController;
 use App\Http\Controllers\StoryEstimationController;
@@ -71,6 +72,8 @@ Route::middleware('auth')->group(function (): void {
     Route::resource('projects', ProjectController::class)->only(['index', 'create', 'store', 'show']);
     Route::get('/projects/{project}/eksekusi', [ProjectPagesController::class, 'executions'])->name('projects.executions.index');
     Route::get('/projects/{project}/demo-rilis', [ProjectPagesController::class, 'release'])->name('projects.release.show');
+    Route::post('/projects/{project}/rilis/satukan', [ReleaseController::class, 'unify'])->middleware('throttle:6,1')->name('projects.release.unify');
+    Route::post('/projects/{project}/rilis/kirim', [ReleaseController::class, 'push'])->middleware('throttle:6,1')->name('projects.release.push');
     Route::get('/projects/{project}/pengaturan', [ProjectPagesController::class, 'settings'])->name('projects.settings.show');
     Route::put('/projects/{project}/test-command', [ProjectController::class, 'updateTestCommand'])->name('projects.test-command.update');
     Route::get('/projects/{project}/stories', [StoryController::class, 'index'])->name('projects.stories.index');

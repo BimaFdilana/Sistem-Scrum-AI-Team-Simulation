@@ -107,3 +107,25 @@
 .sprint-lock-note{margin:-4px 0 12px;padding:8px 12px;border-left:3px solid var(--amber);border-radius:0 8px 8px 0;background:rgba(var(--amber-rgb),.08);color:var(--muted);font-size:12px}
 .estimate-current{display:inline-block;margin-right:8px;padding:6px 10px;border:1px solid rgba(var(--accent-rgb),.35);border-radius:8px;background:rgba(var(--accent-rgb),.08);font-size:12px}
 .reestimate-form{margin-top:8px}
+/* Rilis ke GitHub */
+.rl-steps{display:grid;gap:12px;margin:12px 0}
+.rl-step{display:grid;grid-template-columns:34px minmax(0,1fr);gap:12px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.rl-step p{margin:4px 0 10px;font-size:13px;color:var(--muted);line-height:1.55}
+.rl-step-no{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;border:1px solid var(--line-strong);font-weight:700}
+.rl-step.is-done .rl-step-no{background:rgba(var(--accent-rgb),.15);border-color:var(--accent);color:var(--accent-strong)}
+.rl-step.is-todo .rl-step-no{border-color:var(--amber);color:var(--amber)}
+.rl-step.is-locked{opacity:.75}
+.rl-conflicts{margin-top:10px;padding:12px;border:1px solid rgba(220,38,38,.4);border-radius:10px;background:rgba(220,38,38,.06)}
+.rl-conflicts ul,.rl-items ul{margin:6px 0;padding-left:18px;font-size:12.5px}
+.rl-actions{display:flex;flex-wrap:wrap;gap:8px}
+.rl-actions form{display:inline-flex}
+.rl-items{margin:0 0 10px;font-size:13px}
+.rl-items summary{cursor:pointer;color:var(--accent);font-weight:600}
+.rl-warn{color:var(--amber);font-size:12.5px}
+.rl-history-title{margin:18px 0 6px;font-size:14px}
+.rl-history{list-style:none;margin:0;padding:0;display:grid;gap:6px;font-size:12.5px}
+.rl-history li{display:flex;gap:12px;padding:8px 10px;border:1px solid var(--line);border-radius:8px}
+.rl-history li.is-failed{border-color:rgba(220,38,38,.4)}
+.rl-history li span:first-child{color:var(--muted);white-space:nowrap}
+.soft-badge.is-warn{color:var(--amber);border-color:rgba(var(--amber-rgb),.45)}
+.rl-connection{margin-top:14px}

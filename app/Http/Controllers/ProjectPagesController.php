@@ -6,7 +6,9 @@ use App\Models\Project;
 use App\Support\Demo\DemoContents;
 use App\Support\Demo\DemoServerManager;
 use App\Support\Execution\ProjectRuns;
+use App\Support\Release\ReleaseManager;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
 
 /** Halaman per project di sidebar: Eksekusi, Demo & Rilis, Pengaturan Project. */
@@ -31,15 +33,21 @@ class ProjectPagesController extends Controller
         ]);
     }
 
-    public function release(Project $project, DemoServerManager $demos): View
+    public function release(Project $project, DemoServerManager $demos, ReleaseManager $releases): View
     {
         $demo = $demos->runningFor($project);
+        try {
+            $release = $releases->status($project);
+        } catch (\Throwable $exception) {
+            $release = ['ready' => false, 'reason' => 'Status rilis tidak bisa dibaca: '.Str::limit($exception->getMessage(), 200), 'connected' => false, 'releases' => collect(), 'items' => [], 'blockers' => []];
+        }
 
         return view('projects.release', [
             'project' => $project,
             'demo' => $demo,
             'demoUrl' => $demo ? $demos->url($demo, request()->getHost()) : null,
             'demoContents' => DemoContents::for($project),
+            'release' => $release,
             'activePage' => 'release',
         ]);
     }
