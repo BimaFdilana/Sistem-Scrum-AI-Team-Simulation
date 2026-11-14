@@ -86,7 +86,7 @@
     <div class="exec-hero-head">
         <div>
             <h2>{{ $failed ? 'Eksekusi terhenti' : ($s5 ? 'Eksekusi selesai' : 'Eksekusi berjalan') }}</h2>
-            <p>{{ str_replace('_', ' ', $run->status) }}{{ $run->error_code ? ' · '.$run->error_code : '' }}</p>
+            <p>{{ str_replace('_', ' ', $run->status) }}{{ $run->error_code ? ' · '.\App\Support\Ui\FriendlyText::code($run->error_code) : '' }}</p>
         </div>
         <div class="exec-percent">{{ $percent }}%</div>
     </div>
@@ -142,10 +142,10 @@
 @if ($run->status === 'AWAITING_PERMISSION')
     @include('executions.partials.permission-approval', ['run' => $run])
 @elseif ($run->status === 'COMPLETED')
-    <p class="discussion-banner"><strong>Eksekusi selesai.</strong> {{ $run->summary }}</p>
+    <p class="discussion-banner"><strong>Eksekusi selesai.</strong> {{ \App\Support\Ui\FriendlyText::clean($run->summary) }}</p>
 @elseif ($run->status === 'NEEDS_PO')
     <div class="discussion-banner discussion-banner--danger">
-        <p><strong>Eksekusi berhenti, menunggu keputusan Anda.</strong> {{ $run->summary }}</p>
+        <p><strong>Eksekusi berhenti, menunggu keputusan Anda.</strong> {{ \App\Support\Ui\FriendlyText::clean($run->summary) }}</p>
         <form method="POST" action="{{ route('stories.executions.resume', [$story, $run]) }}">
             @csrf
             <button class="button button-primary" type="submit">Lanjutkan eksekusi</button>
@@ -156,10 +156,10 @@
         </form>
     </div>
 @elseif ($run->status === 'BLOCKED')
-    <p class="discussion-banner discussion-banner--danger"><strong>Eksekusi diblokir.</strong> {{ $run->summary }}</p>
+    <p class="discussion-banner discussion-banner--danger"><strong>Eksekusi diblokir.</strong> {{ \App\Support\Ui\FriendlyText::clean($run->summary) }}</p>
 @elseif ($run->status === 'FAILED')
     <div class="discussion-banner discussion-banner--danger">
-        <p><strong>Eksekusi gagal ({{ $run->error_code }}).</strong> {{ $run->summary ?: 'Penyebab tidak tercatat.' }}</p>
+        <p><strong>Eksekusi gagal ({{ \App\Support\Ui\FriendlyText::code($run->error_code) }}).</strong> {{ $run->summary ? \App\Support\Ui\FriendlyText::clean($run->summary) : 'Penyebab tidak tercatat.' }}</p>
         <p>Pekerjaan yang setengah jadi disimpan di cabang {{ $run->work_branch ?: 'run ini' }} dan tidak ikut ke kode utama. Baseline sudah dikembalikan bersih, jadi Anda bisa langsung menjalankan <strong>Eksekusi User Story</strong> lagi dari halaman project.</p>
     </div>
 @endif
@@ -208,10 +208,10 @@
                     </div>
                     <div class="exec-badges">
                         @if ($task->executor)
-                            <span class="exec-chip exec-chip--{{ $task->executor === 'opencode' ? 'opencode' : 'hermes' }}">{{ $task->executor === 'opencode' ? 'OpenCode' : 'Hermes' }}</span>
+                            <span class="exec-chip exec-chip--{{ $task->executor === 'opencode' ? 'opencode' : 'hermes' }}">{{ $task->executor === 'opencode' ? 'Developer utama' : 'Agen cadangan' }}</span>
                         @endif
                         @if ($task->last_error === 'OPENCODE_FALLBACK')
-                            <span class="exec-chip exec-chip--info" title="OpenCode gagal; task dilanjutkan worker Hermes tanpa mengubah hasil akhir">dialihkan ke Hermes</span>
+                            <span class="exec-chip exec-chip--info" title="Developer utama gagal; task dilanjutkan agen cadangan tanpa mengubah hasil akhir">dialihkan ke agen cadangan</span>
                         @endif
                         <span class="exec-chip {{ $chipClass }}">{{ str_replace('_', ' ', $task->status) }}</span>
                     </div>
@@ -219,10 +219,10 @@
                 <p class="exec-task-desc">{{ $task->description }}</p>
 
                 @if ($task->qa_feedback && in_array($task->status, ['REVISION', 'BLOCKED'], true))
-                    <p class="qa-feedback"><strong>Feedback QA:</strong> {{ $task->qa_feedback }}</p>
+                    <p class="qa-feedback"><strong>Feedback QA:</strong> {{ \App\Support\Ui\FriendlyText::clean($task->qa_feedback) }}</p>
                 @endif
                 @if ($task->last_error && $task->last_error !== 'OPENCODE_FALLBACK')
-                    <p class="qa-feedback"><strong>Error:</strong> {{ $task->last_error }}</p>
+                    <p class="qa-feedback"><strong>Error:</strong> {{ \App\Support\Ui\FriendlyText::clean(\App\Support\Ui\FriendlyText::code($task->last_error)) }}</p>
                 @endif
                 @if ($task->diff_snapshot)
                     <details style="margin-top:.5rem">
@@ -263,7 +263,7 @@
                     <li>
                         <time>{{ $message->created_at->format('d M H:i') }}</time>
                         <strong>{{ str_replace(['-', '_'], ' ', $message->sender_slug) }} → {{ str_replace(['-', '_'], ' ', $message->recipient_slug) }}</strong>
-                        <p>{{ \Illuminate\Support\Str::limit($message->content, 180) }}</p>
+                        <p>{{ \Illuminate\Support\Str::limit(\App\Support\Ui\FriendlyText::clean($message->content), 180) }}</p>
                     </li>
                 @empty
                     <li><time>—</time><strong>Belum ada aktivitas</strong></li>

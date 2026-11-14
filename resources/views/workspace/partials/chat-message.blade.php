@@ -62,7 +62,7 @@
             <span class="chat-report-tag">LAPORAN SCRUM MASTER</span>
             <time datetime="{{ $message->created_at->toIso8601String() }}">{{ $message->created_at->translatedFormat('d M, H:i') }}</time>
         </header>
-        <p>{{ $message->content }}</p>
+        <p>{{ \App\Support\Ui\FriendlyText::clean($message->content) }}</p>
         @if ($message->link_url)<a class="text-link" href="{{ $message->link_url }}">{{ $message->link_label ?: 'Lihat detail' }} →</a>@endif
         @php $rRun = $message->executionRun; @endphp
         @if ($rRun && $message->id === ($latestReportIds[$rRun->id] ?? null) && $rRun->story && ! $rRun->story->isAccepted())
@@ -97,6 +97,6 @@
         @if($message->imageUrl())
             <img src="{{ $message->imageUrl() }}" alt="Gambar terlampir" class="chat-message-image">
         @endif
-        <p>{{ $message->content }}</p>
+        <p>{{ $message->role === 'assistant' ? \App\Support\Ui\FriendlyText::clean($message->content) : $message->content }}</p>
     </article>
 @endif

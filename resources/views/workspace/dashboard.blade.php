@@ -96,7 +96,7 @@
                         <span class="dash-feed-dot"></span>
                         <div>
                             <strong>{{ str_replace(['-', '_'], ' ', $message->sender_slug) }}</strong>
-                            <p>{{ \Illuminate\Support\Str::limit($message->content, 110) }}</p>
+                            <p>{{ \Illuminate\Support\Str::limit(\App\Support\Ui\FriendlyText::clean($message->content), 110) }}</p>
                             <time>{{ $message->created_at?->diffForHumans() }}{{ $message->run?->story ? ' · '.$message->run->story->display_id : '' }}</time>
                         </div>
                     </li>

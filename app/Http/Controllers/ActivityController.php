@@ -7,6 +7,7 @@ use App\Models\ExecutionRun;
 use App\Models\StoryEstimationRun;
 use App\Services\StoryEstimationService;
 use App\Support\Ai\AiQuota;
+use App\Support\Ui\FriendlyText;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -192,7 +193,7 @@ class ActivityController extends Controller
             ])->values()->all(),
             'log' => $run->messages()->latest('id')->limit(4)->get()->reverse()->map(fn ($m) => [
                 'who' => $m->sender_slug,
-                'text' => Str::limit((string) $m->content, 140),
+                'text' => Str::limit(FriendlyText::clean((string) $m->content), 140),
             ])->values()->all(),
             'detail_url' => $detailUrl,
             'chat_url' => route('chat.index', array_filter(['sprint' => $run->story?->sprint_id

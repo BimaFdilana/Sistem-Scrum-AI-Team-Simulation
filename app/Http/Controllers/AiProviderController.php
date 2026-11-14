@@ -134,7 +134,7 @@ class AiProviderController extends Controller
 
         if (! $auth) {
             return redirect()->route('ai-providers.index')
-                ->with('error', 'Gagal meminta link login dari gateway. Pastikan CLIProxyAPI berjalan dan Management API aktif.');
+                ->with('error', 'Gagal meminta link login dari gateway AI. Pastikan layanan gateway AI berjalan dan pengelolaan akunnya aktif.');
         }
 
         session()->put("ai_provider_state.{$provider}", $auth['state']);

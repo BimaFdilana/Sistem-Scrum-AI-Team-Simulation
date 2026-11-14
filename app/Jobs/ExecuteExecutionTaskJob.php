@@ -20,6 +20,7 @@ use App\Support\Execution\OpenCodeRunner;
 use App\Support\Execution\ProjectFacts;
 use App\Support\Execution\TaskCompletion;
 use App\Support\Execution\TaskFileScope;
+use App\Support\Ui\FriendlyText;
 use App\Support\Workspace\PatchApplier;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Bus\Queueable;
@@ -262,7 +263,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                     'execution_task_id' => $task->id,
                     'sender_slug' => 'scrum-master',
                     'recipient_slug' => $task->assignee,
-                    'content' => 'Task dikirim ke board kanban '.$board.' sebagai kartu '.$cardId.' untuk worker '.$profile.' (riwayat multi-agent tercatat di kartu kanban).',
+                    'content' => 'Task dikirim ke agen cadangan ('.$profile.') dan sedang dikerjakan.',
                     'metadata' => ['kanban_board' => $board, 'kanban_task_id' => $cardId, 'revision' => $task->revision_count],
                 ]);
                 KanbanExecutionPollJob::dispatch($run->id, $task->id);
@@ -660,7 +661,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             'execution_task_id' => $task->id,
             'sender_slug' => 'scrum-master',
             'recipient_slug' => $task->assignee,
-            'content' => 'Task #'.$task->id.' dikirim ke OpenCode (agen coding eksternal).',
+            'content' => 'Task #'.$task->id.' dikirim ke developer AI.',
         ]);
 
         $result = app(OpenCodeRunner::class)->run(
@@ -691,11 +692,11 @@ class ExecuteExecutionTaskJob implements ShouldQueue
         }
 
         if (! $result['ok']) {
-            if ($this->fallbackToHermes($run, $task, 'OpenCode gagal (exit '.$result['exit'].'): '.$result['output'])) {
+            if ($this->fallbackToHermes($run, $task, 'Developer AI gagal (kode '.$result['exit'].'): '.FriendlyText::clean($result['output']))) {
                 return;
             }
 
-            $this->failRun($run, $task, 'OPENCODE_FAILED', $worktrees, $baseline, 'OpenCode gagal (exit '.$result['exit'].'): '.$result['output']);
+            $this->failRun($run, $task, 'OPENCODE_FAILED', $worktrees, $baseline, 'Developer AI gagal (kode '.$result['exit'].'): '.FriendlyText::clean($result['output']));
 
             return;
         }
@@ -718,11 +719,11 @@ class ExecuteExecutionTaskJob implements ShouldQueue
         }
 
         if ($files === []) {
-            if ($this->fallbackToHermes($run, $task, 'OpenCode selesai tanpa mengubah file (2 percobaan).')) {
+            if ($this->fallbackToHermes($run, $task, 'Developer AI selesai tanpa mengubah file (2 percobaan).')) {
                 return;
             }
 
-            $this->failRun($run, $task, 'OPENCODE_NO_CHANGES', $worktrees, $baseline, 'OpenCode selesai tanpa mengubah file apa pun.');
+            $this->failRun($run, $task, 'OPENCODE_NO_CHANGES', $worktrees, $baseline, 'Developer AI selesai tanpa mengubah file apa pun.');
 
             return;
         }
@@ -733,7 +734,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             'execution_task_id' => $task->id,
             'sender_slug' => $task->assignee,
             'recipient_slug' => 'qa-engineer',
-            'content' => 'OpenCode selesai: '.count($files).' file ('.implode(', ', array_slice($files, 0, 5)).(count($files) > 5 ? ', ...' : '').').',
+            'content' => 'Developer AI selesai: '.count($files).' file ('.implode(', ', array_slice($files, 0, 5)).(count($files) > 5 ? ', ...' : '').').',
             'metadata' => ['files' => $files, 'driver' => 'opencode', 'revision' => $task->revision_count],
         ]);
 
@@ -788,7 +789,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             'execution_task_id' => $task->id,
             'sender_slug' => 'scrum-master',
             'recipient_slug' => $task->assignee,
-            'content' => 'Fallback otomatis: '.$reason.' Task dilanjutkan lewat Hermes.',
+            'content' => 'Dialihkan otomatis: '.FriendlyText::clean($reason).' Task dilanjutkan oleh agen cadangan.',
         ]);
 
         ExecuteExecutionTaskJob::dispatch($run->id, $task->id);
@@ -828,7 +829,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             'error_code' => $code,
             // Alasan yang bisa dibaca PO; dulu kosong sehingga layar hanya
             // menampilkan kode EXECUTION_FAILED tanpa penjelasan.
-            'summary' => 'Task #'.$task->id.' ('.$task->title.') gagal: '.Str::limit((string) ($errorMessage ?: $code), 600),
+            'summary' => 'Task #'.$task->id.' ('.$task->title.') gagal: '.Str::limit(FriendlyText::clean((string) ($errorMessage ?: $code)), 600),
             'completed_at' => now(),
         ])->save();
 

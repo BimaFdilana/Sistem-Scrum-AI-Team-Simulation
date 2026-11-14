@@ -100,7 +100,7 @@
                         <a class="dc-exec" href="{{ route('stories.executions.show', [$story, $execution]) }}">
                             <span><strong>Eksekusi #{{ $execution->id }}</strong><small>{{ $execution->created_at->format('d M Y H:i') }} · {{ $execution->tasks_count }} task</small></span>
                             <span class="dc-chip">{{ str_replace('_', ' ', $execution->status) }}</span>
-                            @if ($execution->summary)<em>{{ $execution->summary }}</em>@endif
+                            @if ($execution->summary)<em>{{ \App\Support\Ui\FriendlyText::clean($execution->summary) }}</em>@endif
                         </a>
                     @empty
                         <p class="dc-hint">Belum ada eksekusi. Mulai dari halaman project setelah estimasi disepakati.</p>

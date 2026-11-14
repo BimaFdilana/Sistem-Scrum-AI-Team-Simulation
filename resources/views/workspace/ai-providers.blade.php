@@ -41,7 +41,7 @@
         <div>
             <p class="eyebrow"><span class="eyebrow-line"></span>AI PROVIDERS</p>
             <h1>Provider AI</h1>
-            <p class="page-subtitle">Semua agent memakai satu model dari provider yang aktif di sini. Tambah provider lewat login OAuth (Google Gemini, GPT, Claude) atau API key dengan multi akun &amp; multi key. Key disimpan di konfigurasi gateway CLIProxyAPI, bukan di database website.</p>
+            <p class="page-subtitle">Semua agent memakai satu model dari provider yang aktif di sini. Tambah provider lewat login OAuth (Google Gemini, GPT, Claude) atau API key dengan multi akun &amp; multi key. Key disimpan di konfigurasi gateway AI, bukan di database website.</p>
         </div>
         <span class="count-pill">{{ count($activeProviders) }} aktif · {{ count($providers) }} provider</span>
     </section>
@@ -84,7 +84,7 @@
                             <span class="ap-model-pill is-empty">Belum dipilih</span>
                         @endif
                     </div>
-                    <p class="ap-note">Scrum Master, Backend Developer, Frontend Developer, dan QA Engineer memakai model yang sama. Satu pilihan di sini langsung berlaku untuk estimasi, breakdown, eksekusi, dan QA review — termasuk worker kanban dan <strong>agen coding OpenCode</strong> (BE/FE) yang membaca model aktif ini secara otomatis.</p>
+                    <p class="ap-note">Scrum Master, Backend Developer, Frontend Developer, dan QA Engineer memakai model yang sama. Satu pilihan di sini langsung berlaku untuk estimasi, breakdown, eksekusi, dan QA review — termasuk developer utama dan agen cadangan.</p>
 
                     @unless ($activeModel)
                         <p class="form-alert" style="margin-top:14px;">Belum ada model dipilih. Semua alur agent akan menolak berjalan sampai Anda memilih satu model di bawah.</p>
@@ -95,7 +95,7 @@
                     @enderror
 
                     @if (count($availableModels) === 0)
-                        <p class="form-alert" style="margin-top:14px;">Daftar model belum terbaca. Pastikan gateway CLIProxyAPI berjalan dan minimal satu provider terhubung.</p>
+                        <p class="form-alert" style="margin-top:14px;">Daftar model belum terbaca. Pastikan gateway AI berjalan dan minimal satu provider terhubung.</p>
                     @else
                         <form method="POST" action="{{ route('ai-providers.active-model.update') }}">
                             @csrf
@@ -119,7 +119,7 @@
                     <div class="ap-card-head">
                         <div>
                             <p class="section-kicker">STATUS</p>
-                            <h2>Gateway CLIProxyAPI</h2>
+                            <h2>Gateway AI</h2>
                         </div>
                     </div>
                     <div class="ap-health">
@@ -147,7 +147,7 @@
                         </div>
                     </div>
                     @unless ($gatewayUp && $managementUp)
-                        <p class="ap-health-warning">Pastikan service CLIProxyAPI berjalan di server dan <code>CLIPROXY_MANAGEMENT_KEY</code> terisi di <code>.env</code>.</p>
+                        <p class="ap-health-warning">Pastikan layanan gateway AI berjalan di server dan kunci manajemennya sudah diatur.</p>
                     @endunless
                 </article>
             </div>
@@ -300,7 +300,7 @@
             <p class="ap-section-note">Satu provider bisa punya beberapa akun (grup), dan satu akun bisa punya beberapa key. Gateway merotasi key di dalam satu akun dan berpindah akun saat satu akun kena limit. Key tidak pernah ditampilkan utuh — hanya 4 karakter awal dan akhir.</p>
 
             @if ($apiKeys === null || ! $v8Up)
-                <p class="form-alert" style="margin:0">Management API v8 gateway tidak aktif / tidak dapat dihubungi — pastikan gateway versi 8.x berjalan dan <code>CLIPROXY_MANAGEMENT_KEY</code> terisi di <code>.env</code>. Setelah aktif, API key bisa dikelola dari sini.</p>
+                <p class="form-alert" style="margin:0">Pengelolaan akun gateway AI tidak dapat dihubungi — pastikan layanan gateway AI berjalan dan kunci manajemennya sudah diatur. Setelah aktif, API key bisa dikelola dari sini.</p>
             @elseif (! $hasApiKeyAccounts)
                 <div class="ap-card ap-empty">
                     <h3>Belum ada akun API key</h3>

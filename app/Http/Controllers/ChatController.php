@@ -276,7 +276,7 @@ class ChatController extends Controller
             'TIMEOUT' => 'AI terlalu lama merespons. Coba lagi sebentar.',
             'AUTH_FAILED' => 'Kunci akses AI bermasalah. Periksa kembali koneksi provider di menu AI Providers.',
             'PROVIDER_AUTH_INCOMPLETE' => 'Koneksi akun AI di server belum lengkap (akun Google/Antigravity kehilangan project_id). Putuskan lalu hubungkan ulang provider Google di menu AI Providers, kemudian coba chat lagi.',
-            'GATEWAY_UNREACHABLE' => 'Gateway AI tidak dapat dihubungi. Pastikan layanan CLIProxyAPI berjalan.',
+            'GATEWAY_UNREACHABLE' => 'Gateway AI tidak dapat dihubungi. Pastikan layanan gateway AI di server berjalan.',
             'MODEL_NOT_FOUND' => 'Model AI tidak tersedia. Pilih model lain di konfigurasi agen.',
             'DISABLED' => 'Jalur AI sedang dimatikan oleh admin. Hubungi admin untuk mengaktifkannya.',
             'BAD_REQUEST' => 'Permintaan ke AI tidak valid. Coba ulangi dengan pesan yang berbeda.',

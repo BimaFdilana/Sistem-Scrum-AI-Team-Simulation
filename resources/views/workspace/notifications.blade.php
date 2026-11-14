@@ -33,7 +33,7 @@
                     <span class="agent-avatar {{ $notification->read_at ? '' : 'avatar-amber' }}">!</span>
                     <div class="directory-main">
                         <h2>{{ $notification->title }}</h2>
-                        <p>{{ $notification->message }}</p>
+                        <p>{{ \App\Support\Ui\FriendlyText::clean($notification->message) }}</p>
                         <p><small>{{ $notification->created_at->diffForHumans() }}</small></p>
                     </div>
                     <div class="directory-role">

@@ -5,6 +5,7 @@ namespace App\Support\Chat;
 use App\Models\ChatCommand;
 use App\Models\ExecutionRun;
 use App\Support\Ai\AiQuota;
+use App\Support\Ui\FriendlyText;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -64,7 +65,7 @@ class ChatCommandReporter
         $tasks = $run->tasks()->orderBy('sort_order')->orderBy('id')->get()
             ->map(fn ($task) => '- ['.($task->assignee === 'frontend-developer' ? 'FE' : 'BE').'] '.$task->title)
             ->implode("\n");
-        $summary = trim((string) Str::of((string) $run->summary)->before("\nMode langsung"));
+        $summary = FriendlyText::clean(trim((string) Str::of((string) $run->summary)->before("\nMode langsung")));
 
         return match ($run->status) {
             'EXECUTING' => "Perintah Anda saya pecah menjadi tugas untuk tim dan langsung dikerjakan:\n".$tasks
