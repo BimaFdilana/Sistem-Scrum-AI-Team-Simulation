@@ -73,8 +73,50 @@ class ChatCommandReporter
                 ."\n\nCoba hasilnya di demo (Pengaturan & Demo project), lalu pilih **Terima** atau **Tandai Gagal** di bawah.",
             'NEEDS_PO' => 'Pekerjaan berhenti dan butuh keputusan Anda: '.Str::limit($summary !== '' ? $summary : 'lihat detail proses.', 500)
                 ."\n\nKlik **Lanjutkan** untuk mencoba lagi, atau **Tandai Gagal**.",
-            default => 'Perintah gagal dikerjakan: '.Str::limit($summary !== '' ? $summary : (string) $run->error_code, 500)
-                ."\n\nKode utama tidak berubah. Klik **Jalankan ulang** untuk mencoba lagi, atau ubah perintahnya dengan mengirim perintah baru.",
+            default => 'Perintah gagal dikerjakan. '.self::failureExplanation($run)
+                ."\n\nKode utama tidak berubah. ".match (self::failureKind($run)) {
+                    'transient' => 'Gangguan ini sementara, jadi aman klik **Jalankan ulang**.',
+                    'setup' => 'Perbaiki pengaturannya dulu, lalu klik **Jalankan ulang**.',
+                    default => 'Menjalankan ulang hal yang sama akan gagal lagi, jadi klik **Rumuskan ulang**: saya rumuskan perintahnya lebih jelas atau lebih kecil.',
+                }
+            .($summary !== '' ? "\n\nDetail teknis: ".Str::limit($summary, 300) : ''),
+        };
+    }
+
+    /**
+     * Jenis kegagalan, menentukan tombol yang ditawarkan ke PO:
+     * - transient: gangguan sementara (AI sibuk, koneksi, restart) -> Jalankan ulang
+     * - too_big: pekerjaan terlalu besar (waktu habis, QA terus menolak) -> Rumuskan ulang
+     * - unclear: SM tidak bisa memetakan perintah jadi tugas -> Rumuskan ulang
+     * - setup: model AI belum siap -> perbaiki pengaturan
+     */
+    public static function failureKind(ExecutionRun $run): string
+    {
+        $code = (string) $run->error_code;
+        $text = mb_strtolower((string) $run->summary);
+
+        if (in_array($code, ['MODEL_NOT_CHOSEN', 'MODEL_PROBLEMATIC'], true)) {
+            return 'setup';
+        }
+        if (in_array($code, ['TASK_STALLED', 'QA_REVISION_LIMIT', 'GATE_FAILED'], true)
+            || str_contains($text, 'exceeded the timeout') || str_contains($text, 'timed out') || str_contains($text, 'waktu habis')) {
+            return 'too_big';
+        }
+        if (in_array($code, ['BREAKDOWN_FAILED', 'OPENCODE_NO_CHANGES', 'REVIEW_FAILED'], true)) {
+            return 'unclear';
+        }
+
+        return 'transient';
+    }
+
+    /** Penjelasan kegagalan dalam bahasa PO. */
+    public static function failureExplanation(ExecutionRun $run): string
+    {
+        return match (self::failureKind($run)) {
+            'setup' => 'Penyebab: model AI belum dipilih atau sedang bermasalah. Buka menu AI Providers dan pilih model yang tersedia.',
+            'too_big' => 'Penyebab: pekerjaannya terlalu besar untuk satu putaran (developer kehabisan waktu atau QA terus menemukan masalah).',
+            'unclear' => 'Penyebab: Scrum Master tidak bisa memetakan perintah menjadi tugas yang jelas (kriteria terlalu banyak, terlalu umum, atau tidak ada perubahan kode yang dihasilkan).',
+            default => 'Penyebab: gangguan sementara pada AI atau koneksi server.',
         };
     }
 }

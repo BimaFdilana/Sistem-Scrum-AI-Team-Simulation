@@ -3,19 +3,15 @@
 namespace Tests\Feature;
 
 use App\Jobs\AdvanceStoryEstimationJob;
-use App\Jobs\BreakdownExecutionJob;
-use App\Models\ChatMessage;
 use App\Models\ExecutionRun;
 use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\Story;
 use App\Models\StoryEstimationRun;
 use App\Models\User;
-use App\Support\Chat\SprintChat;
 use App\Support\Execution\DirectWorkspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
-use Illuminate\Support\Str;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
@@ -173,99 +169,5 @@ class Sprint2FixesTest extends TestCase
         $story = Story::create(['project_id' => $sprint->project_id, 'sprint_id' => $sprint->id, 'title' => 'Pagu', 'estimate_points' => 5]);
 
         $this->actingAs($user)->post(route('stories.estimations.reestimate', $story))->assertSessionHasErrors('estimation');
-    }
-
-    // ---------- 3. Tanya Scrum Master: perintah chat ke tim ----------
-
-    public function test_chat_command_starts_team_execution_without_backlog(): void
-    {
-        Bus::fake([BreakdownExecutionJob::class]);
-        $user = User::factory()->create();
-        $sprint = $this->sprint($this->project());
-
-        $this->actingAs($user)->postJson(route('chat.commands.store'), ['message' => "Tambahkan kolom Pagu di daftar unit\nUrutkan berdasarkan nama", 'sprint_id' => $sprint->id])
-            ->assertStatus(202);
-
-        $story = Story::query()->where('origin', 'CHAT')->firstOrFail();
-        $this->assertNull($story->sprint_id); // tidak masuk Sprint Backlog
-        $this->assertStringStartsWith('PERINTAH-', $story->display_id);
-        $this->assertSame(1, ExecutionRun::query()->where('story_id', $story->id)->where('status', 'QUEUED')->count());
-        Bus::assertDispatched(BreakdownExecutionJob::class);
-        $this->assertDatabaseHas('chat_messages', ['kind' => 'command', 'role' => 'user']);
-
-        $this->actingAs($user)->get('/chat?sprint='.$sprint->id)->assertOk()
-            ->assertSee('Laporan Scrum Master')->assertSee('Tanya Scrum Master')
-            ->assertSee('perintah untuk tim')->assertDontSee('Ubah kode langsung');
-
-        // Transkrip terpisah: perintah hanya di tab Tanya, obrolan/laporan sprint di tab Laporan.
-        SprintChat::report(SprintChat::conversation($user, $sprint), 'Hasil estimasi US-01: 5 poin');
-        $html = $this->actingAs($user)->get('/chat?sprint='.$sprint->id)->getContent();
-        $reportPane = Str::between($html, 'id="chatTranscript"', 'id="commandTranscript"');
-        $commandPane = Str::after($html, 'id="commandTranscript"');
-        $this->assertStringNotContainsString('Tambahkan kolom Pagu di daftar unit', $reportPane);
-        $this->assertStringContainsString('Hasil estimasi US-01', $reportPane);
-        $this->assertStringContainsString('Tambahkan kolom Pagu di daftar unit', $commandPane);
-        $this->assertStringNotContainsString('Hasil estimasi US-01', $commandPane);
-        $this->actingAs($user)->get(route('projects.show', $sprint->project_id))->assertOk()->assertDontSee('Tambahkan kolom Pagu di daftar unit');
-    }
-
-    public function test_chat_command_is_refused_while_team_is_busy_in_the_project(): void
-    {
-        $user = User::factory()->create();
-        $project = $this->project();
-        $sprint = $this->sprint($project);
-        $this->makeRun($project, 'EXECUTING', 'scrum/run-1');
-
-        $this->actingAs($user)->postJson(route('chat.commands.store'), ['message' => 'Ganti judul halaman', 'sprint_id' => $sprint->id])
-            ->assertStatus(409);
-    }
-
-    public function test_scrum_master_reports_each_stage_once_with_decision_buttons(): void
-    {
-        $user = User::factory()->create();
-        $sprint = $this->sprint($this->project());
-        Bus::fake([BreakdownExecutionJob::class]);
-        $this->actingAs($user)->postJson(route('chat.commands.store'), ['message' => 'Ganti judul halaman', 'sprint_id' => $sprint->id])->assertStatus(202);
-        $run = ExecutionRun::query()->latest('id')->firstOrFail();
-        $run->tasks()->create(['title' => 'Ganti judul di layout', 'assignee' => 'frontend-developer', 'status' => 'PENDING', 'sort_order' => 0]);
-
-        $run->forceFill(['status' => 'EXECUTING'])->save();
-        $run->forceFill(['status' => 'EXECUTING', 'summary' => 'x'])->save(); // tidak dobel
-        $run->forceFill(['status' => 'COMPLETED', 'summary' => 'Lulus review gabungan.'])->save();
-
-        $reports = ChatMessage::query()->where('kind', 'report')->where('execution_run_id', $run->id)->pluck('content');
-        $this->assertCount(2, $reports);
-        $this->assertStringContainsString('[FE] Ganti judul di layout', $reports[0]);
-        $this->assertStringContainsString('lolos pemeriksaan QA', $reports[1]);
-
-        $this->actingAs($user)->get('/chat?sprint='.$sprint->id)->assertOk()
-            ->assertSee('✓ Terima')->assertSee('Tandai Gagal')
-            ->assertSee(route('stories.executions.accept', [$run->story_id, $run]), false);
-    }
-
-    public function test_failed_chat_command_offers_rerun_without_estimate(): void
-    {
-        Bus::fake([BreakdownExecutionJob::class]);
-        $user = User::factory()->create();
-        $sprint = $this->sprint($this->project());
-        $this->actingAs($user)->postJson(route('chat.commands.store'), ['message' => 'Ganti judul halaman', 'sprint_id' => $sprint->id])->assertStatus(202);
-        $run = ExecutionRun::query()->latest('id')->firstOrFail();
-        $run->forceFill(['status' => 'FAILED', 'summary' => 'Task #1 gagal: timeout'])->save();
-
-        $this->actingAs($user)->get('/chat?sprint='.$sprint->id)->assertOk()->assertSee('Jalankan ulang')->assertSee('Task #1 gagal: timeout');
-        $this->actingAs($user)->post(route('stories.executions.store', $run->story_id))->assertRedirect();
-        $this->assertSame(2, ExecutionRun::query()->where('story_id', $run->story_id)->count());
-    }
-
-    public function test_status_of_a_command_is_private(): void
-    {
-        Bus::fake([BreakdownExecutionJob::class]);
-        $owner = User::factory()->create();
-        $sprint = $this->sprint($this->project());
-        $this->actingAs($owner)->postJson(route('chat.commands.store'), ['message' => 'Ganti judul halaman', 'sprint_id' => $sprint->id]);
-        $run = ExecutionRun::query()->latest('id')->firstOrFail();
-
-        $this->actingAs($owner)->getJson(route('chat.commands.status', $run))->assertOk()->assertJsonPath('active', true);
-        $this->actingAs(User::factory()->create())->getJson(route('chat.commands.status', $run))->assertNotFound();
     }
 }

@@ -60,11 +60,12 @@ class ChatController extends Controller
         }
 
         $conversation = $archived ?? ($selectedSprint ? $threads->get($selectedSprint->id) : null);
-        $messages = $conversation?->messages()->with('executionRun.story')->oldest('id')->get() ?? collect();
+        $messages = $conversation?->messages()->with(['executionRun.story', 'chatCommand.story'])->oldest('id')->get() ?? collect();
         // Tombol keputusan hanya pada laporan terbaru tiap run, dan hanya untuk run terbaru tiap perintah.
         $latestReportIds = $messages->where('kind', 'report')->whereNotNull('execution_run_id')
             ->groupBy('execution_run_id')->map(fn ($group) => $group->max('id'))->all();
-        $commandStoryIds = $messages->pluck('executionRun.story_id')->filter()->unique()->values();
+        $commandStoryIds = $messages->pluck('executionRun.story_id')
+            ->merge($messages->pluck('chatCommand.story_id'))->filter()->unique()->values();
         $latestRunIds = $commandStoryIds->isEmpty() ? [] : ExecutionRun::query()
             ->whereIn('story_id', $commandStoryIds)->selectRaw('story_id, max(id) as id')->groupBy('story_id')
             ->pluck('id', 'story_id')->all();
@@ -91,9 +92,11 @@ class ChatController extends Controller
             'selectedProject' => $sprintProject,
             'sprintStories' => $stories,
             // Dua transkrip terpisah: perintah ke tim (Tanya) dan sisanya (Laporan).
-            'commandMessages' => $messages->filter(fn ($m) => $m->kind === 'command' || ($m->execution_run_id && $m->executionRun?->story?->isChatCommand()))->values(),
-            'reportMessages' => $messages->reject(fn ($m) => $m->kind === 'command' || ($m->execution_run_id && $m->executionRun?->story?->isChatCommand()))->values(),
+            'commandMessages' => $messages->filter(fn ($m) => $m->kind === 'command' || $m->kind === 'command_plan' || $m->chat_command_id !== null || ($m->execution_run_id && $m->executionRun?->story?->isChatCommand()))->values(),
+            'reportMessages' => $messages->reject(fn ($m) => $m->kind === 'command' || $m->kind === 'command_plan' || $m->chat_command_id !== null || ($m->execution_run_id && $m->executionRun?->story?->isChatCommand()))->values(),
             'latestReportIds' => $latestReportIds,
+            'latestPlanIds' => $messages->where('kind', 'command_plan')->whereNotNull('chat_command_id')
+                ->groupBy('chat_command_id')->map(fn ($group) => $group->max('id'))->all(),
             'latestRunIds' => $latestRunIds,
             'activePage' => 'chat',
         ]);

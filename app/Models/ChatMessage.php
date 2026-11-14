@@ -16,6 +16,7 @@ class ChatMessage extends Model
         'link_url',
         'link_label',
         'execution_run_id',
+        'chat_command_id',
     ];
 
     public function isReport(): bool
@@ -33,6 +34,11 @@ class ChatMessage extends Model
         }
 
         return Storage::disk('public')->url($this->image_path);
+    }
+
+    public function chatCommand(): BelongsTo
+    {
+        return $this->belongsTo(ChatCommand::class);
     }
 
     public function executionRun(): BelongsTo

@@ -100,6 +100,11 @@
             </header>
 
             <section class="chat-panel" aria-label="Chat dengan {{ $agent['name'] }}">
+                @if ($errors->any())
+                    <div class="chat-flash is-error" role="alert">{{ $errors->first() }}</div>
+                @elseif (session('status'))
+                    <div class="chat-flash" role="status">{{ session('status') }}</div>
+                @endif
                 <div class="chat-tabs" role="tablist" aria-label="Jenis percakapan">
                     <button type="button" role="tab" class="chat-tab" id="tab-report" data-tab="report" aria-controls="chatTranscript" aria-selected="true">📋 Laporan Scrum Master @if ($reportMessages->isNotEmpty())<span class="chat-tab-count">{{ $reportMessages->count() }}</span>@endif</button>
                     <button type="button" role="tab" class="chat-tab" id="tab-command" data-tab="command" aria-controls="commandTranscript" aria-selected="false">🧭 Tanya Scrum Master @if ($commandMessages->isNotEmpty())<span class="chat-tab-count">{{ $commandMessages->where('kind', 'command')->count() }} perintah</span>@endif</button>
