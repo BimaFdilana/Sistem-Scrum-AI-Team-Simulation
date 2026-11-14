@@ -164,6 +164,8 @@ class ReleaseManager
             $this->git($repo, ['tag', '-f', $tag, $previous]);
             $this->authGit($repo, ['push', '--atomic', 'origin', 'refs/heads/'.self::BRANCH.':refs/heads/'.self::BRANCH, 'refs/tags/'.$tag.':refs/tags/'.$tag]);
         } catch (Throwable $exception) {
+            // Kirim gagal: tanda cadangan lokal tidak dipakai, jangan menumpuk.
+            $this->git($repo, ['tag', '-d', $tag], true);
             $release = ProjectRelease::query()->create([
                 'project_id' => $project->id, 'user_id' => $user?->id, 'status' => 'FAILED', 'commit_sha' => $head,
                 'previous_sha' => $previous, 'backup_tag' => null, 'items' => $items, 'commit_count' => $ahead,
