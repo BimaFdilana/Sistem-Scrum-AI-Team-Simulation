@@ -70,7 +70,9 @@ class ChatDisclosurePolicy
         }
 
         // Penanda platform + kata/frasa pengungkapan di pesan yang sama.
-        $platform = '(scrumspace|scrum-team|scrum team|artitechlabs|website ini|situs ini|aplikasi ini|platform ini)';
+        $platform = $projectContext
+            ? '(scrumspace|scrum-team|scrum team|artitechlabs)'
+            : '(scrumspace|scrum-team|scrum team|artitechlabs|website ini|situs ini|aplikasi ini|platform ini)';
         if (preg_match('/'.$platform.'/i', $message) === 1
             && (preg_match('/(?<![A-Za-z])'.$words.'(?![A-Za-z])/i', $message) === 1
                 || preg_match('/'.$phrases.'/i', $message) === 1)) {

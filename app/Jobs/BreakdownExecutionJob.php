@@ -10,6 +10,7 @@ use App\Services\AiGateway;
 use App\Services\ChatDisclosurePolicy;
 use App\Services\HermesClient;
 use App\Support\Agents\AgentSoul;
+use App\Support\Chat\CodeContext;
 use App\Support\Execution\ExecutionScheduler;
 use App\Support\Workspace\ProjectFileInventory;
 use Illuminate\Bus\Queueable;
@@ -172,6 +173,8 @@ class BreakdownExecutionJob implements ShouldQueue
             'Kembalikan JSON tepat: {"tasks":[{"title":"...","description":"...","assignee":"frontend-developer","files":["path/relatif/file.php"]}, ...],"criteria":[{"criterion":"salinan satu acceptance criteria","tasks":[1,2]}, ...]}. WAJIB: setiap objek task memuat KEEMPAT field (title, description, assignee, files) — jangan ada yang dihilangkan. "criteria" memetakan SETIAP acceptance criteria story ke nomor task (mulai dari 1, sesuai urutan array tasks) yang memenuhinya; tiap acceptance criteria harus punya minimal satu task, dan tiap task harus melayani minimal satu criteria.',
             'Aturan TODO LIST (wajib): 1-6 task; assignee hanya "frontend-developer" atau "backend-developer"; title diawali kata kerja dan menyebut hasil konkretnya, bukan topik (contoh benar: "Tambahkan kolom status pada tabel daftar pesanan", contoh salah: "Tetapkan sumber pemetaan status", "Analisis daftar pesanan"); description WAJIB memuat empat bagian: KERJAKAN (perubahan kode konkret), FILE (file yang diubah/dibuat, sama dengan files — files tidak boleh kosong untuk task kode), HASIL (apa yang berubah dan terlihat setelah task ini), SELESAI BILA (kriteria selesai task ini saja yang bisa dicek dari patch-nya); LARANG task yang hanya analisis, riset, diskusi, perencanaan, atau penentuan tanpa perubahan kode — tiap task HARUS berakhir dengan patch (buat/ubah file), dan jangan buat task terpisah yang hanya menguji: pengujian menjadi bagian SELESAI BILA tiap task, QA yang akan menguji setelahnya; URUTAN ARRAY = URUTAN EKSEKUSI: task yang hasilnya dibutuhkan task lain HARUS diletakkan lebih dulu, dan tiap description task yang bergantung harus menyebut hasil task sebelumnya yang dipakainya.',
             $inventory?->promptSection(),
+            // Kode yang relevan dengan story/perintah: SM memilih file yang tepat, bukan menebak dari nama.
+            CodeContext::for($story->project, $story->effectiveTitle().' '.$story->effectiveAcceptanceCriteria().' '.($story->isChatCommand() ? (string) $story->description : ''), 9000),
             $this->pathRuleSection($inventory !== null),
             'Versi story: '.($story->hasRefinement() ? 'Hasil Diskusi SM (versi final dari diskusi Fibonacci)' : 'Data Asli').'.',
             $story->isChatCommand()

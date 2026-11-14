@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\ChatCommand;
 use App\Services\HermesClient;
 use App\Support\Agents\AgentSoul;
+use App\Support\Chat\CodeContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -113,6 +114,8 @@ class UnderstandChatCommandJob implements ShouldQueue
             'Aturan criteria: 1-7 butir; tiap butir SATU kalimat yang hasilnya bisa dicek PO di aplikasi (halaman, data, atau tampilan yang terlihat); gabungkan Given/When/Then, deskripsi, dan daftar task menjadi kriteria hasil, jangan menyalin per baris; jangan menulis kriteria berupa langkah teknis seperti "periksa query".',
             'Aturan parts: isi HANYA bila pekerjaan terlalu besar untuk satu putaran (lebih dari 6 perubahan kode atau lebih dari 3 halaman/fitur berbeda). Bila diisi: 2-4 bagian berurutan, masing-masing {"title":"...","criteria":["..."]} dengan aturan yang sama; bagian berikutnya boleh memakai hasil bagian sebelumnya.',
             $command->hint ? "Percobaan sebelumnya gagal, hindari penyebabnya:\n".$command->hint : null,
+            // Kode nyata project: kriteria merujuk halaman, data, dan nama yang benar-benar ada.
+            CodeContext::for($command->project, $command->command, 9000),
             implode("\n", $context),
             "PERINTAH PO:\n".trim($command->command),
         ]));

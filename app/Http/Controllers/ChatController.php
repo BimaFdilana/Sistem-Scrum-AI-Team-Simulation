@@ -10,6 +10,7 @@ use App\Models\Project;
 use App\Models\Sprint;
 use App\Services\ChatDisclosurePolicy;
 use App\Services\HermesClient;
+use App\Support\Chat\CodeContext;
 use App\Support\Chat\SprintChat;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -235,6 +236,11 @@ class ChatController extends Controller
                 .' · '.($story->acceptance_status ?? 'belum diterima'))->take(25)->implode("\n");
             $parts[] = '[Sprint: "'.$sprint->name.'" (status '.$sprint->status.')'
                 .($sprint->goal ? ', goal: '.$sprint->goal : '')."\nStory di sprint ini:\n".($stories !== '' ? $stories : '(belum ada story)').']';
+        }
+        // SM bisa MEMBACA kode project (cabang utama) yang relevan dengan pertanyaan.
+        $code = CodeContext::for($project, (string) $userMessage->content);
+        if ($code !== '') {
+            $parts[] = $code;
         }
         $history = $conversation->messages()->where('id', '<', $userMessage->id)
             ->latest('id')->limit(8)->get()->reverse()

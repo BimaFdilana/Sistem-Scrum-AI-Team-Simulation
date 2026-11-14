@@ -80,6 +80,7 @@
                             <strong>Bisa</strong>
                             <ul>
                                 <li>Menjawab pertanyaan tentang sprint ini: story, poin, status penerimaan.</li>
+                                <li><strong>Membaca kode project</strong> (hanya membaca) untuk menjawab pertanyaan seperti "file mana yang mengatur pagu?" atau "kenapa pagu tampil Fleksibel?".</li>
                                 <li>Merangkum hasil estimasi tim dan hasil eksekusi untuk Anda.</li>
                                 <li>Membantu memperjelas story dan Sprint Goal.</li>
                                 <li>Menyarankan langkah berikutnya.</li>
@@ -92,7 +93,7 @@
                                 <li>Mengubah kode sendiri. Kode diubah tim (Backend, Frontend, QA) lewat mode <strong>Tanya Scrum Master</strong>.</li>
                                 <li>Menyetujui izin eksekusi atau menerima story; itu keputusan Anda lewat tombol.</li>
                                 <li>Mengubah backlog atau memberi estimasi sendiri.</li>
-                                <li>Membuka detail server atau platform.</li>
+                                <li>Membuka detail server atau platform ScrumSpace.</li>
                             </ul>
                         </div>
                     </div>
