@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\Ai\AiQuota;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -584,6 +585,13 @@ class CliProxyApiClient
         }
         if ($status === 429) {
             $retryAfter = (int) ($response->header('Retry-After') ?? 0);
+            $detail = (string) ($response->json('error.message') ?? $response->body() ?? '');
+            if (AiQuota::isQuotaText($detail)) {
+                // Kuota habis berlangsung berjam-jam: jangan diulang buta, beri tahu PO.
+                AiQuota::exhausted($model, $detail);
+
+                return ['status' => 'permanent', 'text' => null, 'error' => 'QUOTA_EXHAUSTED', 'tool_calls' => [], 'usage' => [], 'retry_after' => null];
+            }
 
             return ['status' => 'transient', 'text' => null, 'error' => 'RATE_LIMITED', 'tool_calls' => [], 'usage' => [], 'retry_after' => $retryAfter > 0 ? min($retryAfter, 300) : null];
         }
@@ -615,6 +623,8 @@ class CliProxyApiClient
             if ($toolCalls !== []) {
                 $content = $response->json('choices.0.message.content');
 
+                AiQuota::recovered($model);
+
                 return ['status' => 'ok', 'text' => is_string($content) ? trim($content) : null, 'error' => '', 'tool_calls' => $toolCalls, 'usage' => $usage, 'retry_after' => null];
             }
         }
@@ -622,6 +632,8 @@ class CliProxyApiClient
         if (! is_string($content) || trim($content) === '') {
             return ['status' => 'transient', 'text' => null, 'error' => 'EMPTY_RESPONSE', 'tool_calls' => [], 'usage' => $usage, 'retry_after' => null];
         }
+
+        AiQuota::recovered($model);
 
         return ['status' => 'ok', 'text' => trim($content), 'error' => '', 'tool_calls' => [], 'usage' => $usage, 'retry_after' => null];
     }

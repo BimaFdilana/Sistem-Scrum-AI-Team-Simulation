@@ -12,6 +12,8 @@ use App\Services\AgentProfileClient;
 use App\Services\AgentToolRunner;
 use App\Services\AiGateway;
 use App\Services\KanbanClient;
+use App\Services\StrictModelResolver;
+use App\Support\Ai\AiQuota;
 use App\Support\Execution\DirectWorkspace;
 use App\Support\Execution\ExecutorPlanner;
 use App\Support\Execution\OpenCodeRunner;
@@ -327,6 +329,12 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                     'content' => 'Proses agen dihentikan oleh restart layanan; task diulang otomatis (percobaan '.($this->attempts() + 1).').',
                 ]);
                 $this->release(30);
+
+                return;
+            }
+            if (($exception instanceof AiUnavailableException && $exception->errorCode === 'QUOTA_EXHAUSTED')
+                || AiQuota::isQuotaText($exception->getMessage())) {
+                $this->pauseForQuota($run, $task, $exception->getMessage());
 
                 return;
             }
@@ -675,6 +683,13 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             }
         }
 
+        if (! $result['ok'] && AiQuota::isQuotaText($result['output'])) {
+            // Kuota habis: worker cadangan memakai model yang sama, jadi jangan dialihkan.
+            $this->pauseForQuota($run, $task, (string) $result['output']);
+
+            return;
+        }
+
         if (! $result['ok']) {
             if ($this->fallbackToHermes($run, $task, 'OpenCode gagal (exit '.$result['exit'].'): '.$result['output'])) {
                 return;
@@ -779,6 +794,30 @@ class ExecuteExecutionTaskJob implements ShouldQueue
         ExecuteExecutionTaskJob::dispatch($run->id, $task->id);
 
         return true;
+    }
+
+    /**
+     * Kuota AI habis: eksekusi DIJEDA (bukan digagalkan) dan menunggu PO. Setelah
+     * PO mengganti model aktif atau kuota pulih, tombol "Lanjutkan" menjalankan
+     * ulang task ini dari awal. PO juga diberi tahu (banner, notifikasi, chat).
+     */
+    private function pauseForQuota(ExecutionRun $run, ExecutionTask $task, string $detail): void
+    {
+        $model = rescue(fn () => app(StrictModelResolver::class)->resolve('backend-developer'), null, false);
+        AiQuota::exhausted(is_string($model) ? $model : null, $detail);
+
+        $task->forceFill(['status' => 'BLOCKED', 'last_error' => 'QUOTA_EXHAUSTED', 'last_progress_at' => now()])->save();
+        $run->messages()->create([
+            'execution_task_id' => $task->id,
+            'sender_slug' => 'scrum-master',
+            'recipient_slug' => 'product-owner',
+            'content' => 'Task #'.$task->id.' dijeda: kuota model AI habis. Ganti model aktif di AI Providers atau tunggu kuota pulih, lalu klik Lanjutkan.',
+        ]);
+        $run->transitionTo(ExecutionRun::NEEDS_PO, ['EXECUTING', 'REVIEWING', 'QA_REVIEW'], [
+            'error_code' => 'QUOTA_EXHAUSTED',
+            'summary' => 'Kuota model AI'.(is_string($model) ? ' '.$model : '').' habis, jadi tim berhenti di task #'.$task->id.' ('.$task->title.'). '
+                .'Ganti model aktif di menu AI Providers atau tunggu kuota pulih (biasanya beberapa jam), lalu klik Lanjutkan.',
+        ]);
     }
 
     private function failRun(ExecutionRun $run, ExecutionTask $task, string $code, ?WorktreeManager $worktrees = null, ?string $baseline = null, ?string $errorMessage = null): void

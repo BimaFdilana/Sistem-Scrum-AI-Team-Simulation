@@ -18,3 +18,10 @@
 .form-field input:focus,.form-field select:focus,.form-field textarea:focus{border-color:rgba(var(--accent-rgb),.55);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.08)}
 .form-field input[type=file]{padding:9px;color:var(--muted)}
 .form-hint{color:var(--muted);font-size:10px;line-height:1.6}
+
+/* Peringatan kuota AI habis (tampil di semua halaman workspace). */
+.quota-banner{display:flex;align-items:center;gap:12px;margin:12px 24px 0;padding:12px 16px;border:1px solid rgba(var(--amber-rgb),.55);border-left:4px solid var(--amber);border-radius:10px;background:rgba(var(--amber-rgb),.12);color:var(--text)}
+.quota-banner p{flex:1;margin:0;font-size:13px;line-height:1.5}
+.quota-banner-icon{font-size:18px;color:var(--amber)}
+.quota-banner .button{white-space:nowrap}
+@media(max-width:680px){.quota-banner{flex-wrap:wrap;margin:10px 12px 0}}

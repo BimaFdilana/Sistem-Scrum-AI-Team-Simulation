@@ -64,3 +64,6 @@
 .dock-empty{margin:0;padding:16px 14px;color:var(--muted);font-size:12px;line-height:1.55}
 a.dock-close,a.dock-btn{text-decoration:none}
 .workspace-body .page-content{padding-bottom:88px}
+
+.dock-alert{margin:10px 12px 0;padding:10px 12px;border:1px solid rgba(var(--amber-rgb),.5);border-radius:10px;background:rgba(var(--amber-rgb),.1)}
+.dock-alert p{margin:0 0 8px;font-size:11.5px;line-height:1.5;color:var(--text)}

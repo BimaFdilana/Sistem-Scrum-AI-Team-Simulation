@@ -6,6 +6,7 @@ use App\Models\ChatCommand;
 use App\Models\ExecutionRun;
 use App\Models\StoryEstimationRun;
 use App\Services\StoryEstimationService;
+use App\Support\Ai\AiQuota;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -44,6 +45,8 @@ class ActivityController extends Controller
         $payload = [
             'runs' => $runs->map(fn (ExecutionRun $run) => $this->present($run))->values()->all(),
             'estimations' => $this->estimations($request),
+            // Peringatan kuota AI habis: panel progres menampilkannya di atas daftar proses.
+            'alert' => ($quota = AiQuota::current()) ? AiQuota::message($quota) : null,
         ];
         $all = collect($payload['runs'])->concat($payload['estimations']);
         $payload['attention'] = $all->where('state', 'attention')->count();

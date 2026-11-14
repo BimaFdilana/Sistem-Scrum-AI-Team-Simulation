@@ -12,6 +12,7 @@
     var KEY_DISMISSED = 'scrumspace-dock-dismissed';
 
     var runs = [];
+    var alertText = null;
     var chatUrl = root.dataset.chatUrl || '/chat';
     // Di layar kecil panel menutupi halaman: selalu mulai terlipat walau terakhir terbuka.
     var open = read(KEY_OPEN) === '1' && !(window.matchMedia && window.matchMedia('(max-width: 600px)').matches);
@@ -75,13 +76,13 @@
     function render() {
         var list = visibleRuns();
         root.hidden = false;
-        var state = list.length === 0 ? 'idle' : overall(list);
+        var state = list.length === 0 ? (alertText ? 'attention' : 'idle') : (alertText ? 'attention' : overall(list));
         var active = list.filter(function (r) { return r.state !== 'done'; }).length;
         pill.className = 'dock-pill dock-state-' + state;
         pill.setAttribute('aria-expanded', String(open));
         pill.replaceChildren();
         pill.append(el('span', 'dock-dot'));
-        pill.append(el('span', 'dock-pill-text', list.length === 0 ? 'Progres · tidak ada proses' : pillText(list, state)));
+        pill.append(el('span', 'dock-pill-text', alertText ? '⚠ Kuota AI habis' + (list.length ? ' · ' + list.length + ' proses' : '') : (list.length === 0 ? 'Progres · tidak ada proses' : pillText(list, state))));
         if (list.length > 1) { pill.append(el('span', 'dock-pill-count', String(list.length))); }
 
         panel.hidden = !open;
@@ -116,6 +117,14 @@
         head.insertBefore(chat, close);
 
         var nodes = [head];
+        if (alertText) {
+            var warn = el('div', 'dock-alert');
+            warn.append(el('p', '', alertText));
+            var fix = el('a', 'dock-btn is-primary', 'Ganti model');
+            fix.href = '/ai-providers';
+            warn.append(fix);
+            nodes.push(warn);
+        }
         if (list.length === 0) {
             nodes.push(el('p', 'dock-empty', 'Tidak ada estimasi atau eksekusi yang berjalan. Proses yang Anda mulai akan muncul di sini, dan hasilnya dilaporkan Scrum Master di chat sprint.'));
         }
@@ -324,6 +333,8 @@
             var combined = (data.runs || []).map(function (r) { r.kind = r.kind || 'execution'; return r; })
                 .concat(data.estimations || []);
             detectChanges(combined);
+            if (data.alert && data.alert !== alertText) { announce(data.alert); }
+            alertText = data.alert || null;
             runs = combined;
             render();
         }).catch(function () {

@@ -107,6 +107,14 @@
                 <div class="breadcrumbs"><span>AI Scrum Agent Workspace</span><span class="crumb-separator">/</span><strong>{{ $breadcrumb ?? 'Ringkasan' }}</strong></div>
                 <div class="topbar-right"><button type="button" class="theme-toggle" id="themeToggle" title="Ganti tema" aria-label="Ganti tema gelap/terang"><span class="theme-icon-moon" aria-hidden="true">🌙</span><span class="theme-icon-sun" aria-hidden="true">☀️</span></button><span class="environment-pill"><span class="status-dot status-idle"></span>Local preview</span><span class="topbar-date">MVP · tahap awal</span></div>
             </header>
+            @php $aiQuota = \App\Support\Ai\AiQuota::current(); @endphp
+            @if ($aiQuota)
+                <div class="quota-banner" role="alert">
+                    <span class="quota-banner-icon" aria-hidden="true">⚠</span>
+                    <p>{{ \App\Support\Ai\AiQuota::message($aiQuota) }}</p>
+                    <a class="button button-primary" href="{{ route('ai-providers.index') }}">Ganti model</a>
+                </div>
+            @endif
             <div class="page-content">
                 @yield('content')
             </div>

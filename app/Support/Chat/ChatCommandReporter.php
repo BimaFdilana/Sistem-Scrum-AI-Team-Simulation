@@ -4,6 +4,7 @@ namespace App\Support\Chat;
 
 use App\Models\ChatCommand;
 use App\Models\ExecutionRun;
+use App\Support\Ai\AiQuota;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -71,7 +72,9 @@ class ChatCommandReporter
             'COMPLETED' => "Perintah selesai dikerjakan dan lolos pemeriksaan QA.\n".$tasks
                 .($summary !== '' ? "\n\nCatatan QA: ".Str::limit($summary, 400) : '')
                 ."\n\nCoba hasilnya di demo (Pengaturan & Demo project), lalu pilih **Terima** atau **Tandai Gagal** di bawah.",
-            'NEEDS_PO' => 'Pekerjaan berhenti dan butuh keputusan Anda: '.Str::limit($summary !== '' ? $summary : 'lihat detail proses.', 500)
+            'NEEDS_PO' => $run->error_code === 'QUOTA_EXHAUSTED'
+                ? "⚠ Pekerjaan dijeda karena kuota model AI habis.\n\n".Str::limit($summary, 400)."\n\nSetelah mengganti model aktif di AI Providers (atau kuota pulih), klik **Lanjutkan**. Pekerjaan diteruskan dari task yang tertahan."
+                : 'Pekerjaan berhenti dan butuh keputusan Anda: '.Str::limit($summary !== '' ? $summary : 'lihat detail proses.', 500)
                 ."\n\nKlik **Lanjutkan** untuk mencoba lagi, atau **Tandai Gagal**.",
             default => 'Perintah gagal dikerjakan. '.self::failureExplanation($run)
                 ."\n\nKode utama tidak berubah. ".match (self::failureKind($run)) {
@@ -95,7 +98,7 @@ class ChatCommandReporter
         $code = (string) $run->error_code;
         $text = mb_strtolower((string) $run->summary);
 
-        if (in_array($code, ['MODEL_NOT_CHOSEN', 'MODEL_PROBLEMATIC'], true)) {
+        if (in_array($code, ['MODEL_NOT_CHOSEN', 'MODEL_PROBLEMATIC', 'QUOTA_EXHAUSTED'], true) || AiQuota::isQuotaText($text)) {
             return 'setup';
         }
         if (in_array($code, ['TASK_STALLED', 'QA_REVISION_LIMIT', 'GATE_FAILED'], true)
@@ -113,7 +116,9 @@ class ChatCommandReporter
     public static function failureExplanation(ExecutionRun $run): string
     {
         return match (self::failureKind($run)) {
-            'setup' => 'Penyebab: model AI belum dipilih atau sedang bermasalah. Buka menu AI Providers dan pilih model yang tersedia.',
+            'setup' => AiQuota::isQuotaText((string) $run->summary) || $run->error_code === 'QUOTA_EXHAUSTED'
+                ? 'Penyebab: kuota model AI habis. Ganti model aktif di menu AI Providers, atau tunggu kuota pulih.'
+                : 'Penyebab: model AI belum dipilih atau sedang bermasalah. Buka menu AI Providers dan pilih model yang tersedia.',
             'too_big' => 'Penyebab: pekerjaannya terlalu besar untuk satu putaran (developer kehabisan waktu atau QA terus menemukan masalah).',
             'unclear' => 'Penyebab: Scrum Master tidak bisa memetakan perintah menjadi tugas yang jelas (kriteria terlalu banyak, terlalu umum, atau tidak ada perubahan kode yang dihasilkan).',
             default => 'Penyebab: gangguan sementara pada AI atau koneksi server.',

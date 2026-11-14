@@ -272,6 +272,7 @@ class ChatController extends Controller
     {
         return match ($errorCode) {
             'UPSTREAM_OVERLOADED', 'RATE_LIMITED' => 'Server AI sedang penuh. Tunggu 1–2 menit lalu coba lagi.',
+            'QUOTA_EXHAUSTED' => 'Kuota model AI habis. Ganti model aktif di menu AI Providers, atau tunggu kuota pulih (biasanya beberapa jam).',
             'TIMEOUT' => 'AI terlalu lama merespons. Coba lagi sebentar.',
             'AUTH_FAILED' => 'Kunci akses AI bermasalah. Periksa kembali koneksi provider di menu AI Providers.',
             'PROVIDER_AUTH_INCOMPLETE' => 'Koneksi akun AI di server belum lengkap (akun Google/Antigravity kehilangan project_id). Putuskan lalu hubungkan ulang provider Google di menu AI Providers, kemudian coba chat lagi.',
