@@ -6,6 +6,7 @@ use App\Services\ActiveModelService;
 use App\Services\AiStatusService;
 use App\Services\AiUsageRecorder;
 use App\Services\CliProxyApiClient;
+use App\Support\Ai\AiQuota;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -71,6 +72,7 @@ class AiProviderController extends Controller
         ]);
 
         $result = $activeModel->set($validated['active_model']);
+        AiQuota::clear();
 
         $message = 'Model aktif untuk semua agent disetel ke '.$validated['active_model'].'.';
         if ($result['warnings'] !== []) {

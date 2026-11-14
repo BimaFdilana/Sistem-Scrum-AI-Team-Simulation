@@ -7,8 +7,10 @@ use App\Jobs\ExecuteExecutionTaskJob;
 use App\Models\ExecutionRun;
 use App\Models\Notification;
 use App\Models\Project;
+use App\Models\Setting;
 use App\Models\Story;
 use App\Models\User;
+use App\Services\ActiveModelService;
 use App\Services\AgentToolRunner;
 use App\Services\CliProxyApiClient;
 use App\Support\Ai\AiQuota;
@@ -86,5 +88,47 @@ class AiQuotaWarningTest extends TestCase
         $this->actingAs($owner)->post(route('stories.executions.resume', [$story, $run]))->assertRedirect();
         $this->assertSame('EXECUTING', $run->fresh()->status);
         $this->assertSame('PENDING', $task->fresh()->status);
+    }
+
+    public function test_warning_disappears_when_po_switches_active_model_and_names_the_real_model(): void
+    {
+        $user = User::factory()->create();
+        $this->useActiveModel('gemini-3.1-flash-lite');
+
+        // Model di pengaturan bisa sudah berbeda saat galat datang: nama diambil dari galat asli.
+        AiQuota::exhausted('mimo-v2.6-pro', "\e[0m\n> build · gemini-3.1-flash-lite\n\e[91mError: Resource has been exhausted (e.g. check quota).");
+        $this->assertSame('gemini-3.1-flash-lite', AiQuota::current()['model']);
+        $this->actingAs($user)->get('/projects')->assertOk()->assertSee('Kuota AI habis')->assertSee('gemini-3.1-flash-lite');
+
+        // PO mengganti model aktif lewat AI Providers: peringatan hilang seketika.
+        $this->actingAs($user)->post(route('ai-providers.active-model.update'), ['active_model' => 'deepseek-v4.1-flash']);
+        $this->assertNull(AiQuota::current());
+        $this->actingAs($user)->get('/projects')->assertOk()->assertDontSee('Kuota AI habis');
+        $this->actingAs($user)->getJson(route('activity.active'))->assertJsonPath('alert', null);
+    }
+
+    public function test_warning_for_an_old_model_is_hidden_if_active_model_was_changed_elsewhere(): void
+    {
+        $this->useActiveModel('scrumgateway/gemini-3.1-flash-lite');
+        AiQuota::exhausted(null, '> build · gemini-3.1-flash-lite Error: Resource has been exhausted');
+        $this->assertNotNull(AiQuota::current()); // model sama (awalan diabaikan): tetap tampil
+
+        Setting::put(ActiveModelService::SETTING_KEY, 'deepseek-v4.1-flash');
+        $this->assertNull(AiQuota::current());
+    }
+
+    /** Model aktif tanpa memanggil gateway: set() memvalidasi daftar model gateway. */
+    private function useActiveModel(string $model): void
+    {
+        Setting::put(ActiveModelService::SETTING_KEY, $model);
+        $this->mock(ActiveModelService::class, function ($mock): void {
+            $mock->shouldReceive('current')->andReturnUsing(fn () => Setting::get(ActiveModelService::SETTING_KEY));
+            $mock->shouldReceive('set')->andReturnUsing(function (string $model) {
+                Setting::put(ActiveModelService::SETTING_KEY, $model);
+
+                return ['warnings' => []];
+            });
+            $mock->shouldIgnoreMissing();
+        });
     }
 }

@@ -4,6 +4,7 @@ namespace App\Support\Ai;
 
 use App\Models\Notification;
 use App\Models\User;
+use App\Services\ActiveModelService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -37,7 +38,10 @@ class AiQuota
     public static function exhausted(?string $model, ?string $detail = null): void
     {
         try {
-            $model = $model ?: 'model aktif';
+            // Nama model diambil dari pesan galat yang sebenarnya bila ada ("> build · gemini-x",
+            // "model=gemini-x"), karena model di pengaturan bisa sudah diganti saat galat terjadi.
+            $model = self::modelFromDetail((string) $detail) ?? $model;
+            $model = $model ? self::normalize($model) : 'model aktif';
             $current = Cache::get(self::KEY);
             $isNew = ! is_array($current) || ($current['model'] ?? null) !== $model;
             Cache::put(self::KEY, [
@@ -64,12 +68,15 @@ class AiQuota
         }
     }
 
-    /** Model berhasil dipanggil lagi: peringatan kuota untuk model itu dihapus. */
-    public static function recovered(?string $model): void
+    /**
+     * Ada panggilan AI yang berhasil: agen bekerja lagi, jadi peringatan dihapus.
+     * Semua agen memakai satu model aktif, sehingga keberhasilan model mana pun
+     * berarti tim tidak lagi tertahan kuota.
+     */
+    public static function recovered(?string $model = null): void
     {
         try {
-            $current = Cache::get(self::KEY);
-            if (is_array($current) && ($model === null || ($current['model'] ?? null) === $model)) {
+            if (Cache::has(self::KEY)) {
                 Cache::forget(self::KEY);
             }
         } catch (Throwable) {
@@ -77,16 +84,50 @@ class AiQuota
         }
     }
 
+    /** PO mengganti model aktif: peringatan untuk model lama tidak berlaku lagi. */
+    public static function clear(): void
+    {
+        self::recovered();
+    }
+
     /** @return array{model: string, since: string, last_seen: string, detail: string}|null */
     public static function current(): ?array
     {
         try {
             $current = Cache::get(self::KEY);
+            if (! is_array($current)) {
+                return null;
+            }
+            // Model aktif sudah diganti ke model lain: peringatan model lama hilang.
+            $active = rescue(fn () => app(ActiveModelService::class)->current(), null, false);
+            if (is_string($active) && trim($active) !== '' && self::normalize($active) !== self::normalize((string) ($current['model'] ?? ''))) {
+                Cache::forget(self::KEY);
 
-            return is_array($current) ? $current : null;
+                return null;
+            }
+
+            return $current;
         } catch (Throwable) {
             return null;
         }
+    }
+
+    /** "scrumgateway/gemini-x" dan "gemini-x" dianggap model yang sama. */
+    public static function normalize(string $model): string
+    {
+        $model = trim($model);
+
+        return mb_strtolower(str_contains($model, '/') ? substr($model, strrpos($model, '/') + 1) : $model);
+    }
+
+    private static function modelFromDetail(string $detail): ?string
+    {
+        $plain = (string) preg_replace('/\e\[[0-9;]*m/', '', $detail);
+        if (preg_match('/build\s*·\s*([A-Za-z0-9._\/-]+)/u', $plain, $m) || preg_match('/model=([A-Za-z0-9._\/-]+)/', $plain, $m)) {
+            return $m[1];
+        }
+
+        return null;
     }
 
     /** Kalimat peringatan untuk PO. */

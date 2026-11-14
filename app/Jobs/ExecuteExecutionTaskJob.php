@@ -285,6 +285,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             $applied = $result['files'];
             $patch = ['summary' => $result['summary']];
 
+            AiQuota::recovered();
             $worktrees->commit($worktree, 'Task #'.$task->id.': '.$task->title);
 
             $run->messages()->create([
@@ -728,6 +729,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             return;
         }
 
+        AiQuota::recovered();
         $worktrees->commit($worktree, 'Task #'.$task->id.': '.$task->title);
 
         $run->messages()->create([
