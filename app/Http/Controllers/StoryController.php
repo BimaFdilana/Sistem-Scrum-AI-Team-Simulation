@@ -37,7 +37,7 @@ class StoryController extends Controller
 
         $project->backlog()->updateOrCreate([], $data);
 
-        return redirect()->route('projects.show', $project)->with('status', 'Backlog project diperbarui.');
+        return redirect()->route('projects.settings.show', $project)->with('status', 'Backlog project diperbarui.');
     }
 
     public function createForSprint(Sprint $sprint): View|RedirectResponse

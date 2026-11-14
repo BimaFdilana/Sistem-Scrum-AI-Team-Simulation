@@ -83,7 +83,7 @@ class ExecutionController extends Controller
         return view('executions.show', [
             'story' => $story,
             'run' => $run->load(['tasks', 'messages', 'permissionRequest', 'findings']),
-            'activePage' => 'backlog',
+            'activePage' => 'executions',
         ]);
     }
 

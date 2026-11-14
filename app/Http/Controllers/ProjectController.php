@@ -74,7 +74,7 @@ class ProjectController extends Controller
             'project' => $project->loadCount('stories')->load('backlog'),
             'demo' => $demo,
             'demoUrl' => $demo ? $demos->url($demo, request()->getHost()) : null,
-            'activePage' => 'projects',
+            'activePage' => 'project-backlog',
             'demoContents' => DemoContents::for($project),
             ...ProjectBoard::for($project),
         ]);
@@ -96,7 +96,7 @@ class ProjectController extends Controller
                 : null,
         ])->save();
 
-        return redirect()->route('projects.show', $project)
+        return redirect()->route('projects.settings.show', $project)
             ->with('status', $project->test_command
                 ? 'Perintah tes disimpan: gerbang QA akan menjalankannya sebelum review.'
                 : 'Perintah tes dikosongkan: gerbang tes tidak dijalankan (hanya php -l).');

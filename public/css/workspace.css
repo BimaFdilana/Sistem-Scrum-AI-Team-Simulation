@@ -25,3 +25,12 @@
 .quota-banner-icon{font-size:18px;color:var(--amber)}
 .quota-banner .button{white-space:nowrap}
 @media(max-width:680px){.quota-banner{flex-wrap:wrap;margin:10px 12px 0}}
+/* Sidebar bergrup: UTAMA, PROJECT (dengan pemilih project), PENGATURAN. */
+.nav-group + .nav-group{margin-top:14px}
+.nav-project-select{width:100%;margin:2px 0 8px;padding:8px 10px;border:1px solid var(--line-strong);border-radius:9px;background:var(--input-bg);color:var(--text);font:inherit;font-size:13px;font-weight:600}
+.nav-project-select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.nav-group-project .nav-link{padding-left:16px}
+/* Lonceng notifikasi di topbar */
+.topbar-bell{position:relative;display:inline-grid;place-items:center;width:36px;height:36px;border:1px solid var(--line);border-radius:10px;color:var(--text);text-decoration:none;font-size:15px}
+.topbar-bell:hover,.topbar-bell.is-active{background:var(--panel-hover)}
+.topbar-bell-count{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--danger);color:#fff;font-size:10px;font-weight:700;line-height:18px;text-align:center}

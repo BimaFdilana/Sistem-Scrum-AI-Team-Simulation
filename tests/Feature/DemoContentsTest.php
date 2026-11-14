@@ -116,7 +116,7 @@ class DemoContentsTest extends TestCase
         $this->storyWithBranch($project, 2, 'BERHASIL');
         $this->mock(DemoServerManager::class, fn ($mock) => $mock->shouldReceive('runningFor')->andReturn(null));
 
-        $this->actingAs(User::factory()->create())->get(route('projects.show', $project))
+        $this->actingAs(User::factory()->create())->get(route('projects.release.show', $project))
             ->assertOk()->assertSee('Isi demo')->assertSee('US-01 Story 1')->assertSee('ada di demo')
             ->assertSee('belum ada di demo')->assertSee('scrum/run-2');
     }

@@ -114,7 +114,7 @@ class DemoAccountsTest extends TestCase
             $mock->shouldReceive('url')->andReturn('http://demo.test:9101');
         });
 
-        $this->actingAs(User::factory()->create())->get(route('projects.show', $project))
+        $this->actingAs(User::factory()->create())->get(route('projects.release.show', $project))
             ->assertOk()
             ->assertSee('Akun untuk masuk ke demo')
             ->assertSee('admin@demo.test')
@@ -127,7 +127,7 @@ class DemoAccountsTest extends TestCase
         $project = Project::query()->create(['name' => 'DB', 'project_type' => 'NEW_PROJECT', 'stack' => 'Laravel', 'status' => 'BASELINE_READY']);
         $this->mock(DemoServerManager::class, fn ($mock) => $mock->shouldReceive('runningFor')->andReturn(null));
 
-        $this->actingAs(User::factory()->create())->get(route('projects.show', $project))
+        $this->actingAs(User::factory()->create())->get(route('projects.release.show', $project))
             ->assertOk()->assertDontSee('Akun untuk masuk ke demo')->assertDontSee('id="demo-password"', false);
     }
 
@@ -150,7 +150,7 @@ class DemoAccountsTest extends TestCase
             $mock->shouldReceive('url')->andReturn('http://demo.test:9103');
         });
 
-        $this->actingAs(User::factory()->create())->get(route('projects.show', $project))
+        $this->actingAs(User::factory()->create())->get(route('projects.release.show', $project))
             ->assertOk()->assertSee('hentikan lalu jalankan ulang demo', false)->assertDontSee('id="demo-password"', false);
     }
 
@@ -162,7 +162,7 @@ class DemoAccountsTest extends TestCase
             $mock->shouldReceive('url')->andReturn('http://demo.test:9104');
         });
 
-        $this->actingAs(User::factory()->create())->get(route('projects.show', $project))
+        $this->actingAs(User::factory()->create())->get(route('projects.release.show', $project))
             ->assertOk()->assertSee('Tidak ada akun yang bisa ditampilkan')->assertDontSee('id="demo-password"', false);
     }
 }

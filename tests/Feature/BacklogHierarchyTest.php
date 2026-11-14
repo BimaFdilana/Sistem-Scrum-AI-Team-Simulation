@@ -20,8 +20,11 @@ class BacklogHierarchyTest extends TestCase
         $owner = User::factory()->create();
         $project = $this->createProject();
 
+        // Nama dan deskripsi backlog kini di halaman Pengaturan Project.
+        $this->actingAs($owner)->get(route('projects.settings.show', $project))
+            ->assertOk()->assertSee('Nama Sprint Backlog')->assertSee('Deskripsi Sprint Backlog');
         $this->actingAs($owner)->get('/projects/'.$project->id)
-            ->assertOk()->assertSee('Nama Sprint Backlog')->assertSee('Deskripsi Sprint Backlog')
+            ->assertOk()
             ->assertSee('Nama Sprint')->assertSee('<dialog', false)->assertSee('Buat Sprint', false)
             ->assertSee('data-sprint-dialog-open', false)->assertSee('bk-stats', false)
             ->assertDontSee('name="start_date"', false)->assertDontSee('name="end_date"', false);
@@ -29,7 +32,7 @@ class BacklogHierarchyTest extends TestCase
         $this->actingAs($owner)->put('/projects/'.$project->id.'/backlog', [
             'name' => 'Sprint Backlog Produk',
             'description' => 'Daftar seluruh sprint dan kebutuhan project.',
-        ])->assertRedirect('/projects/'.$project->id);
+        ])->assertRedirect(route('projects.settings.show', $project)); // kembali ke Pengaturan Project
 
         $backlog = Backlog::query()->sole();
         $this->assertSame($project->id, $backlog->project_id);

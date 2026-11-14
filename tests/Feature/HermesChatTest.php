@@ -118,10 +118,12 @@ class HermesChatTest extends TestCase
 
     public function test_workspace_sidebar_links_straight_to_the_scrum_master_chat(): void
     {
+        // Chat Scrum Master ada di grup PROJECT sidebar, terikat ke project terpilih.
+        $project = Project::create(['name' => 'Toko Online', 'project_type' => 'web']);
         $this->actingAs(User::factory()->create())
             ->get('/dashboard')
             ->assertOk()
-            ->assertSee('href="'.route('chat.index').'"', false)
+            ->assertSee('href="'.route('chat.index', ['project_id' => $project->id]).'"', false)
             ->assertSee('Chat Scrum Master');
     }
 

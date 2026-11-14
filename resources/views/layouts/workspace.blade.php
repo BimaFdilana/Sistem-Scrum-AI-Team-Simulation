@@ -24,10 +24,10 @@
     @if (($activePage ?? '') === 'ai-providers')
         <link rel="stylesheet" href="{{ asset('css/ai-providers.css') }}?v={{ filemtime(public_path('css/ai-providers.css')) }}">
     @endif
-    @if (request()->routeIs('projects.show', 'projects.index', 'projects.create'))
+    @if (request()->routeIs('projects.show', 'projects.index', 'projects.create', 'projects.executions.index', 'projects.release.show', 'projects.settings.show'))
         <link rel="stylesheet" href="{{ asset('css/project-tabs.css') }}?v={{ filemtime(public_path('css/project-tabs.css')) }}">
     @endif
-    @if (request()->routeIs('projects.show'))
+    @if (request()->routeIs('projects.show', 'projects.release.show', 'projects.settings.show'))
         <link rel="stylesheet" href="{{ asset('css/project-board.css') }}?v={{ filemtime(public_path('css/project-board.css')) }}">
     @endif
     @if (request()->routeIs('stories.executions.show'))
@@ -65,20 +65,40 @@
                 <span class="switcher-chevron" aria-hidden="true">⌄</span>
             </div>
 
-            <nav class="nav-group">
-                <p class="nav-caption">WORKSPACE</p>
-                <a class="nav-link {{ $activePage === 'dashboard' ? 'is-active' : '' }}" href="{{ route('dashboard') }}"><span class="nav-dot"></span>Ringkasan</a>
-                <a class="nav-link {{ in_array(($activePage ?? ''), ['agents', 'agent-chat', 'agent-activity'], true) ? 'is-active' : '' }}" href="{{ route('agents.index') }}"><span class="nav-dot"></span>Agent</a>
-                <a class="nav-link {{ $activePage === 'chat' ? 'is-active' : '' }}" href="{{ route('chat.index') }}"><span class="nav-dot"></span>Chat Scrum Master</a>
-                <a class="nav-link {{ $activePage === 'ai-providers' ? 'is-active' : '' }}" href="{{ route('ai-providers.index') }}"><span class="nav-dot"></span>AI Providers</a>
-                <a class="nav-link {{ in_array(($activePage ?? ''), ['projects', 'backlog', 'sprints', 'discussion'], true) ? 'is-active' : '' }}" href="{{ route('projects.index') }}"><span class="nav-dot"></span>Projects</a>
-                <a class="nav-link {{ $activePage === 'actors' ? 'is-active' : '' }}" href="{{ route('actors.index') }}"><span class="nav-dot"></span>Aktor</a>
-                <a class="nav-link {{ $activePage === 'github-settings' ? 'is-active' : '' }}" href="{{ route('settings.github.edit') }}"><span class="nav-dot"></span>GitHub</a>
-                <a class="nav-link {{ $activePage === 'notifications' ? 'is-active' : '' }}" href="{{ route('notifications.index') }}"><span class="nav-dot"></span>Notifikasi
-                    @if (! empty($unreadNotificationsCount))
-                        <span class="nav-badge">{{ $unreadNotificationsCount > 99 ? '99+' : $unreadNotificationsCount }}</span>
-                    @endif
-                </a>
+            @php
+                $ap = $activePage ?? '';
+                $is = fn (array $pages) => in_array($ap, $pages, true) ? 'is-active' : '';
+            @endphp
+            <nav class="nav-group" aria-label="Menu utama">
+                <p class="nav-caption">UTAMA</p>
+                <a class="nav-link {{ $is(['dashboard']) }}" href="{{ route('dashboard') }}"><span class="nav-dot"></span>Ringkasan</a>
+                <a class="nav-link {{ $is(['projects']) }}" href="{{ route('projects.index') }}"><span class="nav-dot"></span>Projects</a>
+            </nav>
+
+            @if ($navProject)
+                <nav class="nav-group nav-group-project" aria-label="Menu project">
+                    <p class="nav-caption">PROJECT</p>
+                    <label class="sr-only" for="navProjectSelect">Pilih project</label>
+                    <select id="navProjectSelect" class="nav-project-select" data-url-template="{{ route('projects.show', ['project' => '__ID__']) }}">
+                        @foreach ($navProjects as $option)
+                            <option value="{{ $option->id }}" @selected($option->id === $navProject->id)>{{ $option->name }}</option>
+                        @endforeach
+                    </select>
+                    <a class="nav-link {{ $is(['backlog', 'sprints', 'discussion', 'project-backlog']) }}" href="{{ route('projects.show', $navProject) }}"><span class="nav-dot"></span>Sprint Backlog</a>
+                    <a class="nav-link {{ $is(['chat']) }}" href="{{ route('chat.index', ['project_id' => $navProject->id]) }}"><span class="nav-dot"></span>Chat Scrum Master</a>
+                    <a class="nav-link {{ $is(['executions']) }}" href="{{ route('projects.executions.index', $navProject) }}"><span class="nav-dot"></span>Eksekusi
+                        @if (! empty($navDecisionCount))<span class="nav-badge" title="Perlu keputusan Anda">{{ $navDecisionCount }}</span>@endif
+                    </a>
+                    <a class="nav-link {{ $is(['release', 'github-settings']) }}" href="{{ route('projects.release.show', $navProject) }}"><span class="nav-dot"></span>Demo &amp; Rilis</a>
+                    <a class="nav-link {{ $is(['project-settings']) }}" href="{{ route('projects.settings.show', $navProject) }}"><span class="nav-dot"></span>Pengaturan Project</a>
+                </nav>
+            @endif
+
+            <nav class="nav-group" aria-label="Pengaturan">
+                <p class="nav-caption">PENGATURAN</p>
+                <a class="nav-link {{ $is(['ai-providers']) }}" href="{{ route('ai-providers.index') }}"><span class="nav-dot"></span>Model AI</a>
+                <a class="nav-link {{ $is(['agents', 'agent-chat', 'agent-activity']) }}" href="{{ route('agents.index') }}"><span class="nav-dot"></span>Tim Agen</a>
+                <a class="nav-link {{ $is(['actors']) }}" href="{{ route('actors.index') }}"><span class="nav-dot"></span>Aktor</a>
             </nav>
 
             <div class="sidebar-bottom">
@@ -105,7 +125,7 @@
         <main class="main-area">
             <header class="topbar">
                 <div class="breadcrumbs"><span>AI Scrum Agent Workspace</span><span class="crumb-separator">/</span><strong>{{ $breadcrumb ?? 'Ringkasan' }}</strong></div>
-                <div class="topbar-right"><button type="button" class="theme-toggle" id="themeToggle" title="Ganti tema" aria-label="Ganti tema gelap/terang"><span class="theme-icon-moon" aria-hidden="true">🌙</span><span class="theme-icon-sun" aria-hidden="true">☀️</span></button><span class="environment-pill"><span class="status-dot status-idle"></span>Local preview</span><span class="topbar-date">MVP · tahap awal</span></div>
+                <div class="topbar-right"><a class="topbar-bell {{ ($activePage ?? '') === 'notifications' ? 'is-active' : '' }}" href="{{ route('notifications.index') }}" title="Notifikasi" aria-label="Notifikasi{{ ! empty($unreadNotificationsCount) ? ', '.$unreadNotificationsCount.' belum dibaca' : '' }}"><span aria-hidden="true">🔔</span>@if (! empty($unreadNotificationsCount))<span class="topbar-bell-count">{{ $unreadNotificationsCount > 99 ? '99+' : $unreadNotificationsCount }}</span>@endif</a><button type="button" class="theme-toggle" id="themeToggle" title="Ganti tema" aria-label="Ganti tema gelap/terang"><span class="theme-icon-moon" aria-hidden="true">🌙</span><span class="theme-icon-sun" aria-hidden="true">☀️</span></button><span class="environment-pill"><span class="status-dot status-idle"></span>Local preview</span><span class="topbar-date">MVP · tahap awal</span></div>
             </header>
             @php $aiQuota = \App\Support\Ai\AiQuota::current(); @endphp
             @if ($aiQuota)
@@ -124,6 +144,16 @@
     @include('components.confirm-dialog')
     @include('components.activity-dock')
     <script src="{{ asset('js/confirm-dialog.js') }}?v={{ filemtime(public_path('js/confirm-dialog.js')) }}"></script>
+    <script>
+        // Pemilih project di sidebar: pindah ke Sprint Backlog project terpilih.
+        (function () {
+            var select = document.getElementById('navProjectSelect');
+            if (!select) return;
+            select.addEventListener('change', function () {
+                window.location.href = select.dataset.urlTemplate.replace('__ID__', select.value);
+            });
+        })();
+    </script>
     <script>
         // Toggle tema gelap/terang — preferensi disimpan di localStorage.
         (function () {

@@ -36,38 +36,9 @@
         <div><dt>Total poin</dt><dd>{{ $stats['points'] }}</dd></div>
     </dl>
 
-    <div class="pj-tabs" data-tabs>
-        <div class="pj-tabbar" role="tablist" aria-label="Bagian project {{ $project->name }}">
-            <button type="button" class="pj-tab is-active" data-tab="backlog" role="tab">Sprint Backlog <span class="pj-flag is-info">{{ $stats['stories'] }} story</span></button>
-            <button type="button" class="pj-tab" data-tab="pengaturan" role="tab">Pengaturan &amp; Demo</button>
-        </div>
-
-        <div class="pj-panel is-active" data-panel="backlog" role="tabpanel">
-            @include('projects.partials.board')
-        </div>
-
-        <div class="pj-panel" data-panel="pengaturan" role="tabpanel">
-            @include('projects.partials.settings')
-        </div>
-    </div>
+    @include('projects.partials.board')
 
     @include('projects.partials.dialogs')
 
-    @once
-    <script>
-        document.addEventListener('click', function (event) {
-            var button = event.target.closest('[data-tab]');
-            if (!button) return;
-            var root = button.closest('[data-tabs]');
-            if (!root) return;
-            root.querySelectorAll(':scope > .pj-tabbar [data-tab]').forEach(function (tab) {
-                tab.classList.toggle('is-active', tab === button);
-                tab.setAttribute('aria-selected', tab === button ? 'true' : 'false');
-            });
-            root.querySelectorAll(':scope > [data-panel]').forEach(function (panel) {
-                panel.classList.toggle('is-active', panel.dataset.panel === button.dataset.tab);
-            });
-        });
-    </script>
-    @endonce
+
 @endsection

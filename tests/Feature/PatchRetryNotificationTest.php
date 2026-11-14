@@ -148,7 +148,7 @@ class PatchRetryNotificationTest extends TestCase
         ]);
 
         // Badge muncul di sidebar.
-        $this->actingAs($owner)->get('/dashboard')->assertSee('nav-badge');
+        $this->actingAs($owner)->get('/dashboard')->assertSee('topbar-bell-count'); // lonceng notifikasi di topbar
 
         // Halaman daftar.
         $this->actingAs($owner)->get('/notifications')

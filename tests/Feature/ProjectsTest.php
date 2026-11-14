@@ -62,6 +62,8 @@ class ProjectsTest extends TestCase
             ->assertSee('Setiap project punya Sprint Backlog')
             ->assertDontSee('Product backlog')
             ->assertDontSee('>Sprints</a>', false)
-            ->assertDontSee('>Sprint Backlog</a>', false);
+            // Sprint Backlog kini ada di grup PROJECT sidebar, terikat ke project terpilih.
+            ->assertSee('nav-project-select', false)
+            ->assertSee(route('projects.show', $project).'"', false);
     }
 }

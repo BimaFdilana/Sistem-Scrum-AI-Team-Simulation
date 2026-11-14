@@ -125,7 +125,7 @@ class SprintChatTest extends TestCase
         $user = User::factory()->create();
 
         $this->actingAs($user)->get('/chat')->assertOk()->assertSee('Sprint Satu')->assertSee('Chat Scrum Master');
-        $this->actingAs($user)->get('/projects')->assertOk()->assertSee('href="'.route('chat.index').'"', false);
+        $this->actingAs($user)->get('/projects')->assertOk()->assertSee('href="'.route('chat.index', ['project_id' => $one->project_id]).'"', false);
     }
 
     public function test_activity_dock_is_always_present_and_points_to_the_sprint_chat(): void
