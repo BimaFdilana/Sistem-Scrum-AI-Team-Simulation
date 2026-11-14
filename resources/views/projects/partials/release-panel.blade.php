@@ -3,8 +3,20 @@
     <section class="empty-panel rl-panel" aria-label="Rilis ke GitHub">
         <div class="panel-heading">
             <div><p class="section-kicker">RILIS KE GITHUB</p><h2>Satukan &amp; kirim sebagai satu project utuh</h2></div>
-            @if ($release['connected'] ?? false)<span class="soft-badge">GitHub terhubung</span>@else<span class="soft-badge is-warn">GitHub belum terhubung</span>@endif
+            <div class="rl-head-actions">
+                @if ($release['connected'] ?? false)<span class="soft-badge">GitHub terhubung</span>@else<span class="soft-badge is-warn">GitHub belum terhubung</span>@endif
+                <a class="button button-primary" href="{{ route('settings.github.edit') }}">🔑 Kelola token GitHub</a>
+            </div>
         </div>
+
+        @php $lastRelease = ($release['releases'] ?? collect())->first(); @endphp
+        @if ($lastRelease && $lastRelease->status === 'FAILED')
+            <div class="rl-token-help" role="alert">
+                <p><strong>Pengiriman terakhir gagal:</strong> {{ $lastRelease->error }}</p>
+                <p>Buat token baru di GitHub dengan izin <strong>Contents: Read and write</strong> untuk repository ini, lalu simpan lewat tombol di bawah. Setelah itu kirim lagi.</p>
+                <a class="button button-primary" href="{{ route('settings.github.edit') }}">Buka halaman token GitHub</a>
+            </div>
+        @endif
 
         @if (! ($release['ready'] ?? false))
             <p class="field-help">{{ $release['reason'] ?? 'Status rilis belum tersedia.' }}</p>
@@ -79,6 +91,6 @@
             @endif
         @endif
 
-        <p class="field-help rl-connection">Koneksi GitHub: <a href="{{ route('settings.github.edit') }}">kelola token</a>. Token butuh izin <strong>Contents: Read and write</strong> untuk repository project ini.</p>
+        <p class="field-help rl-connection">Token GitHub butuh izin <strong>Contents: Read and write</strong> untuk repository project ini. Kelola lewat tombol <strong>Kelola token GitHub</strong> di bagian atas panel ini.</p>
     </section>
 </div>

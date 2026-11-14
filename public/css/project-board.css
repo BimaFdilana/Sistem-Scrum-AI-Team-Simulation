@@ -129,3 +129,6 @@
 .rl-history li span:first-child{color:var(--muted);white-space:nowrap}
 .soft-badge.is-warn{color:var(--amber);border-color:rgba(var(--amber-rgb),.45)}
 .rl-connection{margin-top:14px}
+.rl-head-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+.rl-token-help{margin:12px 0;padding:14px 16px;border:1px solid rgba(var(--amber-rgb),.5);border-left:4px solid var(--amber);border-radius:10px;background:rgba(var(--amber-rgb),.08)}
+.rl-token-help p{margin:0 0 8px;font-size:13px;line-height:1.55}
