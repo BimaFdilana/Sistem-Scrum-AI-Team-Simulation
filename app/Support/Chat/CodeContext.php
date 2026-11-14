@@ -94,7 +94,7 @@ class CodeContext
             }
 
             return "KODE PROJECT YANG RELEVAN (dibaca dari cabang {$ref}; kamu HANYA membaca, tidak bisa mengubah kode).\n"
-                .'Saat menjawab tentang kode, sebut nama file (dan nama method/baris bila perlu). Bila jawabannya butuh perubahan kode, sarankan PO memberi perintah di tab "Tanya Scrum Master".'
+                .'Saat menjawab tentang kode, sebut nama file (dan nama method/baris bila perlu). Bila PO ingin melihat bagian kode lain, cukup minta PO bertanya lagi di sini dengan menyebut nama file atau fiturnya. Hanya bila jawabannya butuh PERUBAHAN kode, sarankan PO memberi perintah di tab "Tanya Scrum Master".'
                 ."\n\n".implode("\n\n", $parts);
         } catch (Throwable $exception) {
             Log::info('Konteks kode untuk SM tidak tersedia', ['project' => $project?->id, 'error' => $exception->getMessage()]);
