@@ -7,6 +7,8 @@ use App\Services\AiStatusService;
 use App\Services\AiUsageRecorder;
 use App\Services\CliProxyApiClient;
 use App\Support\Ai\AiQuota;
+use App\Support\Ai\AntigravityQuota;
+use App\Support\Ai\QuotaWatcher;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -50,6 +52,7 @@ class AiProviderController extends Controller
             'v8Up' => $client->isV8ManagementAvailable(),
             // Satu model untuk semua peran: dipilih di halaman ini, bukan
             // lagi di halaman Konfigurasi Agent per peran (dihapus 3 Nov 2026).
+            'quotaSnapshot' => $this->quotaSnapshot(),
             'activeModel' => $activeModel->current(),
             'availableModels' => $activeModel->available(),
             'activePage' => 'ai-providers',
@@ -867,5 +870,28 @@ class AiProviderController extends Controller
 
         return redirect()->route('ai-providers.index')
             ->with('success', 'Daftar model akun "'.$group.'" diperbarui ('.count($parsed['models']).' model).');
+    }
+
+    /** Kuota akun Google untuk panel di halaman Model AI; tidak pernah menggagalkan halaman. */
+    private function quotaSnapshot(): ?array
+    {
+        try {
+            return app(AntigravityQuota::class)->snapshot(false, 8);
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /** Muat ulang kuota akun sekarang (dibatasi laju) dan perbarui status waktu pulih. */
+    public function refreshQuota(): RedirectResponse
+    {
+        try {
+            app(AntigravityQuota::class)->snapshot(true, 20);
+            app(QuotaWatcher::class)->check(force: true, allowChatProbe: false);
+        } catch (Throwable) {
+            return back()->withErrors(['quota' => 'Kuota tidak dapat dibaca dari Google saat ini. Coba lagi sebentar.']);
+        }
+
+        return back()->with('status', 'Kuota akun diperbarui.');
     }
 }

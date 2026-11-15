@@ -2,6 +2,7 @@
 
 namespace App\Support\Ai;
 
+use App\Jobs\CheckAiQuotaJob;
 use App\Models\Notification;
 use App\Models\User;
 use App\Services\ActiveModelService;
@@ -44,15 +45,22 @@ class AiQuota
             $model = $model ? self::normalize($model) : 'model aktif';
             $current = Cache::get(self::KEY);
             $isNew = ! is_array($current) || ($current['model'] ?? null) !== $model;
-            Cache::put(self::KEY, [
+            $state = [
                 'model' => $model,
                 'since' => $isNew ? now()->toIso8601String() : ($current['since'] ?? now()->toIso8601String()),
                 'last_seen' => now()->toIso8601String(),
                 'detail' => Str::limit(trim((string) $detail), 300),
-            ], now()->addHours(12));
+            ];
+            // Pertahankan hasil pengawas (waktu pulih, jadwal cek) bila kejadian ini lanjutan.
+            if (! $isNew && is_array($current)) {
+                $state += array_intersect_key($current, array_flip(['reset_at', 'reset_certain', 'checked_at', 'next_check_at']));
+            }
+            self::store($state);
 
             if ($isNew) {
                 Log::warning('Kuota model AI habis', ['model' => $model, 'detail' => Str::limit((string) $detail, 300)]);
+                // Cari tahu kapan kuota pulih (membaca kuota akun Google) tanpa menahan pemanggil.
+                rescue(fn () => CheckAiQuotaJob::dispatch(), null, false);
                 foreach (User::query()->pluck('id') as $userId) {
                     Notification::query()->create([
                         'user_id' => $userId,
@@ -73,21 +81,69 @@ class AiQuota
      * Semua agen memakai satu model aktif, sehingga keberhasilan model mana pun
      * berarti tim tidak lagi tertahan kuota.
      */
-    public static function recovered(?string $model = null): void
+    public static function recovered(?string $model = null, bool $notify = true): void
     {
         try {
-            if (Cache::has(self::KEY)) {
-                Cache::forget(self::KEY);
+            $state = Cache::get(self::KEY);
+            if (! is_array($state)) {
+                return;
+            }
+            Cache::forget(self::KEY);
+            if ($notify) {
+                foreach (User::query()->pluck('id') as $userId) {
+                    Notification::query()->create([
+                        'user_id' => $userId,
+                        'type' => 'ai_quota_pulih',
+                        'title' => 'Kuota AI pulih',
+                        'message' => 'Model '.($state['model'] ?? 'AI').' bisa dipakai lagi. Eksekusi yang dijeda karena kuota dapat dilanjutkan dengan tombol Lanjutkan.',
+                        'link' => route('dashboard', [], false),
+                    ]);
+                }
             }
         } catch (Throwable) {
             // pencatatan kuota bersifat bantuan
         }
     }
 
-    /** PO mengganti model aktif: peringatan untuk model lama tidak berlaku lagi. */
+    /** PO mengganti model aktif: peringatan untuk model lama tidak berlaku lagi (tanpa notifikasi pulih). */
     public static function clear(): void
     {
-        self::recovered();
+        try {
+            Cache::forget(self::KEY);
+        } catch (Throwable) {
+            // abaikan
+        }
+    }
+
+    /**
+     * Tambahkan hasil pengawas (waktu pulih, jadwal cek) ke status yang ada.
+     *
+     * @param  array<string, mixed>  $patch
+     */
+    public static function annotate(array $patch): void
+    {
+        try {
+            $state = Cache::get(self::KEY);
+            if (is_array($state)) {
+                self::store(array_merge($state, $patch));
+            }
+        } catch (Throwable) {
+            // abaikan
+        }
+    }
+
+    /** @param  array<string, mixed>  $state */
+    private static function store(array $state): void
+    {
+        // Status bertahan sampai waktu pulih (kuota mingguan bisa berhari-hari), minimal 12 jam.
+        $ttl = now()->addHours(12);
+        if (! empty($state['reset_at'])) {
+            $until = rescue(fn () => Carbon::parse($state['reset_at'])->addHour(), null, false);
+            if ($until !== null && $until->greaterThan($ttl)) {
+                $ttl = $until->greaterThan(now()->addDays(8)) ? now()->addDays(8) : $until;
+            }
+        }
+        Cache::put(self::KEY, $state, $ttl);
     }
 
     /** @return array{model: string, since: string, last_seen: string, detail: string}|null */
@@ -130,12 +186,69 @@ class AiQuota
         return null;
     }
 
-    /** Kalimat peringatan untuk PO. */
+    private const ZONE = 'Asia/Jakarta';
+
+    /** "6 hari 23 jam", "3 jam 12 menit", "14 menit". */
+    public static function duration(int $seconds): string
+    {
+        $d = intdiv($seconds, 86400);
+        $h = intdiv($seconds % 86400, 3600);
+        $m = intdiv($seconds % 3600, 60);
+
+        return match (true) {
+            $d > 0 => $d.' hari '.$h.' jam',
+            $h > 0 => $h.' jam '.$m.' menit',
+            default => max(1, $m).' menit',
+        };
+    }
+
+    /** "6 hari 23 jam lagi" atau "sebentar lagi" bila waktu sudah lewat. */
+    public static function remaining(string $resetAt): string
+    {
+        $seconds = rescue(fn () => Carbon::parse($resetAt)->timestamp - time(), 0, false);
+
+        return $seconds <= 0 ? 'sebentar lagi' : self::duration($seconds).' lagi';
+    }
+
+    public static function resetLabel(string $resetAt): string
+    {
+        return Carbon::parse($resetAt)->timezone(self::ZONE)->locale('id')->translatedFormat('l, d M Y H:i').' WIB';
+    }
+
+    /**
+     * Bahan tampilan banner: apa yang terjadi dan sampai kapan harus menunggu.
+     *
+     * @return array<string, mixed>
+     */
+    public static function banner(array $state): array
+    {
+        $resetAt = $state['reset_at'] ?? null;
+        $next = isset($state['next_check_at']) ? rescue(fn () => Carbon::parse($state['next_check_at'])->timezone(self::ZONE)->format('H:i'), null, false) : null;
+
+        return [
+            'headline' => 'Kuota AI habis',
+            'detail' => 'Model '.$state['model'].' ditolak penyedia. Estimasi, eksekusi, dan chat Scrum Master berhenti sampai kuota pulih atau Anda mengganti model aktif.',
+            'reset_at' => $resetAt,
+            'reset_certain' => (bool) ($state['reset_certain'] ?? false),
+            'reset_label' => $resetAt ? self::resetLabel($resetAt) : null,
+            'remaining' => $resetAt ? self::remaining($resetAt) : null,
+            'next_check' => $next,
+        ];
+    }
+
+    /** Kalimat peringatan untuk PO (panel progres, notifikasi). */
     public static function message(array $state): string
     {
-        $since = rescue(fn () => Carbon::parse($state['since'])->timezone(config('app.timezone'))->format('H:i'), '');
+        $banner = self::banner($state);
+        $since = rescue(fn () => Carbon::parse($state['since'])->timezone(self::ZONE)->format('H:i'), '');
 
-        return 'Kuota AI habis: model '.$state['model'].' ditolak penyedia'.($since !== '' ? ' sejak '.$since : '')
-            .'. Estimasi, eksekusi, dan chat Scrum Master berhenti sampai kuota pulih atau Anda mengganti model aktif.';
+        $text = 'Kuota AI habis: model '.$state['model'].' ditolak penyedia'.($since !== '' ? ' sejak '.$since.' WIB' : '').'. ';
+        if ($banner['reset_at']) {
+            $text .= 'Perkiraan pulih '.$banner['reset_label'].' ('.$banner['remaining'].'). ';
+        } else {
+            $text .= 'Waktu pulih belum diketahui; dicek otomatis'.($banner['next_check'] ? ', cek berikutnya '.$banner['next_check'].' WIB' : '').'. ';
+        }
+
+        return $text.'Estimasi, eksekusi, dan chat Scrum Master berhenti sampai kuota pulih atau Anda mengganti model aktif.';
     }
 }

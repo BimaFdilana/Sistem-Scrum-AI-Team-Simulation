@@ -152,6 +152,8 @@
                 </article>
             </div>
 
+            @include('workspace.partials.quota-panel')
+
             <article class="ap-card ap-overview-usage">
                 <div class="ap-card-head">
                     <div>

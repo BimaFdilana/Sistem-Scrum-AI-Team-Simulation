@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\Ai\QuotaWatcher;
 use App\Support\Demo\DemoServerManager;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -13,6 +14,9 @@ Artisan::command('inspire', function () {
 Schedule::command('runs:watchdog')->everyFiveMinutes()->withoutOverlapping();
 // Laporan estimasi yang macet (melebihi batas job SM) diselesaikan dengan poin tersimpan.
 Schedule::command('estimations:recover --minutes=45')->everyTenMinutes()->withoutOverlapping();
+// Kuota AI habis: cek berkala kapan pulih (hanya bekerja bila ada kuota habis tercatat).
+Schedule::call(fn () => app(QuotaWatcher::class)->check())
+    ->name('ai-quota-watch')->everyFiveMinutes()->withoutOverlapping();
 // Demo yang kedaluwarsa atau prosesnya mati dimatikan dan port-nya dibebaskan.
 Schedule::call(fn () => app(DemoServerManager::class)->prune())
     ->name('demo-prune')->everyFiveMinutes()->withoutOverlapping();

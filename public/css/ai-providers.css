@@ -204,3 +204,14 @@
     .ap-connect-row { flex-wrap: wrap; }
     .ap-connect-row .button { width: 100%; }
 }
+/* Panel kuota akun Google */
+.ap-quota-account{padding:12px 0;border-top:1px solid var(--line)}
+.ap-quota-account:first-of-type{border-top:0}
+.ap-quota-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px}
+.ap-quota-row{margin:10px 0}
+.ap-quota-line{display:flex;justify-content:space-between;gap:12px;font-size:13px}
+.ap-quota-bar{height:8px;margin:6px 0 4px;border-radius:4px;background:var(--line-strong);overflow:hidden}
+.ap-quota-bar span{display:block;height:100%;border-radius:4px;background:var(--accent)}
+.ap-quota-row.is-low .ap-quota-bar span{background:var(--amber)}
+.ap-quota-row.is-empty .ap-quota-bar span{background:var(--danger)}
+.ap-quota-reset{margin:0;font-size:12px;color:var(--muted)}

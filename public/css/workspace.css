@@ -34,3 +34,7 @@
 .topbar-bell{position:relative;display:inline-grid;place-items:center;width:36px;height:36px;border:1px solid var(--line);border-radius:10px;color:var(--text);text-decoration:none;font-size:15px}
 .topbar-bell:hover,.topbar-bell.is-active{background:var(--panel-hover)}
 .topbar-bell-count{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--danger);color:#fff;font-size:10px;font-weight:700;line-height:18px;text-align:center}
+.quota-banner-body{flex:1;min-width:0}
+.quota-banner-body p{margin:0 0 4px}
+.quota-countdown{font-size:13px}
+.quota-countdown-value,[data-quota-countdown]{font-variant-numeric:tabular-nums}

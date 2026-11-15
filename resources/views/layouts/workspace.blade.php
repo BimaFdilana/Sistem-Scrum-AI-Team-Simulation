@@ -127,11 +127,19 @@
                 <div class="breadcrumbs"><span>AI Scrum Agent Workspace</span><span class="crumb-separator">/</span><strong>{{ $breadcrumb ?? 'Ringkasan' }}</strong></div>
                 <div class="topbar-right"><a class="topbar-bell {{ ($activePage ?? '') === 'notifications' ? 'is-active' : '' }}" href="{{ route('notifications.index') }}" title="Notifikasi" aria-label="Notifikasi{{ ! empty($unreadNotificationsCount) ? ', '.$unreadNotificationsCount.' belum dibaca' : '' }}"><span aria-hidden="true">🔔</span>@if (! empty($unreadNotificationsCount))<span class="topbar-bell-count">{{ $unreadNotificationsCount > 99 ? '99+' : $unreadNotificationsCount }}</span>@endif</a><button type="button" class="theme-toggle" id="themeToggle" title="Ganti tema" aria-label="Ganti tema gelap/terang"><span class="theme-icon-moon" aria-hidden="true">🌙</span><span class="theme-icon-sun" aria-hidden="true">☀️</span></button><span class="environment-pill"><span class="status-dot status-idle"></span>Local preview</span><span class="topbar-date">MVP · tahap awal</span></div>
             </header>
-            @php $aiQuota = \App\Support\Ai\AiQuota::current(); @endphp
-            @if ($aiQuota)
+            @php $aiQuota = \App\Support\Ai\AiQuota::current(); $quotaView = $aiQuota ? \App\Support\Ai\AiQuota::banner($aiQuota) : null; @endphp
+            @if ($quotaView)
                 <div class="quota-banner" role="alert">
                     <span class="quota-banner-icon" aria-hidden="true">⚠</span>
-                    <p>{{ \App\Support\Ai\AiQuota::message($aiQuota) }}</p>
+                    <div class="quota-banner-body">
+                        <p><strong>{{ $quotaView['headline'] }}.</strong> {{ $quotaView['detail'] }}</p>
+                        @if ($quotaView['reset_at'])
+                            <p class="quota-countdown">Perkiraan pulih <strong>{{ $quotaView['reset_label'] }}</strong> ·
+                                <strong class="quota-countdown-value" data-quota-countdown data-reset-at="{{ $quotaView['reset_at'] }}">{{ $quotaView['remaining'] }}</strong></p>
+                        @else
+                            <p class="quota-countdown">Waktu pulih belum diketahui dari penyedia. Sistem mengecek otomatis{{ $quotaView['next_check'] ? '; cek berikutnya '.$quotaView['next_check'].' WIB' : '' }}.</p>
+                        @endif
+                    </div>
                     <a class="button button-primary" href="{{ route('ai-providers.index') }}">Ganti model</a>
                 </div>
             @endif
@@ -144,6 +152,28 @@
     @include('components.confirm-dialog')
     @include('components.activity-dock')
     <script src="{{ asset('js/confirm-dialog.js') }}?v={{ filemtime(public_path('js/confirm-dialog.js')) }}"></script>
+    <script>
+        // Hitung mundur kuota AI: diperbarui tiap 30 detik di peramban (tanpa muat ulang halaman).
+        (function () {
+            var nodes = document.querySelectorAll('[data-quota-countdown]');
+            if (!nodes.length) return;
+            function phrase(seconds) {
+                if (seconds <= 0) return 'sebentar lagi (sedang dicek ulang)';
+                var d = Math.floor(seconds / 86400), h = Math.floor((seconds % 86400) / 3600), m = Math.floor((seconds % 3600) / 60);
+                if (d > 0) return d + ' hari ' + h + ' jam lagi';
+                if (h > 0) return h + ' jam ' + m + ' menit lagi';
+                return Math.max(1, m) + ' menit lagi';
+            }
+            function tick() {
+                nodes.forEach(function (node) {
+                    var at = Date.parse(node.dataset.resetAt);
+                    if (!isNaN(at)) node.textContent = phrase(Math.round((at - Date.now()) / 1000));
+                });
+            }
+            tick();
+            setInterval(tick, 30000);
+        })();
+    </script>
     <script>
         // Pemilih project di sidebar: pindah ke Sprint Backlog project terpilih.
         (function () {

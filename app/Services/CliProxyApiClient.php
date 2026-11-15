@@ -916,6 +916,47 @@ class CliProxyApiClient
         }
     }
 
+    /**
+     * Management API `api-call`: gateway memanggil URL upstream atas nama sebuah akun
+     * (token akun dipasang di tempat $TOKEN$). Hanya baca; dipakai membaca kuota dan
+     * tingkat langganan akun Antigravity. Tidak pernah melempar galat.
+     *
+     * @return array{status: int, body: mixed}|null null bila gateway/kunci tidak tersedia atau gagal
+     */
+    public function apiCall(string $authIndex, string $url, array $payload, string $userAgent, int $timeout = 20): ?array
+    {
+        if (! $this->managementKey || $authIndex === '') {
+            return null;
+        }
+
+        try {
+            $response = $this->managementV8()->timeout($timeout)->post('/requests/api-call', [
+                'authIndex' => $authIndex,
+                'method' => 'POST',
+                'url' => $url,
+                'header' => [
+                    'Authorization' => 'Bearer $TOKEN$',
+                    'Content-Type' => 'application/json',
+                    'User-Agent' => $userAgent,
+                ],
+                'data' => json_encode($payload),
+            ]);
+            if (! $response->successful()) {
+                return null;
+            }
+            $json = $response->json() ?? [];
+            $body = $json['body'] ?? null;
+            if (is_string($body)) {
+                $decoded = json_decode($body, true);
+                $body = $decoded ?? $body;
+            }
+
+            return ['status' => (int) ($json['status_code'] ?? 0), 'body' => $body];
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
     protected function managementV8()
     {
         return Http::baseUrl($this->baseUrl.'/v8/management')

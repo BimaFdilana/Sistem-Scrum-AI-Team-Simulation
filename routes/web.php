@@ -50,6 +50,8 @@ Route::middleware('auth')->group(function (): void {
     // Menggantikan halaman Konfigurasi Agent per peran (dihapus 3 Nov 2026).
     Route::post('/ai-providers/active-model', [AiProviderController::class, 'updateActiveModel'])
         ->middleware('throttle:20,1')->name('ai-providers.active-model.update');
+    Route::post('/ai-providers/quota/refresh', [AiProviderController::class, 'refreshQuota'])
+        ->middleware('throttle:4,1')->name('ai-providers.quota.refresh');
     Route::get('/ai-providers/{provider}/connect', [AiProviderController::class, 'connect'])->name('ai-providers.connect');
     Route::post('/ai-providers/{provider}/callback', [AiProviderController::class, 'callback'])->middleware('throttle:20,1')->name('ai-providers.callback');
     Route::post('/ai-providers/{provider}/disconnect', [AiProviderController::class, 'disconnect'])->name('ai-providers.disconnect');
