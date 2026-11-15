@@ -207,7 +207,7 @@
                                 <div class="ap-provider-title">
                                     <h3>{{ $info['label'] }}</h3>
                                     <p>{{ $info['description'] }}</p>
-                                    @if ($info['email'])
+                                    @if (count($info['accounts'] ?? []) <= 1 && $info['email'])
                                         <small>{{ $info['email'] }}</small>
                                     @endif
                                 </div>
@@ -254,11 +254,16 @@
                                 @endif
                             </div>
 
-                            <div class="ap-card-foot">
-                                <form method="POST" action="{{ route('ai-providers.disconnect', ['provider' => $slug]) }}">
-                                    @csrf
-                                    <button class="button button-danger" type="submit" onclick="return handleConfirm(event, {title: 'Putus akun?', message: 'Putus akun {{ $info['label'] }}? Kamu bisa mengaktifkannya lagi kapan pun.', confirmLabel: 'Ya, putuskan', danger: true})">Putuskan</button>
-                                </form>
+                            <div class="ap-card-foot ap-account-list">
+                                @foreach (($info['accounts'] ?? []) ?: [$info['account']] as $acc)
+                                    @php $accEmail = $acc['email'] ?? $acc['label'] ?? $info['label']; @endphp
+                                    <form method="POST" action="{{ route('ai-providers.disconnect', ['provider' => $slug]) }}" class="ap-account-row">
+                                        @csrf
+                                        <input type="hidden" name="account" value="{{ $acc['name'] ?? '' }}">
+                                        @if (count($info['accounts'] ?? []) > 1)<span class="ap-account-email">{{ $accEmail }}</span>@endif
+                                        <button class="button button-danger" type="submit" onclick="return handleConfirm(event, {title: 'Putus akun?', message: {{ \Illuminate\Support\Js::from('Putus dan hapus akun '.$accEmail.' dari gateway? Untuk memakainya lagi harus login ulang.') }}, confirmLabel: 'Ya, putuskan', danger: true})">Putuskan</button>
+                                    </form>
+                                @endforeach
                             </div>
                         </article>
                     @endforeach

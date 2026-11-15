@@ -236,6 +236,69 @@ class CliProxyApiClient
         $this->forgetAccountsCache();
     }
 
+    /**
+     * Hapus file akun dari gateway (putus permanen). Akun yang diputus tidak lagi
+     * disimpan sebagai "nonaktif": menyambung lagi berarti login ulang.
+     */
+    public function deleteAccount(string $name): bool
+    {
+        try {
+            $response = $this->management()->delete('/auth-files?name='.rawurlencode($name));
+            if ($response->successful()) {
+                $this->forgetModelsCache();
+
+                return true;
+            }
+
+            return false;
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * Semua file akun milik satu provider (aktif maupun nonaktif).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function providerAccounts(string $provider, bool $fresh = false): array
+    {
+        return array_values(array_filter(
+            (array) ($this->accounts($fresh)['files'] ?? []),
+            fn ($account) => is_array($account) && self::accountMatches($account, $provider)
+        ));
+    }
+
+    /** @param array<string, mixed> $account */
+    private static function accountMatches(array $account, string $provider): bool
+    {
+        $haystack = implode(' ', array_filter([
+            $account['provider'] ?? null,
+            $account['type'] ?? null,
+            $account['kind'] ?? null,
+            $account['name'] ?? null,
+            $account['id'] ?? null,
+        ], 'is_string'));
+
+        return $haystack !== '' && stripos($haystack, $provider) !== false;
+    }
+
+    /**
+     * Potret nama => modtime semua akun provider, diambil SEBELUM kode OAuth dikirim
+     * agar akun yang baru ditulis bisa dikenali walau provider punya banyak akun.
+     *
+     * @return array<string, string>
+     */
+    public function accountSnapshot(string $provider): array
+    {
+        $snapshot = [];
+        foreach ($this->providerAccounts($provider, true) as $account) {
+            $snapshot[(string) ($account['name'] ?? $account['id'] ?? '')] = (string) ($account['modtime'] ?? '');
+        }
+
+        return $snapshot;
+    }
+
     /** Disable (disconnect) a linked account by its auth-file name. */
     public function disableAccount(string $name): bool
     {
@@ -284,21 +347,18 @@ class CliProxyApiClient
      * atau null bila timeout. Ini sinyal "pertukaran kode BERHASIL" yang
      * sebenarnya — bukan sekadar "callback diterima".
      */
-    public function waitForTokenRefresh(string $provider, int $timeoutSeconds = 60, int $intervalSeconds = 3): ?array
+    public function waitForTokenRefresh(string $provider, int $timeoutSeconds = 60, int $intervalSeconds = 3, ?array $before = null): ?array
     {
-        $before = $this->accountForProvider($provider, true);
-        $beforeModtime = is_string($before['modtime'] ?? null) ? $before['modtime'] : null;
+        // Bandingkan SEMUA akun provider: dengan banyak akun Google, akun pertama
+        // yang aktif belum tentu akun yang baru login (dulu akun lama ikut diaktifkan).
+        $before ??= $this->accountSnapshot($provider);
         $deadline = time() + max(0, $timeoutSeconds);
 
         do {
-            $account = $this->accountForProvider($provider, true);
-
-            if ($account !== null) {
-                $afterModtime = is_string($account['modtime'] ?? null) ? $account['modtime'] : null;
-                $isNew = $before === null;
-                $wasRewritten = $beforeModtime !== null && $afterModtime !== null && $afterModtime !== $beforeModtime;
-
-                if ($isNew || $wasRewritten) {
+            foreach ($this->providerAccounts($provider, true) as $account) {
+                $name = (string) ($account['name'] ?? $account['id'] ?? '');
+                $modtime = (string) ($account['modtime'] ?? '');
+                if (! array_key_exists($name, $before) || ($modtime !== '' && $modtime !== $before[$name])) {
                     return $account;
                 }
             }
@@ -318,12 +378,14 @@ class CliProxyApiClient
      * tidak disabled). Pertukaran kode OAuth bisa berjalan asinkron di
      * gateway, jadi "callback diterima" belum berarti "akun terhubung".
      */
-    public function waitForAccountEnabled(string $provider, int $timeoutSeconds = 30, int $intervalSeconds = 3): bool
+    public function waitForAccountEnabled(string $provider, int $timeoutSeconds = 30, int $intervalSeconds = 3, ?string $name = null): bool
     {
         $deadline = time() + max(0, $timeoutSeconds);
 
         do {
-            $account = $this->accountForProvider($provider, true);
+            $account = $name === null
+                ? $this->accountForProvider($provider, true)
+                : collect($this->providerAccounts($provider, true))->first(fn ($a) => ($a['name'] ?? null) === $name);
 
             if ($account !== null && ! ($account['disabled'] ?? false)) {
                 return true;

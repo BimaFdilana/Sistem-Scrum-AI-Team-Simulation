@@ -192,18 +192,19 @@ class AiProviderController extends Controller
                 ->with('error', 'Sesi login kedaluwarsa dan URL tidak mengandung state. Silakan mulai lagi dari tombol Hubungkan.');
         }
 
+        $before = $client->accountSnapshot($provider);
         if ($client->submitCallback($state, $code)) {
-            // Tunggu bukti nyata pertukaran kode berhasil (file token ditulis),
-            // bukan sekadar "callback diterima".
-            $account = $client->waitForTokenRefresh($provider, 60);
+            // Tunggu bukti nyata pertukaran kode berhasil: file akun YANG BARU LOGIN
+            // muncul atau ditulis ulang (bukan sekadar akun pertama provider ini).
+            $account = $client->waitForTokenRefresh($provider, 60, 3, $before);
 
             if ($account !== null) {
-                // Gateway tidak mengaktifkan otomatis akun yang pernah diputus.
+                // Akun yang baru login wajib aktif.
                 if (($account['disabled'] ?? false) && isset($account['name'])) {
                     $client->setAccountDisabled($account['name'], false);
                 }
 
-                if ($client->waitForAccountEnabled($provider, 10)) {
+                if ($client->waitForAccountEnabled($provider, 10, 3, isset($account['name']) ? (string) $account['name'] : null)) {
                     $client->forgetModelsCache();
 
                     return redirect()->route('ai-providers.index')
@@ -221,21 +222,24 @@ class AiProviderController extends Controller
         return back()->with('error', 'Gagal menyelesaikan login. Kode mungkin kedaluwarsa — coba ulangi proses login dari awal.');
     }
 
-    public function disconnect(string $provider, CliProxyApiClient $client): RedirectResponse
+    public function disconnect(Request $request, string $provider, CliProxyApiClient $client): RedirectResponse
     {
         $providers = config('ai.providers', []);
         abort_unless(isset($providers[$provider]), 404);
 
-        $account = $client->accountForProvider($provider);
+        // Putus akun yang DIPILIH (provider bisa punya beberapa akun), lalu hapus filenya:
+        // akun yang diputus tidak disimpan lagi dan tidak bisa aktif kembali diam-diam.
+        $name = $request->string('account')->toString();
+        $account = $name !== ''
+            ? collect($client->providerAccounts($provider, true))->first(fn ($a) => ($a['name'] ?? null) === $name)
+            : $client->accountForProvider($provider, true);
 
-        if ($account && isset($account['name']) && $client->disableAccount($account['name'])) {
-            // Clean slate: hapus sisa status OAuth yang tertunda agar
-            // penghubungan ulang ke provider yang sama mulai dari nol.
-            // (Cache katalog model sudah dihapus di dalam disableAccount.)
+        if ($account && isset($account['name']) && $client->deleteAccount((string) $account['name'])) {
             session()->forget("ai_provider_state.{$provider}");
+            $who = $account['email'] ?? $account['label'] ?? $providers[$provider]['label'];
 
             return redirect()->route('ai-providers.index')
-                ->with('success', $providers[$provider]['label'].' diputus. Kamu bisa mengaktifkannya lagi kapan pun tanpa login ulang.');
+                ->with('success', $who.' diputus dan dihapus dari gateway. Untuk memakainya lagi, sambungkan ulang lewat login.');
         }
 
         return redirect()->route('ai-providers.index')

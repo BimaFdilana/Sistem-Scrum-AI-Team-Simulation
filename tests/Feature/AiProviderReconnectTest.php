@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Models\User;
 use App\Services\CliProxyApiClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -73,23 +75,24 @@ class AiProviderReconnectTest extends TestCase
 
         $client = app(CliProxyApiClient::class);
 
-        \Illuminate\Support\Facades\Cache::put('cliproxy:models', [['id' => 'x', 'owned_by' => 'openai']], 60);
+        Cache::put('cliproxy:models', [['id' => 'x', 'owned_by' => 'openai']], 60);
         $this->assertTrue($client->disableAccount('codex-a.json'));
-        $this->assertNull(\Illuminate\Support\Facades\Cache::get('cliproxy:models'));
+        $this->assertNull(Cache::get('cliproxy:models'));
 
-        \Illuminate\Support\Facades\Cache::put('cliproxy:models', [['id' => 'x', 'owned_by' => 'openai']], 60);
+        Cache::put('cliproxy:models', [['id' => 'x', 'owned_by' => 'openai']], 60);
         $this->assertTrue($client->setAccountDisabled('codex-a.json', false));
-        $this->assertNull(\Illuminate\Support\Facades\Cache::get('cliproxy:models'));
+        $this->assertNull(Cache::get('cliproxy:models'));
     }
 
     public function test_disconnect_clears_provider_cache_and_pending_oauth_state(): void
     {
-        Http::fake([
-            $this->mgmt('/auth-files/status') => Http::response(['status' => 'ok']),
-            $this->mgmt('/auth-files') => Http::response(['files' => [$this->codexFile(false)]]),
-        ]);
+        Http::fake(function (Request $request) {
+            return $request->method() === 'DELETE'
+                ? Http::response(['status' => 'ok'])
+                : Http::response(['files' => [$this->codexFile(false)]]);
+        });
 
-        \Illuminate\Support\Facades\Cache::put('cliproxy:models', [['id' => 'x', 'owned_by' => 'openai']], 60);
+        Cache::put('cliproxy:models', [['id' => 'x', 'owned_by' => 'openai']], 60);
 
         $response = $this->actingAs(User::factory()->create())
             ->withSession(['ai_provider_state.codex' => 'state-lama'])
@@ -98,7 +101,7 @@ class AiProviderReconnectTest extends TestCase
         $response->assertRedirect(route('ai-providers.index'));
         $response->assertSessionHas('success');
         // Cache model terhapus ...
-        $this->assertNull(\Illuminate\Support\Facades\Cache::get('cliproxy:models'));
+        $this->assertNull(Cache::get('cliproxy:models'));
         // ... dan sisa OAuth state ikut dibersihkan.
         $this->assertFalse(session()->has('ai_provider_state.codex'));
     }
@@ -257,5 +260,58 @@ class AiProviderReconnectTest extends TestCase
         $this->assertNotEquals(route('ai-providers.index'), $response->headers->get('Location'));
 
         \Mockery::close();
+    }
+
+    private function googleFile(string $email, bool $disabled, string $modtime = '2026-11-15T10:00:00Z'): array
+    {
+        return ['id' => "antigravity-{$email}.json", 'name' => "antigravity-{$email}.json", 'provider' => 'antigravity', 'email' => $email, 'disabled' => $disabled, 'modtime' => $modtime];
+    }
+
+    public function test_disconnect_deletes_the_chosen_account_not_the_first_active_one(): void
+    {
+        $files = [$this->googleFile('lama@example.com', false), $this->googleFile('baru@example.com', false)];
+        Http::fake(function (Request $request) use ($files) {
+            return $request->method() === 'DELETE' ? Http::response(['status' => 'ok']) : Http::response(['files' => $files]);
+        });
+
+        $this->actingAs(User::factory()->create())
+            ->post('/ai-providers/antigravity/disconnect', ['account' => 'antigravity-lama@example.com.json'])
+            ->assertRedirect(route('ai-providers.index'))
+            ->assertSessionHas('success', fn ($m) => str_contains($m, 'lama@example.com') && str_contains($m, 'dihapus'));
+
+        Http::assertSent(fn ($r) => $r->method() === 'DELETE' && str_contains(urldecode($r->url()), 'name=antigravity-lama@example.com.json'));
+        Http::assertNotSent(fn ($r) => $r->method() === 'DELETE' && str_contains(urldecode($r->url()), 'baru@example.com'));
+        Http::assertNotSent(fn ($r) => str_contains($r->url(), '/auth-files/status')); // tidak sekadar dinonaktifkan
+    }
+
+    public function test_new_login_is_recognised_among_many_accounts_and_old_ones_stay_off(): void
+    {
+        // Kasus 15 Nov: akun lama yang sudah diputus ikut aktif lagi saat akun baru disambungkan.
+        $before = [$this->googleFile('lama@example.com', true), $this->googleFile('aktif@example.com', false)];
+        $after = [...$before, $this->googleFile('baru@example.com', false, '2026-11-15T11:09:54Z')];
+        $calls = 0;
+        Http::fake(function () use (&$calls, $before, $after) {
+            return Http::response(['files' => $calls++ === 0 ? $before : $after]);
+        });
+
+        $client = app(CliProxyApiClient::class);
+        $snapshot = $client->accountSnapshot('antigravity');
+        $account = $client->waitForTokenRefresh('antigravity', 5, 1, $snapshot);
+
+        $this->assertSame('baru@example.com', $account['email']);
+        $this->assertTrue($client->waitForAccountEnabled('antigravity', 0, 1, 'antigravity-baru@example.com.json'));
+        $this->assertFalse($client->waitForAccountEnabled('antigravity', 0, 1, 'antigravity-lama@example.com.json'));
+    }
+
+    public function test_page_lists_each_active_account_with_its_own_disconnect_button(): void
+    {
+        config(['ai.cliproxy.api_key' => 'k']);
+        $files = [$this->googleFile('satu@example.com', false), $this->googleFile('dua@example.com', false), $this->googleFile('mati@example.com', true)];
+        Http::fake(fn () => Http::response(['files' => $files, 'data' => []]));
+
+        $html = $this->actingAs(User::factory()->create())->get(route('ai-providers.index'))->assertOk()->getContent();
+        $this->assertStringContainsString('value="antigravity-satu@example.com.json"', $html);
+        $this->assertStringContainsString('value="antigravity-dua@example.com.json"', $html);
+        $this->assertStringNotContainsString('value="antigravity-mati@example.com.json"', $html);
     }
 }

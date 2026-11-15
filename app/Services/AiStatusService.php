@@ -33,6 +33,11 @@ class AiStatusService
                 'connected' => $connected,
                 'email' => $connected ? ($account['email'] ?? null) : null,
                 'account' => $account,
+                // Semua akun aktif provider ini (mis. beberapa akun Google), masing-masing bisa diputus.
+                'accounts' => array_values(array_filter(
+                    $this->client->providerAccounts($slug),
+                    fn ($a) => ! ($a['disabled'] ?? false)
+                )),
             ];
         }
 
@@ -61,6 +66,7 @@ class AiStatusService
                     'provider' => null,
                     'reason' => 'Jalur agent AI dimatikan di konfigurasi.',
                 ];
+
                 continue;
             }
             $check = $resolver->check($slug);
@@ -71,6 +77,7 @@ class AiStatusService
                     'provider' => $this->providerLabelForModel($check['model']),
                     'reason' => null,
                 ];
+
                 continue;
             }
 
