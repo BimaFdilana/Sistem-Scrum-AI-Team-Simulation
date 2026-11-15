@@ -7,9 +7,11 @@ use App\Models\ExecutionRun;
 use App\Models\StoryEstimationRun;
 use App\Services\StoryEstimationService;
 use App\Support\Ai\AiQuota;
+use App\Support\Execution\ExecutionStopper;
 use App\Support\Ui\FriendlyText;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -40,8 +42,10 @@ class ActivityController extends Controller
                         ->where('updated_at', '>=', now()->subMinutes(30)));
             })
             ->latest('updated_at')
-            ->limit(5)
+            ->limit(15)
             ->get();
+        // Yang sudah tidak berproses dan tidak butuh Anda lagi tidak ditampilkan.
+        $runs = $this->withoutFinishedOnes($runs)->take(5)->values();
 
         $payload = [
             'runs' => $runs->map(fn (ExecutionRun $run) => $this->present($run))->values()->all(),
@@ -58,6 +62,33 @@ class ActivityController extends Controller
         $response->isNotModified($request);
 
         return $response;
+    }
+
+    /**
+     * Buang run yang tidak lagi berproses dan tidak menunggu keputusan:
+     * dihentikan PO, story-nya sudah diputuskan, atau sudah digantikan run yang lebih baru.
+     *
+     * @param  Collection<int, ExecutionRun>  $runs
+     * @return Collection<int, ExecutionRun>
+     */
+    private function withoutFinishedOnes($runs)
+    {
+        $latest = ExecutionRun::query()->whereIn('story_id', $runs->pluck('story_id')->unique())
+            ->selectRaw('story_id, max(id) as last_id')->groupBy('story_id')->pluck('last_id', 'story_id');
+
+        return $runs->reject(function (ExecutionRun $run) use ($latest): bool {
+            if (in_array($run->status, self::ACTIVE, true)) {
+                return false;
+            }
+            if ($run->error_code === ExecutionStopper::CODE) {
+                return true;
+            }
+            if ($run->story?->isAccepted()) {
+                return true; // keputusan PO sudah diambil: tidak ada yang perlu ditindaklanjuti
+            }
+
+            return (int) ($latest[$run->story_id] ?? $run->id) > $run->id; // sudah ada run yang lebih baru
+        });
     }
 
     /**
@@ -162,7 +193,7 @@ class ActivityController extends Controller
             default => $this->stageFromTasks($run),
         };
 
-        $tasks = $run->tasks;
+        $tasks = $run->tasks->reject(fn ($t) => $t->status === 'CANCELLED')->values(); // dibatalkan = tidak berproses lagi
         $detailUrl = $run->story ? route('stories.executions.show', [$run->story, $run]) : null;
 
         $actions = [];
