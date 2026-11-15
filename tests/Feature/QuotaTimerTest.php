@@ -6,6 +6,7 @@ use App\Models\Notification;
 use App\Models\Setting;
 use App\Models\User;
 use App\Services\ActiveModelService;
+use App\Services\CliProxyApiClient;
 use App\Support\Ai\AiQuota;
 use App\Support\Ai\AntigravityQuota;
 use App\Support\Ai\QuotaWatcher;
@@ -23,6 +24,10 @@ class QuotaTimerTest extends TestCase
 {
     use RefreshDatabase;
 
+    private array $gateway = [];
+
+    private bool $gatewayFaked = false;
+
     private function summary(float $gemini, float $thirdParty, ?string $reset = null, string $window = 'weekly'): array
     {
         $reset ??= now()->addDays(6)->addHours(23)->utc()->toIso8601String();
@@ -34,16 +39,23 @@ class QuotaTimerTest extends TestCase
     }
 
     /** Gateway tiruan: daftar akun, ringkasan kuota, dan tingkat akun. */
-    private function fakeGateway(array $summary, bool $disabled = false): void
+    private function fakeGateway(array $summary, bool $disabled = false, array $cooldowns = [], array $extraAccounts = []): void
     {
         config(['ai.cliproxy.base_url' => 'http://127.0.0.1:8317', 'ai.cliproxy.management_key' => 'mk', 'ai.cliproxy.api_key' => 'k', 'ai.cliproxy.agents_enabled' => true]);
         Cache::flush();
-        Http::fake(function (Request $request) use ($summary, $disabled) {
+        // Http::fake menumpuk callback (yang pertama menang): isi gateway diganti lewat properti.
+        $this->gateway = compact('summary', 'disabled', 'cooldowns', 'extraAccounts');
+        if ($this->gatewayFaked) {
+            return;
+        }
+        $this->gatewayFaked = true;
+        Http::fake(function (Request $request) {
+            ['summary' => $summary, 'disabled' => $disabled, 'cooldowns' => $cooldowns, 'extraAccounts' => $extraAccounts] = $this->gateway;
             if (str_contains($request->url(), '/v0/management/auth-files')) {
-                return Http::response(['files' => [[
+                return Http::response(['files' => array_merge([[
                     'provider' => 'antigravity', 'label' => 'akun@example.test', 'auth_index' => 'abc123', 'project_id' => 'proj',
-                    'disabled' => $disabled, 'status' => $disabled ? 'disabled' : 'active',
-                ]]]);
+                    'disabled' => $disabled, 'status' => $disabled ? 'disabled' : 'active', 'cooldowns' => $cooldowns,
+                ]], $extraAccounts)]);
             }
             if (str_contains($request->url(), '/v8/management/requests/api-call')) {
                 $target = (string) $request['url'];
@@ -155,5 +167,54 @@ class QuotaTimerTest extends TestCase
         $this->assertStringContainsString('hanya punya batas', $html); // semua jendela mingguan: catatan tingkat gratis tampil
 
         $this->actingAs($user)->post(route('ai-providers.quota.refresh'))->assertRedirect()->assertSessionHas('status');
+    }
+
+    private function cooldown(int $seconds = 90): array
+    {
+        return [['scope' => 'model', 'model_key' => 'gemini-3.1-flash-lite', 'reason' => 'quota', 'retry_at' => now()->addSeconds($seconds)->utc()->toIso8601String(), 'backoff_level' => 5, 'http_status' => 429]];
+    }
+
+    public function test_gateway_cooldown_blocks_model_only_when_every_active_account_waits(): void
+    {
+        $this->fakeGateway($this->summary(1.0, 1.0), cooldowns: $this->cooldown());
+        $cool = app(CliProxyApiClient::class)->modelCooldown('scrumgateway/gemini-3.1-flash-lite');
+        $this->assertNotNull($cool);
+        $this->assertSame(5, $cool['level']);
+        $this->assertNull(app(CliProxyApiClient::class)->modelCooldown('gemini-3.5-flash-lite'));
+
+        $this->fakeGateway($this->summary(1.0, 1.0), cooldowns: $this->cooldown(), extraAccounts: [['provider' => 'antigravity', 'auth_index' => 'free1', 'disabled' => false, 'cooldowns' => []]]);
+        $this->assertNull(app(CliProxyApiClient::class)->modelCooldown('gemini-3.1-flash-lite'));
+
+        $this->fakeGateway($this->summary(1.0, 1.0), cooldowns: [['model_key' => 'gemini-3.1-flash-lite', 'retry_at' => now()->subMinute()->toIso8601String()]]);
+        $this->assertNull(app(CliProxyApiClient::class)->modelCooldown('gemini-3.1-flash-lite'));
+    }
+
+    public function test_rate_limit_with_full_weekly_quota_keeps_warning_instead_of_false_recovery(): void
+    {
+        // Kasus run #39: kuota mingguan 100% tetapi Google menolak 429 berulang.
+        $user = User::factory()->create();
+        Queue::fake();
+        $this->fakeGateway($this->summary(1.0, 1.0), cooldowns: $this->cooldown());
+        Setting::put(ActiveModelService::SETTING_KEY, 'gemini-3.1-flash-lite');
+        AiQuota::exhausted('gemini-3.1-flash-lite', 'All credentials for model gemini-3.1-flash-lite are cooling down');
+
+        $this->assertSame('waiting', app(QuotaWatcher::class)->check(force: true, allowChatProbe: false));
+        $state = AiQuota::current();
+        $this->assertSame('cooldown', $state['kind']);
+        $this->assertNotEmpty($state['reset_at']);
+        $this->assertSame(0, Notification::query()->where('type', 'ai_quota_pulih')->count());
+
+        $html = $this->actingAs($user)->get('/projects')->assertOk()->getContent();
+        $this->assertStringContainsString('AI dibatasi sementara', $html);
+        $this->assertStringContainsString('Dicoba lagi sekitar', $html);
+
+        // Jeda selesai: masih ditunggu 10 menit sebelum dianggap pulih.
+        $this->fakeGateway($this->summary(1.0, 1.0));
+        Cache::put('ai-quota:exhausted', $state, 3600);
+        $this->assertSame('waiting', app(QuotaWatcher::class)->check(force: true, allowChatProbe: false));
+        $this->assertNotNull(AiQuota::current());
+        $this->travel(11)->minutes();
+        $this->assertSame('recovered', app(QuotaWatcher::class)->check(force: true, allowChatProbe: false));
+        $this->assertNull(AiQuota::current());
     }
 }

@@ -53,7 +53,7 @@ class AiQuota
             ];
             // Pertahankan hasil pengawas (waktu pulih, jadwal cek) bila kejadian ini lanjutan.
             if (! $isNew && is_array($current)) {
-                $state += array_intersect_key($current, array_flip(['reset_at', 'reset_certain', 'checked_at', 'next_check_at']));
+                $state += array_intersect_key($current, array_flip(['reset_at', 'reset_certain', 'checked_at', 'next_check_at', 'kind']));
             }
             self::store($state);
 
@@ -225,9 +225,15 @@ class AiQuota
         $resetAt = $state['reset_at'] ?? null;
         $next = isset($state['next_check_at']) ? rescue(fn () => Carbon::parse($state['next_check_at'])->timezone(self::ZONE)->format('H:i'), null, false) : null;
 
+        $cooldown = ($state['kind'] ?? null) === 'cooldown';
+
         return [
-            'headline' => 'Kuota AI habis',
-            'detail' => 'Model '.$state['model'].' ditolak penyedia. Estimasi, eksekusi, dan chat Scrum Master berhenti sampai kuota pulih atau Anda mengganti model aktif.',
+            'cooldown' => $cooldown,
+            'headline' => $cooldown ? 'AI dibatasi sementara' : 'Kuota AI habis',
+            'detail' => $cooldown
+                ? 'Penyedia menolak model '.$state['model'].' untuk sementara karena terlalu banyak permintaan (kuota mingguan masih ada). Sistem mencoba lagi otomatis; Anda juga bisa mengganti model aktif.'
+                : 'Model '.$state['model'].' ditolak penyedia. Estimasi, eksekusi, dan chat Scrum Master berhenti sampai kuota pulih atau Anda mengganti model aktif.',
+            'reset_prefix' => $cooldown ? 'Dicoba lagi sekitar' : 'Perkiraan pulih',
             'reset_at' => $resetAt,
             'reset_certain' => (bool) ($state['reset_certain'] ?? false),
             'reset_label' => $resetAt ? self::resetLabel($resetAt) : null,
@@ -242,9 +248,11 @@ class AiQuota
         $banner = self::banner($state);
         $since = rescue(fn () => Carbon::parse($state['since'])->timezone(self::ZONE)->format('H:i'), '');
 
-        $text = 'Kuota AI habis: model '.$state['model'].' ditolak penyedia'.($since !== '' ? ' sejak '.$since.' WIB' : '').'. ';
+        $text = $banner['cooldown']
+            ? 'AI dibatasi sementara: model '.$state['model'].' ditolak penyedia karena terlalu banyak permintaan'.($since !== '' ? ' sejak '.$since.' WIB' : '').'. '
+            : 'Kuota AI habis: model '.$state['model'].' ditolak penyedia'.($since !== '' ? ' sejak '.$since.' WIB' : '').'. ';
         if ($banner['reset_at']) {
-            $text .= 'Perkiraan pulih '.$banner['reset_label'].' ('.$banner['remaining'].'). ';
+            $text .= $banner['reset_prefix'].' '.$banner['reset_label'].' ('.$banner['remaining'].'). ';
         } else {
             $text .= 'Waktu pulih belum diketahui; dicek otomatis'.($banner['next_check'] ? ', cek berikutnya '.$banner['next_check'].' WIB' : '').'. ';
         }

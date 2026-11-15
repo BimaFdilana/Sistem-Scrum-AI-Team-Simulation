@@ -11,6 +11,7 @@ use App\Models\Project;
 use App\Services\AgentProfileClient;
 use App\Services\AgentToolRunner;
 use App\Services\AiGateway;
+use App\Services\CliProxyApiClient;
 use App\Services\KanbanClient;
 use App\Services\StrictModelResolver;
 use App\Support\Ai\AiQuota;
@@ -32,6 +33,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Symfony\Component\Process\Exception\ProcessSignaledException;
+use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Throwable;
 
 /**
@@ -334,7 +336,11 @@ class ExecuteExecutionTaskJob implements ShouldQueue
 
                 return;
             }
+            // Batas waktu habis saat model sedang dijeda penyedia = kuota, bukan agen yang gagal.
+            $timedOutOnQuota = $exception instanceof ProcessTimedOutException
+                && rescue(fn () => app(CliProxyApiClient::class)->modelCooldown(app(OpenCodeRunner::class)->model()), null, false) !== null;
             if (($exception instanceof AiUnavailableException && $exception->errorCode === 'QUOTA_EXHAUSTED')
+                || $timedOutOnQuota
                 || AiQuota::isQuotaText($exception->getMessage())) {
                 $this->pauseForQuota($run, $task, $exception->getMessage());
 

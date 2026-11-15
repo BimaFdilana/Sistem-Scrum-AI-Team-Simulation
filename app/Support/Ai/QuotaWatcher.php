@@ -19,6 +19,8 @@ class QuotaWatcher
 
     private const KNOWN_INTERVAL_MIN = 15;
 
+    private const COOLDOWN_SETTLE_MIN = 10;
+
     public function __construct(
         private readonly AntigravityQuota $quota,
         private readonly CliProxyApiClient $gateway,
@@ -41,10 +43,53 @@ class QuotaWatcher
         $group = AntigravityQuota::groupForModel($model);
 
         try {
-            if ($group !== null) {
-                return $this->checkGoogle($group);
+            // Model Google: kuota mingguan yang benar-benar habis menentukan waktu pulih.
+            $google = $group !== null ? $this->checkGoogle($group) : null;
+            if ($google === 'waiting') {
+                return 'waiting';
             }
-            if (! $allowChatProbe) {
+
+            // Jeda gateway (429 berulang): kuota mingguan bisa masih ada padahal penyedia
+            // menolak sementara. Tanpa ini peringatan hilang terlalu cepat.
+            $cooldown = rescue(fn () => $this->gateway->modelCooldown($model), null, false);
+            if ($cooldown !== null) {
+                $retry = Carbon::parse($cooldown['retry_at'])->addSeconds(30);
+                AiQuota::annotate([
+                    'kind' => 'cooldown',
+                    'reset_at' => $cooldown['retry_at'],
+                    'reset_certain' => false,
+                    'cooldown_clear_since' => null,
+                    'checked_at' => now()->toIso8601String(),
+                    'next_check_at' => ($retry->lessThan(now()->addMinute()) ? now()->addMinute() : $retry)->toIso8601String(),
+                ]);
+
+                return 'waiting';
+            }
+            // Jeda sudah lewat: belum tentu pulih (bisa ditolak lagi). Anggap pulih setelah
+            // 10 menit tanpa jeda; panggilan model yang berhasil menghapus peringatan lebih cepat.
+            if (($state['kind'] ?? null) === 'cooldown') {
+                $since = $state['cooldown_clear_since'] ?? null;
+                if ($since !== null && Carbon::parse($since)->lessThanOrEqualTo(now()->subMinutes(self::COOLDOWN_SETTLE_MIN))) {
+                    AiQuota::recovered();
+
+                    return 'recovered';
+                }
+                AiQuota::annotate([
+                    'reset_at' => null,
+                    'cooldown_clear_since' => $since ?? now()->toIso8601String(),
+                    'checked_at' => now()->toIso8601String(),
+                    'next_check_at' => now()->addMinutes(5)->toIso8601String(),
+                ]);
+
+                return 'waiting';
+            }
+
+            if ($google === 'available') {
+                AiQuota::recovered();
+
+                return 'recovered';
+            }
+            if ($google === 'unknown' || ! $allowChatProbe) {
                 $this->schedule(self::UNKNOWN_INTERVAL_MIN);
 
                 return 'waiting';
@@ -85,9 +130,7 @@ class QuotaWatcher
                 continue;
             }
             if (min(array_column($windows, 'remaining')) > 0.001) {
-                AiQuota::recovered();
-
-                return 'recovered';
+                return 'available';
             }
             // Habis: pulih saat SEMUA jendela yang habis sudah reset (yang terlama menentukan).
             $blocking = array_filter($windows, fn ($w) => $w['remaining'] <= 0.001 && $w['reset_at']);
@@ -98,7 +141,10 @@ class QuotaWatcher
             }
         }
 
-        $patch = ['checked_at' => now()->toIso8601String()];
+        if ($accounts === []) {
+            return 'unknown'; // tidak ada data kuota (akun nonaktif / API tidak tersedia)
+        }
+        $patch = ['checked_at' => now()->toIso8601String(), 'kind' => 'quota'];
         if ($best !== null) {
             $resetAt = Carbon::createFromTimestamp($best['at'])->utc();
             $next = now()->addMinutes(self::KNOWN_INTERVAL_MIN);

@@ -2,6 +2,8 @@
 
 namespace App\Support\Execution;
 
+use App\Services\ActiveModelService;
+use App\Services\CliProxyApiClient;
 use Illuminate\Support\Facades\File;
 use RuntimeException;
 use Symfony\Component\Process\Process;
@@ -31,7 +33,7 @@ class OpenCodeRunner
             return $configured;
         }
 
-        $active = app(\App\Services\ActiveModelService::class)->current();
+        $active = app(ActiveModelService::class)->current();
 
         if (! is_string($active) || trim($active) === '') {
             return $configured;
@@ -81,7 +83,17 @@ class OpenCodeRunner
             null,
             $timeout
         );
-        $process->run();
+        $process->start();
+        if ($this->waitWatchingQuota($process, $model)) {
+            $output = $process->getOutput().$process->getErrorOutput();
+
+            return [
+                'ok' => false,
+                'exit' => null,
+                // Teks memuat penanda kuota agar pemanggil menjeda eksekusi, bukan menggagalkannya.
+                'output' => 'QUOTA_EXHAUSTED: Resource has been exhausted — model '.$model.' terus dijeda penyedia (429), proses dihentikan lebih awal. '.mb_substr($output, -1500),
+            ];
+        }
 
         $output = $process->getOutput().$process->getErrorOutput();
 
@@ -90,6 +102,38 @@ class OpenCodeRunner
             'exit' => $process->getExitCode(),
             'output' => mb_substr($output, -4000),
         ];
+    }
+
+    /**
+     * Tunggu proses selesai. Bila model terus dijeda gateway (429 berulang), OpenCode
+     * hanya mengulang diam-diam sampai batas waktu habis (run #39: 25 menit sia-sia).
+     * Cek jeda tiap 30 detik; jeda di 4 dari 6 cek terakhir = hentikan proses.
+     *
+     * @return bool true bila dihentikan karena kuota/jeda penyedia
+     */
+    private function waitWatchingQuota(Process $process, string $model): bool
+    {
+        $interval = max(1, (int) config('ai.opencode.quota_probe_seconds', 30));
+        $lastProbe = time();
+        $samples = [];
+
+        while ($process->isRunning()) {
+            usleep(500_000);
+            $process->checkTimeout();
+            if (time() - $lastProbe < $interval) {
+                continue;
+            }
+            $lastProbe = time();
+            $samples[] = rescue(fn () => app(CliProxyApiClient::class)->modelCooldown($model), null, false) !== null;
+            $samples = array_slice($samples, -6);
+            if (count(array_filter($samples)) >= 4) {
+                $process->stop(5);
+
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -151,7 +195,7 @@ class OpenCodeRunner
         $ids = [];
 
         try {
-            $ids = (array) app(\App\Services\ActiveModelService::class)->available();
+            $ids = (array) app(ActiveModelService::class)->available();
         } catch (\Throwable) {
             $ids = [];
         }

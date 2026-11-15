@@ -134,7 +134,7 @@
                     <div class="quota-banner-body">
                         <p><strong>{{ $quotaView['headline'] }}.</strong> {{ $quotaView['detail'] }}</p>
                         @if ($quotaView['reset_at'])
-                            <p class="quota-countdown">Perkiraan pulih <strong>{{ $quotaView['reset_label'] }}</strong> ·
+                            <p class="quota-countdown">{{ $quotaView['reset_prefix'] }} <strong>{{ $quotaView['reset_label'] }}</strong> ·
                                 <strong class="quota-countdown-value" data-quota-countdown data-reset-at="{{ $quotaView['reset_at'] }}">{{ $quotaView['remaining'] }}</strong></p>
                         @else
                             <p class="quota-countdown">Waktu pulih belum diketahui dari penyedia. Sistem mengecek otomatis{{ $quotaView['next_check'] ? '; cek berikutnya '.$quotaView['next_check'].' WIB' : '' }}.</p>

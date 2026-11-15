@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Support\Ai\AiQuota;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -96,6 +97,50 @@ class CliProxyApiClient
         }
 
         return $this->accountsCache;
+    }
+
+    /**
+     * Jeda (cooldown) gateway untuk satu model setelah penyedia menolak (429).
+     *
+     * Bernilai hanya bila SEMUA akun aktif dari penyedia yang menolak sedang dijeda
+     * untuk model itu; satu akun bebas berarti model masih bisa dipakai.
+     *
+     * @return array{retry_at: string, accounts: int, level: int}|null
+     */
+    public function modelCooldown(string $model): ?array
+    {
+        $key = AiQuota::normalize($model);
+        $files = array_values(array_filter((array) ($this->accounts(true)['files'] ?? []), fn ($f) => is_array($f) && empty($f['disabled'])));
+
+        $blocked = [];
+        $providers = [];
+        foreach ($files as $i => $file) {
+            foreach ((array) ($file['cooldowns'] ?? []) as $cooldown) {
+                if (! is_array($cooldown) || AiQuota::normalize((string) ($cooldown['model_key'] ?? '')) !== $key) {
+                    continue;
+                }
+                $retryAt = rescue(fn () => Carbon::parse((string) ($cooldown['retry_at'] ?? '')), null, false);
+                if ($retryAt === null || $retryAt->isPast()) {
+                    continue;
+                }
+                $blocked[$i] = ['at' => $retryAt->timestamp, 'level' => (int) ($cooldown['backoff_level'] ?? 0)];
+                $providers[(string) ($file['provider'] ?? '')] = true;
+            }
+        }
+        if ($blocked === []) {
+            return null;
+        }
+        foreach ($files as $i => $file) {
+            if (isset($providers[(string) ($file['provider'] ?? '')]) && ! isset($blocked[$i])) {
+                return null;
+            }
+        }
+
+        return [
+            'retry_at' => Carbon::createFromTimestamp(min(array_column($blocked, 'at')))->utc()->toIso8601String(),
+            'accounts' => count($blocked),
+            'level' => max(array_column($blocked, 'level')),
+        ];
     }
 
     /** Paksa refresh cache accounts() (mis. setelah connect/disconnect). */
