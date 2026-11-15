@@ -83,8 +83,18 @@ class OpenCodeRunner
             null,
             $timeout
         );
+        // Penanda henti lama (dari run sebelumnya) tidak boleh menghentikan proses baru ini.
+        ExecutionStopper::clearFlag($worktree);
         $process->start();
-        if ($this->waitWatchingQuota($process, $model)) {
+        $ended = $this->waitWatchingQuota($process, $model, $worktree);
+        if ($ended === 'stopped') {
+            return [
+                'ok' => false,
+                'exit' => null,
+                'output' => 'STOPPED_BY_PO: proses agen dihentikan paksa oleh PO.',
+            ];
+        }
+        if ($ended === 'quota') {
             $output = $process->getOutput().$process->getErrorOutput();
 
             return [
@@ -109,9 +119,9 @@ class OpenCodeRunner
      * hanya mengulang diam-diam sampai batas waktu habis (run #39: 25 menit sia-sia).
      * Cek jeda tiap 30 detik; jeda di 4 dari 6 cek terakhir = hentikan proses.
      *
-     * @return bool true bila dihentikan karena kuota/jeda penyedia
+     * @return string|null 'quota' (jeda penyedia), 'stopped' (henti paksa PO), atau null bila selesai sendiri
      */
-    private function waitWatchingQuota(Process $process, string $model): bool
+    private function waitWatchingQuota(Process $process, string $model, string $worktree): ?string
     {
         $interval = max(1, (int) config('ai.opencode.quota_probe_seconds', 30));
         $lastProbe = time();
@@ -120,6 +130,11 @@ class OpenCodeRunner
         while ($process->isRunning()) {
             usleep(500_000);
             $process->checkTimeout();
+            if (ExecutionStopper::stopRequested($worktree)) {
+                $process->stop(5);
+
+                return 'stopped';
+            }
             if (time() - $lastProbe < $interval) {
                 continue;
             }
@@ -129,11 +144,11 @@ class OpenCodeRunner
             if (count(array_filter($samples)) >= 4) {
                 $process->stop(5);
 
-                return true;
+                return 'quota';
             }
         }
 
-        return false;
+        return null;
     }
 
     /**

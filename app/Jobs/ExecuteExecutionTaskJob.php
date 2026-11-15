@@ -16,6 +16,7 @@ use App\Services\KanbanClient;
 use App\Services\StrictModelResolver;
 use App\Support\Ai\AiQuota;
 use App\Support\Execution\DirectWorkspace;
+use App\Support\Execution\ExecutionStopper;
 use App\Support\Execution\ExecutorPlanner;
 use App\Support\Execution\OpenCodeRunner;
 use App\Support\Execution\ProjectFacts;
@@ -287,6 +288,11 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             $applied = $result['files'];
             $patch = ['summary' => $result['summary']];
 
+            if (ExecutionStopper::wasStopped($run)) {
+                $this->afterStop($run, $task);
+
+                return;
+            }
             AiQuota::recovered();
             $worktrees->commit($worktree, 'Task #'.$task->id.': '.$task->title);
 
@@ -307,6 +313,12 @@ class ExecuteExecutionTaskJob implements ShouldQueue
 
             app(TaskCompletion::class)->submitForQa($run, $task, $diffSnapshot);
         } catch (Throwable $exception) {
+            // PO menghentikan eksekusi: jangan menimpa status, jeda, atau mencoba ulang.
+            if (ExecutionStopper::wasStopped($run)) {
+                $this->afterStop($run, $task);
+
+                return;
+            }
             // Seperti di ReviewExecutionTaskJob: kegagalan AI sementara
             // dilepas kembali ke antrean (task dikembalikan ke status
             // semula agar guard percobaan berikutnya lolos), bukan
@@ -678,6 +690,12 @@ class ExecuteExecutionTaskJob implements ShouldQueue
 
         $task->forceFill(['last_progress_at' => now()])->save();
 
+        if (ExecutionStopper::wasStopped($run) || str_contains((string) $result['output'], 'STOPPED_BY_PO')) {
+            $this->afterStop($run, $task);
+
+            return;
+        }
+
         // Provider kadang memblokir jawaban model lewat content filter
         // (terjadi pada run #4). Coba sekali dengan model cadangan sebelum
         // menyerahkan task ke Hermes.
@@ -826,6 +844,19 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             'error_code' => 'QUOTA_EXHAUSTED',
             'summary' => 'Kuota model AI'.(is_string($model) ? ' '.$model : '').' habis, jadi tim berhenti di task #'.$task->id.' ('.$task->title.'). '
                 .'Ganti model aktif di menu AI Providers atau tunggu kuota pulih (biasanya beberapa jam), lalu klik Lanjutkan.',
+        ]);
+    }
+
+    /** Run dihentikan PO saat task ini berjalan: batalkan task dan kembalikan baseline. */
+    private function afterStop(ExecutionRun $run, ExecutionTask $task): void
+    {
+        $task->forceFill(['status' => 'CANCELLED', 'last_error' => ExecutionStopper::CODE, 'last_progress_at' => now()])->save();
+        $note = app(ExecutionStopper::class)->release($run->fresh());
+        $run->messages()->create([
+            'execution_task_id' => $task->id,
+            'sender_slug' => 'scrum-master',
+            'recipient_slug' => 'product-owner',
+            'content' => 'Eksekusi dihentikan paksa oleh PO; task #'.$task->id.' dibatalkan.'.($note ? ' '.$note : ''),
         ]);
     }
 

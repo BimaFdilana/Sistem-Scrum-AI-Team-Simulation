@@ -20,6 +20,11 @@
                 <span class="chat-command-label">{{ \App\Http\Controllers\ChatCommandController::label($cmdRun->status) }}</span>
                 · <a href="{{ route('stories.executions.show', [$cmdRun->story_id, $cmdRun]) }}">lihat proses</a>
             </span>
+            @if ($cmdActive || $cmdRun->status === 'NEEDS_PO')
+                <form method="POST" action="{{ route('chat.commands.stop', $cmdRun) }}" class="chat-stop-form">@csrf
+                    <button class="button button-danger chat-stop-btn" type="submit" onclick="return handleConfirm(event, {title: 'Hentikan paksa?', message: 'Eksekusi dihentikan sekarang. Tugas yang belum selesai dibatalkan; kode utama tidak berubah. Lanjut?', confirmLabel: 'Ya, hentikan', danger: true})">■ Hentikan paksa</button>
+                </form>
+            @endif
         @endif
     </article>
 @elseif ($message->kind === 'command_plan' && $message->chatCommand)

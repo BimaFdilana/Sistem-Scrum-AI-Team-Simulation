@@ -10,7 +10,9 @@ use App\Models\Sprint;
 use App\Models\Story;
 use App\Support\Chat\ChatCommandReporter;
 use App\Support\Chat\SprintChat;
+use App\Support\Chat\StopIntent;
 use App\Support\Execution\DirectWorkspace;
+use App\Support\Execution\ExecutionStopper;
 use App\Support\Workspace\BaselineSnapshot;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -34,7 +36,7 @@ class ChatCommandController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'message' => ['required', 'string', 'min:5', 'max:6000'],
+            'message' => ['required', 'string', 'min:3', 'max:6000'],
             'sprint_id' => ['required', 'integer', 'exists:sprints,id'],
         ]);
         $sprint = Sprint::query()->with('project')->findOrFail($data['sprint_id']);
@@ -46,6 +48,11 @@ class ChatCommandController extends Controller
 
         $text = trim($data['message']);
         $conversation = SprintChat::conversation($request->user(), $sprint);
+
+        // "Hentikan eksekusi" ditangani langsung (tanpa AI) agar tetap jalan saat kuota habis.
+        if (StopIntent::matches($text)) {
+            return $this->stopFromChat($request, $text, $project, $sprint, $conversation);
+        }
         $command = DB::transaction(function () use ($text, $project, $sprint, $conversation, $request) {
             $command = ChatCommand::query()->create([
                 'user_id' => $request->user()->id,
@@ -73,6 +80,64 @@ class ChatCommandController extends Controller
             'command_id' => $command->id,
             'phase_url' => route('chat.commands.phase', $command, false),
         ], 202);
+    }
+
+    /** Perintah henti di chat: hentikan semua eksekusi project ini lalu lapor di chat. */
+    private function stopFromChat(Request $request, string $text, $project, Sprint $sprint, $conversation): JsonResponse
+    {
+        $runs = ExecutionRun::query()->with('story')
+            ->whereIn('status', [...DirectWorkspace::ACTIVE, ExecutionRun::NEEDS_PO])
+            ->whereHas('story', fn ($q) => $q->where('project_id', $project->id))
+            ->orderBy('id')->get();
+
+        $stopper = app(ExecutionStopper::class);
+        $labels = [];
+        $notes = [];
+        foreach ($runs as $run) {
+            $result = $stopper->stop($run);
+            if ($result['stopped']) {
+                $labels[] = $run->subjectLabel();
+                if ($result['note'] !== '') {
+                    $notes[] = $result['note'];
+                }
+            }
+        }
+
+        $reply = $labels === []
+            ? 'Tidak ada eksekusi yang sedang berjalan atau menunggu keputusan di project ini, jadi tidak ada yang perlu dihentikan.'
+            : 'Eksekusi dihentikan paksa: '.implode(', ', $labels).'. Tugas yang belum selesai dibatalkan dan proses agen yang sedang jalan diminta berhenti.'
+                .($notes !== [] ? ' '.implode(' ', array_unique($notes)) : '')
+                ."\n\nKode utama tidak berubah. Kirim perintah baru, atau klik **Jalankan ulang** pada laporannya bila ingin mengulang.";
+
+        DB::transaction(function () use ($request, $text, $project, $sprint, $conversation, $reply): void {
+            $command = ChatCommand::query()->create([
+                'user_id' => $request->user()->id,
+                'chat_conversation_id' => $conversation->id,
+                'sprint_id' => $sprint->id,
+                'project_id' => $project->id,
+                'command' => $text,
+                'phase' => ChatCommand::STOPPED,
+                'title' => 'Hentikan eksekusi',
+            ]);
+            $conversation->messages()->create(['role' => 'user', 'kind' => 'command', 'content' => $text, 'chat_command_id' => $command->id]);
+            $conversation->messages()->create(['role' => 'assistant', 'kind' => 'report', 'content' => $reply, 'chat_command_id' => $command->id]);
+            $conversation->touch();
+        });
+
+        return response()->json(['conversation_id' => $conversation->uuid, 'stopped' => count($labels)]);
+    }
+
+    /** Tombol "Hentikan paksa" pada kartu perintah. */
+    public function stop(Request $request, ExecutionRun $run): RedirectResponse
+    {
+        $command = ChatCommand::query()->where('story_id', $run->story_id)->first();
+        abort_unless($command !== null && (int) $command->user_id === (int) $request->user()->id, 404);
+
+        $result = app(ExecutionStopper::class)->stop($run);
+
+        return back()->with($result['stopped'] ? 'status' : 'error', $result['stopped']
+            ? 'Eksekusi dihentikan paksa.'
+            : $result['note']);
     }
 
     /** PO mengonfirmasi (dan boleh mengoreksi) rumusan SM; tim mulai bekerja. */

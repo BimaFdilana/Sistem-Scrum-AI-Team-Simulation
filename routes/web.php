@@ -40,6 +40,7 @@ Route::middleware('auth')->group(function (): void {
         ->name('chat.messages.store');
     Route::post('/chat/commands', [ChatCommandController::class, 'store'])->middleware('throttle:6,1')->name('chat.commands.store');
     Route::get('/chat/commands/{run}', [ChatCommandController::class, 'status'])->name('chat.commands.status');
+    Route::post('/chat/commands/{run}/stop', [ChatCommandController::class, 'stop'])->middleware('throttle:10,1')->name('chat.commands.stop');
     Route::post('/chat/commands/{command}/confirm', [ChatCommandController::class, 'confirm'])->middleware('throttle:10,1')->name('chat.commands.confirm');
     Route::post('/chat/commands/{command}/cancel', [ChatCommandController::class, 'cancel'])->name('chat.commands.cancel');
     Route::post('/chat/commands/{command}/rethink', [ChatCommandController::class, 'rethink'])->middleware('throttle:6,1')->name('chat.commands.rethink');

@@ -18,6 +18,8 @@ class ChatCommand extends Model
 
     public const NOT_UNDERSTOOD = 'NOT_UNDERSTOOD';
 
+    public const STOPPED = 'STOPPED';
+
     protected $fillable = [
         'user_id', 'chat_conversation_id', 'sprint_id', 'project_id', 'story_id', 'command', 'reported',
         'phase', 'title', 'criteria', 'hint', 'parent_id', 'part_index', 'part_total',
@@ -36,6 +38,7 @@ class ChatCommand extends Model
             self::AWAITING => 'Menunggu konfirmasi Anda',
             self::CANCELLED => 'Dibatalkan',
             self::NOT_UNDERSTOOD => 'Belum bisa dipahami',
+            self::STOPPED => 'Perintah henti diproses',
             default => 'Dikonfirmasi',
         };
     }

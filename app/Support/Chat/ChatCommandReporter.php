@@ -77,14 +77,22 @@ class ChatCommandReporter
                 ? "⚠ Pekerjaan dijeda karena kuota model AI habis.\n\n".Str::limit($summary, 400)."\n\nSetelah mengganti model aktif di AI Providers (atau kuota pulih), klik **Lanjutkan**. Pekerjaan diteruskan dari task yang tertahan."
                 : 'Pekerjaan berhenti dan butuh keputusan Anda: '.Str::limit($summary !== '' ? $summary : 'lihat detail proses.', 500)
                 ."\n\nKlik **Lanjutkan** untuk mencoba lagi, atau **Tandai Gagal**.",
-            default => 'Perintah gagal dikerjakan. '.self::failureExplanation($run)
+            'FAILED' => $run->error_code === 'STOPPED_BY_PO'
+                ? "Eksekusi dihentikan paksa atas perintah Anda.\n".$tasks."\n\nKode utama tidak berubah. Klik **Jalankan ulang** bila ingin mengulang."
+                : self::failedContent($run, $summary),
+            default => self::failedContent($run, $summary),
+        };
+    }
+
+    private static function failedContent(ExecutionRun $run, string $summary): string
+    {
+        return 'Perintah gagal dikerjakan. '.self::failureExplanation($run)
                 ."\n\nKode utama tidak berubah. ".match (self::failureKind($run)) {
                     'transient' => 'Gangguan ini sementara, jadi aman klik **Jalankan ulang**.',
                     'setup' => 'Perbaiki pengaturannya dulu, lalu klik **Jalankan ulang**.',
                     default => 'Menjalankan ulang hal yang sama akan gagal lagi, jadi klik **Rumuskan ulang**: saya rumuskan perintahnya lebih jelas atau lebih kecil.',
                 }
-            .($summary !== '' ? "\n\nDetail teknis: ".Str::limit($summary, 300) : ''),
-        };
+        .($summary !== '' ? "\n\nDetail teknis: ".Str::limit($summary, 300) : '');
     }
 
     /**
