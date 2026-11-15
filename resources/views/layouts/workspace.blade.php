@@ -50,6 +50,7 @@
     @if (($activePage ?? '') === 'actors')
         <link rel="stylesheet" href="{{ asset('css/actors.css') }}?v={{ filemtime(public_path('css/actors.css')) }}">
     @endif
+    <link rel="stylesheet" href="{{ asset('css/light-theme.css') }}?v={{ filemtime(public_path('css/light-theme.css')) }}">
 </head>
 <body class="workspace-body">
     <div class="app-shell">

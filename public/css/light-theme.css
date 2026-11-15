@@ -1,0 +1,136 @@
+/*
+ * Perbaikan mode terang. Dimuat PALING AKHIR agar menimpa warna yang semula
+ * ditulis untuk latar gelap (hex/rgba langsung) di berkas CSS lain.
+ * Target kontras: teks biasa >= 4.5:1, teks besar/ikon >= 3:1 (WCAG AA).
+ */
+
+/* Label untuk pembaca layar: tersembunyi secara visual (di kedua tema). */
+.sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* Ukuran huruf terkecil dinaikkan sedikit agar terbaca (kedua tema). */
+.nav-caption,.story-section-label,.eyebrow,.agent-status,.ap-tab-count,.board-avatar{font-size:10px}
+.section-kicker{font-size:10px}
+.nav-badge{font-size:11px}
+
+[data-theme="light"]{
+  --text:#14201f;
+  --muted:#43545a;
+  --quiet:#59696f;
+  --accent:#087a57;
+  --accent-strong:#06604a;
+  --accent-rgb:8,122,87;
+  --danger:#b42b35;
+  --danger-rgb:180,43,53;
+  --amber:#7a5208;
+  --amber-rgb:122,82,8;
+  --line:rgba(18,28,33,.12);
+  --line-strong:rgba(18,28,33,.24);
+  /* Variabel yang dipakai halaman papan/eksekusi (di tema gelap memakai fallback). */
+  --surface:#ffffff;
+  --border:rgba(18,28,33,.18);
+}
+
+/* Kerangka */
+[data-theme="light"] .topbar{background:rgba(255,255,255,.9);border-bottom:1px solid var(--line)}
+[data-theme="light"] .workspace-symbol{background:rgba(var(--accent-rgb),.12);color:var(--accent-strong)}
+[data-theme="light"] .user-avatar{background:#e3e8ec;color:var(--text)}
+[data-theme="light"] .button-primary,
+[data-theme="light"] .directory-actions .button-primary{background:var(--accent-strong);border-color:var(--accent-strong);color:#fff}
+[data-theme="light"] .button-primary:hover,
+[data-theme="light"] .directory-actions .button-primary:hover{background:#054c3a;border-color:#054c3a}
+[data-theme="light"] .nav-badge{background:rgba(var(--amber-rgb),.12);border-color:rgba(var(--amber-rgb),.4);color:var(--amber)}
+[data-theme="light"] .empty-actions{border-color:var(--line-strong)}
+[data-theme="light"] .story-criteria{background:rgba(18,28,33,.05)}
+[data-theme="light"] .directory-row-unread{background:rgba(var(--amber-rgb),.06);border-color:rgba(var(--amber-rgb),.35)}
+[data-theme="light"] .topbar-bell-count{color:#fff}
+[data-theme="light"] .agent-config-form :focus-visible,
+[data-theme="light"] .agent-config-history :focus-visible{outline-color:var(--accent)}
+
+/* Avatar berwarna */
+[data-theme="light"] .avatar-mint{color:#0b6b4d;background:rgba(11,107,77,.1);border-color:rgba(11,107,77,.3)}
+[data-theme="light"] .avatar-blue{color:#1d5f96;background:rgba(29,95,150,.1);border-color:rgba(29,95,150,.3)}
+[data-theme="light"] .avatar-violet{color:#5b3fb0;background:rgba(91,63,176,.1);border-color:rgba(91,63,176,.3)}
+[data-theme="light"] .avatar-amber{color:#8a5a0a;background:rgba(138,90,10,.12);border-color:rgba(138,90,10,.32)}
+[data-theme="light"] .avatar-rose{color:#a63a45;background:rgba(166,58,69,.1);border-color:rgba(166,58,69,.3)}
+[data-theme="light"] .dc-msg--be .dc-avatar{color:#1d5f96;border-color:rgba(29,95,150,.35);background:rgba(29,95,150,.1)}
+[data-theme="light"] .dc-msg--fe .dc-avatar{color:#5b3fb0;border-color:rgba(91,63,176,.35);background:rgba(91,63,176,.1)}
+[data-theme="light"] .dc-msg--qa .dc-avatar{color:#0b6b4d}
+[data-theme="light"] img.agent-avatar,
+[data-theme="light"] img.dash-agent-avatar{background:rgba(18,28,33,.06);border-color:var(--line)}
+
+/* Ringkasan + papan sprint */
+[data-theme="light"] .board-wrap,
+[data-theme="light"] .dash-panel,
+[data-theme="light"] .dash-stat{background-color:#fff}
+[data-theme="light"] .board-col{background:#f3f5f7;border-color:var(--line-strong)}
+[data-theme="light"] .board-card{background:#fff;border-color:var(--line-strong)}
+[data-theme="light"] .board-card:hover{border-color:rgba(79,70,229,.55);box-shadow:0 8px 20px rgba(18,28,33,.12)}
+[data-theme="light"] .board-card.is-locked{background:rgba(4,120,87,.07);border-color:rgba(4,120,87,.4)}
+[data-theme="light"] .board-col-count{background:rgba(18,28,33,.08);color:var(--muted)}
+[data-theme="light"] .board-id{color:#4338ca}
+[data-theme="light"] .board-points{background:rgba(79,70,229,.1);border-color:rgba(79,70,229,.4);color:#3730a3}
+[data-theme="light"] .board-badge--done{border-color:rgba(4,120,87,.5);color:#047857}
+[data-theme="light"] .board-avatar,
+[data-theme="light"] .dash-agent-avatar{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff}
+[data-theme="light"] .board-progress-bar,
+[data-theme="light"] .dash-stat-bar{background:rgba(18,28,33,.12)}
+[data-theme="light"] .dash-agents li{background:rgba(18,28,33,.04)}
+[data-theme="light"] .dash-agent-state{color:#0369a1}
+[data-theme="light"] .dash-agent-state.is-on{color:#047857}
+[data-theme="light"] .board-empty{border-color:var(--line-strong)}
+[data-theme="light"] .story-section{border-top-color:var(--line)}
+
+/* Tab project / story / sprint */
+[data-theme="light"] .pj-tabbar,
+[data-theme="light"] .story-tabbar{background:rgba(18,28,33,.05);border-color:var(--line)}
+[data-theme="light"] .story-switchbar{background:rgba(18,28,33,.04);border-color:var(--line)}
+[data-theme="light"] .pj-tab:hover,
+[data-theme="light"] .story-tab:hover,
+[data-theme="light"] .story-switch:hover{color:var(--text);background:rgba(18,28,33,.07)}
+[data-theme="light"] .story-switch{background:rgba(18,28,33,.05)}
+[data-theme="light"] .pj-tab.is-active,
+[data-theme="light"] .story-tab.is-active,
+[data-theme="light"] .story-switch.is-active{color:#fff;background:linear-gradient(135deg,#4f46e5,#7c3aed)}
+[data-theme="light"] .pj-flag,
+[data-theme="light"] .story-tab-flag{color:var(--muted);border-color:var(--line-strong)}
+[data-theme="light"] .pj-flag.is-ok,
+[data-theme="light"] .story-tab-flag.is-ok{color:#047857;border-color:rgba(4,120,87,.55)}
+[data-theme="light"] .story-tab-flag.is-wait{color:#92400e;border-color:rgba(146,64,14,.5)}
+[data-theme="light"] .pj-flag.is-live,
+[data-theme="light"] .story-tab-flag.is-live{color:#4338ca;border-color:rgba(67,56,202,.55)}
+[data-theme="light"] .pj-flag.is-info{color:#0369a1;border-color:rgba(3,105,161,.5)}
+[data-theme="light"] .pj-tab.is-active .pj-flag,
+[data-theme="light"] .story-tab.is-active .story-tab-flag{color:#fff;border-color:rgba(255,255,255,.6)}
+[data-theme="light"] .demo-live{background:rgba(3,105,161,.06);border-color:var(--line-strong);color:var(--muted)}
+
+/* Halaman eksekusi */
+[data-theme="light"] .exec-hero{--rail:rgba(18,28,33,.2)}
+[data-theme="light"] .exec-step-dot{background:#fff;color:var(--muted)}
+[data-theme="light"] .exec-step.is-done .exec-step-dot{color:#fff}
+[data-theme="light"] .exec-step.is-active .exec-step-dot{color:#4338ca;border-color:#4f46e5}
+[data-theme="light"] .exec-step.is-error .exec-step-dot{color:#b91c1c;border-color:#dc2626;background:rgba(220,38,38,.08)}
+[data-theme="light"] .exec-task-desc,
+[data-theme="light"] .exec-timeline p,
+[data-theme="light"] .exec-chip{color:var(--muted)}
+[data-theme="light"] .exec-chip{border-color:var(--line-strong)}
+[data-theme="light"] .exec-chip--opencode{color:#7e22ce;border-color:rgba(126,34,206,.5)}
+[data-theme="light"] .exec-chip--hermes,
+[data-theme="light"] .exec-chip--info{color:#0369a1;border-color:rgba(3,105,161,.5)}
+[data-theme="light"] .exec-chip--ok{color:#047857;border-color:rgba(4,120,87,.5)}
+[data-theme="light"] .exec-chip--warn{color:#92400e;border-color:rgba(146,64,14,.5)}
+[data-theme="light"] .exec-chip--bad{color:#b91c1c;border-color:rgba(185,28,28,.5)}
+[data-theme="light"] .exec-chip--running{color:#4338ca;border-color:rgba(67,56,202,.55)}
+[data-theme="light"] .exec-finding{background:rgba(146,64,14,.07);border-left-color:#d97706}
+[data-theme="light"] .exec-finding code{color:#92400e}
+[data-theme="light"] .exec-permission{background:rgba(217,119,6,.06);border-color:rgba(146,64,14,.4)}
+[data-theme="light"] .exec-permission-list li{background:rgba(18,28,33,.05)}
+
+/* Dialog dan bayangan: lebih lembut di latar terang */
+[data-theme="light"] .dock-pill{box-shadow:0 8px 24px rgba(18,28,33,.16)}
+[data-theme="light"] .dock-panel{box-shadow:0 18px 50px rgba(18,28,33,.22)}
+[data-theme="light"] .confirm-card,
+[data-theme="light"] .sprint-modal-card,
+[data-theme="light"] .fibonacci-progress-card{box-shadow:0 24px 60px rgba(18,28,33,.28)}
+[data-theme="light"] .chat-mode-opt input:checked+span{box-shadow:0 1px 4px rgba(18,28,33,.18)}
+[data-theme="light"] .rl-conflicts,
+[data-theme="light"] .chat-flash.is-error{background:rgba(185,28,28,.07)}
