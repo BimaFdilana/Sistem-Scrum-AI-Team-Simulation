@@ -142,6 +142,6 @@ class ExecutionLifecycleScenarioTest extends TestCase
 
         $this->assertSame('GAGAL', $run->story->fresh()->acceptance_status);
         $this->actingAs($user)->post(route('stories.executions.resume', [$run->story, $run]))->assertRedirect();
-        $this->assertSame('NEEDS_PO', $run->fresh()->status, 'run yang sudah ditutup Gagal tidak boleh dilanjutkan lagi');
+        $this->assertSame('FAILED', $run->fresh()->status, 'run yang ditutup Gagal ikut berstatus gagal dan tidak bisa dilanjutkan lagi');
     }
 }

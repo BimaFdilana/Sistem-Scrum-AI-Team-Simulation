@@ -108,6 +108,15 @@ class ExecutionController extends Controller
             return back()->withErrors(['acceptance' => 'Status keputusan tidak valid.']);
         }
         if ($story->isAccepted()) {
+            // Run yang menunggu PO tetap "menggantung" bila story sudah ditandai Gagal lewat run lain
+            // atau klik sebelumnya. Tutup run itu sebagai gagal, jangan menolak dengan galat.
+            if ($status === 'GAGAL' && $run->isWaitingForPo() && $story->acceptance_status === 'GAGAL') {
+                $this->closeWaitingRunAsFailed($run);
+
+                return redirect()->route('stories.executions.show', [$story, $run])
+                    ->with('status', 'Eksekusi ditutup sebagai Gagal. Story bisa dieksekusi ulang dari halaman project.');
+            }
+
             return back()->withErrors(['acceptance' => 'Story sudah diterima sebelumnya.']);
         }
         // BERHASIL hanya untuk eksekusi yang benar-benar selesai dan lolos QA.
@@ -177,6 +186,12 @@ class ExecutionController extends Controller
             'accepted_at' => now(),
         ])->save();
 
+        // PO menandai Gagal pada run yang menunggu keputusan: run itu sendiri ikut ditutup,
+        // kalau tidak ia tetap berstatus "menunggu PO" dan tombolnya terus muncul.
+        if ($status === 'GAGAL' && $run->isWaitingForPo()) {
+            $this->closeWaitingRunAsFailed($run);
+        }
+
         if ($demoEvidence !== null) {
             // Simpan bukti verifikasi pada run supaya keputusan PO bisa
             // ditelusuri (URL, status HTTP, waktu pemeriksaan).
@@ -199,6 +214,15 @@ class ExecutionController extends Controller
         return redirect()->route('stories.executions.show', [$story, $run])
             ->with('status', 'Story diterima PO dengan status '.$label.'.'
                 .($status === 'BERHASIL' ? ' Eksekusi ulang dikunci.' : ' Hasilnya tidak digabung; story bisa dieksekusi ulang dari halaman project.'));
+    }
+
+    /** Run NEEDS_PO yang diputuskan Gagal oleh PO menjadi FAILED (kode galat asli dipertahankan). */
+    private function closeWaitingRunAsFailed(ExecutionRun $run): void
+    {
+        $run->transitionTo('FAILED', [ExecutionRun::NEEDS_PO], [
+            'completed_at' => now(),
+            'summary' => trim(((string) $run->summary)."\nDitandai Gagal oleh PO pada ".now()->format('d M Y H:i').'.'),
+        ]);
     }
 
     /**

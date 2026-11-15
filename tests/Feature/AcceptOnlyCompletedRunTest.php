@@ -67,4 +67,38 @@ class AcceptOnlyCompletedRunTest extends TestCase
             ->assertSee('eksekusi #'.$done->id)->assertSee('tidak ikut ke kode utama')
             ->assertDontSee('Keputusan final PO: Berhasil');
     }
+
+    public function test_marking_gagal_closes_a_run_that_waits_for_po(): void
+    {
+        $user = User::factory()->create();
+        $story = $this->story();
+        $run = $this->makeRun(ExecutionRun::NEEDS_PO, $story, $user);
+        $run->forceFill(['error_code' => 'QUOTA_EXHAUSTED', 'summary' => 'Kuota habis.'])->save();
+
+        $this->actingAs($user)->post(route('stories.executions.accept', [$story, $run]), ['status' => 'GAGAL'])->assertSessionHasNoErrors();
+
+        $this->assertSame('GAGAL', $story->fresh()->acceptance_status);
+        $run->refresh();
+        $this->assertSame('FAILED', $run->status);
+        $this->assertSame('QUOTA_EXHAUSTED', $run->error_code);
+        $this->assertNotNull($run->completed_at);
+        $this->actingAs($user)->get(route('stories.executions.show', [$story, $run]))->assertOk()->assertDontSee('Lanjutkan eksekusi');
+    }
+
+    public function test_run_left_waiting_after_story_was_already_gagal_can_still_be_closed(): void
+    {
+        // Kasus perintah 47/49: story sudah Gagal, tetapi run-nya masih NEEDS_PO dan tombol terus muncul.
+        $user = User::factory()->create();
+        $story = $this->story();
+        $run = $this->makeRun(ExecutionRun::NEEDS_PO, $story, $user);
+        $story->forceFill(['acceptance_status' => 'GAGAL', 'accepted_at' => now(), 'accepted_execution_run_id' => $run->id])->save();
+
+        $this->actingAs($user)->post(route('stories.executions.accept', [$story, $run]), ['status' => 'GAGAL'])
+            ->assertSessionHasNoErrors()->assertSessionHas('status');
+
+        $this->assertSame('FAILED', $run->fresh()->status);
+        // Run yang sudah selesai tidak bisa ditutup dua kali.
+        $this->actingAs($user)->post(route('stories.executions.accept', [$story, $run]), ['status' => 'GAGAL'])
+            ->assertSessionHasErrors('acceptance');
+    }
 }
