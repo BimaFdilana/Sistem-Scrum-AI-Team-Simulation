@@ -126,6 +126,23 @@ class AiModelPageTest extends TestCase
             ->assertJsonStructure(['disk' => ['total', 'used', 'free', 'percent'], 'memory', 'cpu' => ['cores', 'percent', 'load'], 'network', 'uptime', 'sampled_at']);
     }
 
+    public function test_polling_server_metrics_does_not_block_logout(): void
+    {
+        $login = Mockery::mock(AntigravityLogin::class);
+        $login->shouldReceive('startLogout')->once()->andReturn('0b8f6f7e-1111-4222-8333-444455556666');
+        $this->app->instance(AntigravityLogin::class, $login);
+        $user = User::factory()->create();
+
+        for ($i = 0; $i < 12; $i++) {
+            $this->actingAs($user)->getJson(route('ai-model.server'))->assertOk();
+        }
+
+        $this->actingAs($user)
+            ->postJson(route('ai-model.logout'))
+            ->assertOk()
+            ->assertJsonPath('session', '0b8f6f7e-1111-4222-8333-444455556666');
+    }
+
     public function test_page_has_quota_and_server_cards(): void
     {
         $this->account();

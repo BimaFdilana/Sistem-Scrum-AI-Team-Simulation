@@ -50,15 +50,15 @@ Route::middleware('auth')->group(function (): void {
     // dan per peran, uji koneksi. URL lama /ai-providers diarahkan ke sini.
     Route::redirect('/ai-providers', '/ai-model');
     Route::get('/ai-model', [AiModelController::class, 'index'])->name('ai-model.index');
-    Route::post('/ai-model/models', [AiModelController::class, 'updateModels'])->middleware('throttle:20,1')->name('ai-model.models.update');
-    Route::post('/ai-model/models/refresh', [AiModelController::class, 'refreshModels'])->middleware('throttle:6,1')->name('ai-model.models.refresh');
-    Route::get('/ai-model/quota', [AiModelController::class, 'quota'])->middleware('throttle:20,1')->name('ai-model.quota');
-    Route::get('/ai-model/server', [AiModelController::class, 'serverMetrics'])->middleware('throttle:60,1')->name('ai-model.server');
-    Route::post('/ai-model/test', [AiModelController::class, 'test'])->middleware('throttle:6,1')->name('ai-model.test');
-    Route::post('/ai-model/login', [AiModelController::class, 'startLogin'])->middleware('throttle:6,1')->name('ai-model.login');
-    Route::post('/ai-model/logout', [AiModelController::class, 'startLogout'])->middleware('throttle:6,1')->name('ai-model.logout');
-    Route::get('/ai-model/session/{session}', [AiModelController::class, 'sessionState'])->middleware('throttle:120,1')->name('ai-model.session');
-    Route::post('/ai-model/session/{session}/code', [AiModelController::class, 'submitCode'])->middleware('throttle:10,1')->name('ai-model.session.code');
+    Route::post('/ai-model/models', [AiModelController::class, 'updateModels'])->middleware('throttle:20,1,ai-model-models-update|')->name('ai-model.models.update');
+    Route::post('/ai-model/models/refresh', [AiModelController::class, 'refreshModels'])->middleware('throttle:6,1,ai-model-models-refresh|')->name('ai-model.models.refresh');
+    Route::get('/ai-model/quota', [AiModelController::class, 'quota'])->middleware('throttle:20,1,ai-model-quota|')->name('ai-model.quota');
+    Route::get('/ai-model/server', [AiModelController::class, 'serverMetrics'])->middleware('throttle:60,1,ai-model-server|')->name('ai-model.server');
+    Route::post('/ai-model/test', [AiModelController::class, 'test'])->middleware('throttle:6,1,ai-model-test|')->name('ai-model.test');
+    Route::post('/ai-model/login', [AiModelController::class, 'startLogin'])->middleware('throttle:6,1,ai-model-login|')->name('ai-model.login');
+    Route::post('/ai-model/logout', [AiModelController::class, 'startLogout'])->middleware('throttle:6,1,ai-model-logout|')->name('ai-model.logout');
+    Route::get('/ai-model/session/{session}', [AiModelController::class, 'sessionState'])->middleware('throttle:120,1,ai-model-session|')->name('ai-model.session');
+    Route::post('/ai-model/session/{session}/code', [AiModelController::class, 'submitCode'])->middleware('throttle:10,1,ai-model-session-code|')->name('ai-model.session.code');
     Route::get('/settings/github', [GithubSettingsController::class, 'edit'])->name('settings.github.edit');
     Route::post('/settings/github', [GithubSettingsController::class, 'update'])->middleware('throttle:10,1')->name('settings.github.update');
     Route::post('/settings/github/test', [GithubSettingsController::class, 'test'])->middleware('throttle:10,1')->name('settings.github.test');

@@ -273,7 +273,7 @@
                 showError('');
                 say('Menyiapkan login Google…');
                 const response = await post(@json(route('ai-model.login')));
-                if (!response.ok) { say('Login tidak bisa dimulai. Coba lagi sebentar.'); return; }
+                if (!response.ok) { say(response.status === 429 ? 'Terlalu sering dicoba. Tunggu satu menit lalu coba lagi.' : 'Login tidak bisa dimulai. Coba lagi sebentar.'); return; }
                 session = (await response.json()).session;
                 poll('login');
             });
@@ -286,7 +286,7 @@
                     steps.hidden = true;
                     say('Mengeluarkan akun…');
                     const response = await post(@json(route('ai-model.logout')));
-                    if (!response.ok) { say('Keluar tidak bisa dimulai. Coba lagi sebentar.'); return; }
+                    if (!response.ok) { say(response.status === 429 ? 'Terlalu sering dicoba. Tunggu satu menit lalu klik Keluar lagi.' : 'Keluar tidak bisa dimulai. Coba lagi sebentar.'); return; }
                     session = (await response.json()).session;
                     poll('logout');
                 });
