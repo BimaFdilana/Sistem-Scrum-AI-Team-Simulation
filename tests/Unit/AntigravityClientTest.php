@@ -81,6 +81,28 @@ class AntigravityClientTest extends TestCase
         $this->assertSame([], (new AntigravityClient)->normalizeUsage([]));
     }
 
+    public function test_quota_groups_are_read_from_the_slash_command_result(): void
+    {
+        $outcome = (new AntigravityClient)->interpret(0, json_encode([
+            'conversation_id' => '', 'status' => 'SUCCESS', 'response' => "Gemini Models\tWeekly Limit Remaining\t100%\n",
+            'command' => ['name' => 'usage', 'data' => ['groups' => [
+                ['name' => 'Gemini Models', 'description' => 'Models within this group: Gemini 3.8 Flash', 'buckets' => [
+                    ['id' => 'gemini-weekly', 'window' => 'weekly', 'remaining_fraction' => 0.9981, 'reset_time' => '2026-11-26T11:54:26Z'],
+                    ['id' => 'gemini-5h', 'window' => '5h', 'remaining_fraction' => 0.42, 'reset_time' => '2026-11-20T00:45:43Z'],
+                ]],
+                ['name' => 'Kosong', 'buckets' => [['window' => 'monthly', 'remaining_fraction' => 1]]],
+            ]]],
+        ]), '');
+
+        $groups = (new AntigravityClient)->parseQuota($outcome['result']);
+
+        $this->assertCount(1, $groups);
+        $this->assertSame('Gemini 3.8 Flash', $groups[0]['models']);
+        $this->assertSame(['5h', 'weekly'], array_column($groups[0]['buckets'], 'window'));
+        $this->assertSame(0.42, $groups[0]['buckets'][0]['remaining']);
+        $this->assertSame([], (new AntigravityClient)->parseQuota(['response' => 'tanpa data']));
+    }
+
     public function test_developer_permissions_stay_inside_the_worktree_and_block_git(): void
     {
         $settings = (new AntigravityClient)->taskSettings('/srv/wt/task-1');

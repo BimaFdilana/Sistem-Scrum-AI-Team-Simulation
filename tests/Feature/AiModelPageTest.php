@@ -99,5 +99,40 @@ class AiModelPageTest extends TestCase
     public function test_guest_cannot_open_the_page(): void
     {
         $this->get(route('ai-model.index'))->assertRedirect();
+        $this->getJson(route('ai-model.quota'))->assertUnauthorized();
+        $this->getJson(route('ai-model.server'))->assertUnauthorized();
+    }
+
+    public function test_quota_endpoint_returns_the_account_quota(): void
+    {
+        $quota = ['groups' => [['name' => 'Gemini Models', 'models' => 'Gemini 3.8 Flash', 'buckets' => [
+            ['window' => '5h', 'remaining' => 0.42, 'reset_at' => '2026-11-20T00:45:43Z'],
+        ]]], 'error' => null, 'fetched_at' => '2026-11-19T20:00:00+00:00'];
+        $client = Mockery::mock(AntigravityClient::class);
+        $client->shouldReceive('accountQuota')->with(true)->once()->andReturn($quota);
+        $this->app->instance(AntigravityClient::class, $client);
+
+        $this->actingAs(User::factory()->create())
+            ->getJson(route('ai-model.quota', ['fresh' => 1]))
+            ->assertOk()
+            ->assertJsonPath('groups.0.buckets.0.remaining', 0.42);
+    }
+
+    public function test_server_endpoint_reports_disk_memory_cpu_and_network(): void
+    {
+        $this->actingAs(User::factory()->create())
+            ->getJson(route('ai-model.server'))
+            ->assertOk()
+            ->assertJsonStructure(['disk' => ['total', 'used', 'free', 'percent'], 'memory', 'cpu' => ['cores', 'percent', 'load'], 'network', 'uptime', 'sampled_at']);
+    }
+
+    public function test_page_has_quota_and_server_cards(): void
+    {
+        $this->account();
+
+        $this->actingAs(User::factory()->create())
+            ->get(route('ai-model.index'))
+            ->assertSee('Sisa kuota')
+            ->assertSee('Sumber daya VPS');
     }
 }

@@ -220,3 +220,10 @@
 .ap-account-list { display: flex; flex-direction: column; gap: 8px; }
 .ap-account-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .ap-account-email { font-size: .85rem; color: var(--muted, #6b7280); overflow-wrap: anywhere; }
+
+/* Kuota akun + sumber daya server (halaman Model AI) */
+.ap-duo{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:18px}
+.ap-duo .ap-card-head .ap-small-button{min-height:30px;padding:0 10px;font-size:10px}
+.ap-quota-head small{font-size:10px;text-transform:none;letter-spacing:0}
+.ap-quota-line strong{font-variant-numeric:tabular-nums}
+@media(max-width:900px){.ap-duo{grid-template-columns:1fr}}

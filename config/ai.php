@@ -31,6 +31,8 @@ return [
         'chat_attempts' => (int) env('ANTIGRAVITY_CHAT_ATTEMPTS', 2),
         // Cache daftar model dan status login (detik).
         'models_cache' => (int) env('ANTIGRAVITY_MODELS_CACHE', 600),
+        // Detik cache sisa kuota akun (/quota). Halaman AI Model memintanya tiap menit.
+        'quota_cache' => (int) env('ANTIGRAVITY_QUOTA_CACHE', 60),
         // Profil agy untuk peran developer yang mengedit worktree. Sumber
         // profil ada di resources/antigravity/agents (php artisan
         // antigravity:sync-agents menyalinnya ke agents_dir).

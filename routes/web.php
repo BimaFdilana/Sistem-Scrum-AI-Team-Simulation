@@ -52,6 +52,8 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/ai-model', [AiModelController::class, 'index'])->name('ai-model.index');
     Route::post('/ai-model/models', [AiModelController::class, 'updateModels'])->middleware('throttle:20,1')->name('ai-model.models.update');
     Route::post('/ai-model/models/refresh', [AiModelController::class, 'refreshModels'])->middleware('throttle:6,1')->name('ai-model.models.refresh');
+    Route::get('/ai-model/quota', [AiModelController::class, 'quota'])->middleware('throttle:20,1')->name('ai-model.quota');
+    Route::get('/ai-model/server', [AiModelController::class, 'serverMetrics'])->middleware('throttle:60,1')->name('ai-model.server');
     Route::post('/ai-model/test', [AiModelController::class, 'test'])->middleware('throttle:6,1')->name('ai-model.test');
     Route::post('/ai-model/login', [AiModelController::class, 'startLogin'])->middleware('throttle:6,1')->name('ai-model.login');
     Route::post('/ai-model/logout', [AiModelController::class, 'startLogout'])->middleware('throttle:6,1')->name('ai-model.logout');

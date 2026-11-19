@@ -34,6 +34,8 @@ class AntigravityClient
 
     private const MODELS_CACHE_KEY = 'antigravity:models';
 
+    private const QUOTA_CACHE_KEY = 'antigravity:quota';
+
     public function isEnabled(): bool
     {
         return (bool) config('ai.antigravity.enabled', true);
@@ -124,6 +126,90 @@ class AntigravityClient
     public function forgetModelsCache(): void
     {
         Cache::forget(self::MODELS_CACHE_KEY);
+    }
+
+    /**
+     * Sisa kuota akun Google (batas 5 jam dan mingguan per kelompok model),
+     * dibaca dari slash command `/quota`. Tidak memakai token model.
+     *
+     * @return array{groups: array<int, array{name: string, models: string, buckets: array<int, array{window: string, remaining: float, reset_at: ?string}>}>, error: ?string, fetched_at: string}
+     */
+    public function accountQuota(bool $fresh = false): array
+    {
+        if ($fresh) {
+            Cache::forget(self::QUOTA_CACHE_KEY);
+        }
+
+        return Cache::remember(self::QUOTA_CACHE_KEY, (int) config('ai.antigravity.quota_cache', 60), function (): array {
+            $empty = fn (string $error): array => ['groups' => [], 'error' => $error, 'fetched_at' => now()->toIso8601String()];
+            if (! $this->isEnabled()) {
+                return $empty('DISABLED');
+            }
+            if (! $this->isInstalled()) {
+                return $empty('AGY_NOT_INSTALLED');
+            }
+
+            $process = new Process([$this->binary(), '-p=/quota', '--output-format', 'json', '--print-timeout', '40s'], $this->sandboxDir(), $this->processEnv(), null, 60);
+            try {
+                $process->run();
+            } catch (Throwable $exception) {
+                Log::warning('agy /quota gagal', ['error' => $exception->getMessage()]);
+
+                return $empty('TIMEOUT');
+            }
+
+            $outcome = $this->interpret($process->getExitCode(), $process->getOutput(), $process->getErrorOutput());
+            if ($outcome['status'] !== 'ok') {
+                return $empty((string) $outcome['error']);
+            }
+            $groups = $this->parseQuota($outcome['result']);
+
+            return $groups === [] ? $empty('QUOTA_UNREADABLE') : ['groups' => $groups, 'error' => null, 'fetched_at' => now()->toIso8601String()];
+        });
+    }
+
+    /**
+     * Ambil kelompok kuota dari hasil `/quota --output-format json`
+     * (`command.data.groups[].buckets[]`).
+     *
+     * @param  array<string, mixed>  $result
+     * @return array<int, array{name: string, models: string, buckets: array<int, array{window: string, remaining: float, reset_at: ?string}>}>
+     */
+    public function parseQuota(array $result): array
+    {
+        $groups = data_get($result, 'command.data.groups');
+        if (! is_array($groups)) {
+            return [];
+        }
+
+        $parsed = [];
+        foreach ($groups as $group) {
+            if (! is_array($group) || ! is_array($group['buckets'] ?? null)) {
+                continue;
+            }
+            $buckets = [];
+            foreach ($group['buckets'] as $bucket) {
+                if (! is_array($bucket) || ! is_numeric($bucket['remaining_fraction'] ?? null) || ! in_array($bucket['window'] ?? null, ['5h', 'weekly'], true)) {
+                    continue;
+                }
+                $buckets[] = [
+                    'window' => (string) $bucket['window'],
+                    'remaining' => max(0.0, min(1.0, (float) $bucket['remaining_fraction'])),
+                    'reset_at' => is_string($bucket['reset_time'] ?? null) ? $bucket['reset_time'] : null,
+                ];
+            }
+            if ($buckets === []) {
+                continue;
+            }
+            usort($buckets, fn (array $a, array $b): int => $a['window'] === '5h' ? -1 : ($b['window'] === '5h' ? 1 : 0));
+            $parsed[] = [
+                'name' => (string) ($group['name'] ?? 'Model'),
+                'models' => trim((string) preg_replace('/^Models within this group:\s*/i', '', (string) ($group['description'] ?? ''))),
+                'buckets' => $buckets,
+            ];
+        }
+
+        return $parsed;
     }
 
     /**

@@ -46,6 +46,11 @@ class FakeAntigravityClient extends AntigravityClient
 
     public function forgetModelsCache(): void {}
 
+    public function accountQuota(bool $fresh = false): array
+    {
+        return ['groups' => [], 'error' => 'DISABLED', 'fetched_at' => now()->toIso8601String()];
+    }
+
     public function chatResilient(string $model, string $systemPrompt, string $userMessage, int $timeout = 0, ?array $image = null, array $usageContext = []): array
     {
         if (! $this->isEnabled()) {

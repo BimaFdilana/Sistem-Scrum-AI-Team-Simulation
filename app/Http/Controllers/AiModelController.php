@@ -7,6 +7,7 @@ use App\Services\AiUsageRecorder;
 use App\Services\AntigravityClient;
 use App\Services\AntigravityLogin;
 use App\Support\Ai\AiQuota;
+use App\Support\System\ServerMetrics;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -79,6 +80,18 @@ class AiModelController extends Controller
         }
 
         return back()->with('status', 'Koneksi '.$model.' berhasil dalam '.$seconds.' detik. Jawaban: '.mb_substr($result['text'], 0, 80));
+    }
+
+    /** Sisa kuota akun Google per kelompok model (5 jam dan mingguan). */
+    public function quota(Request $request, AntigravityClient $client): JsonResponse
+    {
+        return response()->json($client->accountQuota($request->boolean('fresh')));
+    }
+
+    /** Pemakaian disk, RAM, CPU, dan jaringan VPS. */
+    public function serverMetrics(ServerMetrics $metrics): JsonResponse
+    {
+        return response()->json($metrics->snapshot());
     }
 
     public function startLogin(AntigravityLogin $login): JsonResponse

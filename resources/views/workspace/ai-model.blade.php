@@ -127,6 +127,35 @@
         </article>
     </div>
 
+    <div class="ap-duo">
+        <article class="ap-card" data-quota-card>
+            <div class="ap-card-head">
+                <div>
+                    <p class="section-kicker">KUOTA AKUN GOOGLE</p>
+                    <h2>Sisa kuota</h2>
+                </div>
+                <button type="button" class="button button-secondary ap-small-button" data-quota-refresh>Perbarui</button>
+            </div>
+            <div data-quota-body>
+                <p class="ap-note">{{ $loggedIn ? 'Membaca kuota…' : 'Hubungkan akun Google dulu untuk melihat kuota.' }}</p>
+            </div>
+            <p class="form-hint" style="margin-top:10px;">Model dalam satu kelompok berbagi batas 5 jam dan batas mingguan. Kuota terpakai sebanding dengan biaya token, jadi tugas pendek dan model yang lebih hemat membuat kuota bertahan lebih lama.</p>
+        </article>
+
+        <article class="ap-card" data-server-card>
+            <div class="ap-card-head">
+                <div>
+                    <p class="section-kicker">SERVER</p>
+                    <h2>Sumber daya VPS</h2>
+                </div>
+                <span class="ap-model-pill" data-server-uptime>…</span>
+            </div>
+            <div data-server-body>
+                <p class="ap-note">Membaca pemakaian server…</p>
+            </div>
+        </article>
+    </div>
+
     <article class="ap-card" style="margin-top:18px;">
         <div class="ap-card-head">
             <div>
@@ -224,6 +253,115 @@
                     poll('logout');
                 });
             }
+
+            // Kuota akun dan pemakaian server ---------------------------------
+            const loggedIn = @json($loggedIn);
+            const quotaUrl = @json(route('ai-model.quota'));
+            const serverUrl = @json(route('ai-model.server'));
+            const quotaBody = document.querySelector('[data-quota-body]');
+            const serverBody = document.querySelector('[data-server-body]');
+            const uptimePill = document.querySelector('[data-server-uptime]');
+            const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+            const bytes = (value) => {
+                const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+                let i = 0;
+                while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+                return (value >= 100 || i === 0 ? Math.round(value) : value.toFixed(1)) + ' ' + units[i];
+            };
+            const rate = (value) => {
+                const bits = value * 8;
+                if (bits >= 1e6) { return (bits / 1e6).toFixed(1) + ' Mbit/s'; }
+                if (bits >= 1e3) { return (bits / 1e3).toFixed(1) + ' kbit/s'; }
+                return Math.round(bits) + ' bit/s';
+            };
+            const duration = (seconds) => {
+                const days = Math.floor(seconds / 86400);
+                const hours = Math.floor((seconds % 86400) / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                if (days > 0) { return days + ' hari ' + hours + ' jam'; }
+                if (hours > 0) { return hours + ' jam ' + minutes + ' mnt'; }
+                return Math.max(minutes, 1) + ' mnt';
+            };
+            const row = (label, value, percent, level, note) => `
+                <div class="ap-quota-row ${level}">
+                    <div class="ap-quota-line"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>
+                    <div class="ap-quota-bar" role="progressbar" aria-label="${escapeHtml(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(percent)}"><span style="width:${Math.max(0, Math.min(100, percent))}%"></span></div>
+                    ${note ? `<p class="ap-quota-reset">${escapeHtml(note)}</p>` : ''}
+                </div>`;
+            const usageLevel = (percent) => percent >= 92 ? 'is-empty' : (percent >= 80 ? 'is-low' : '');
+            const quotaErrors = {
+                NOT_LOGGED_IN: 'Akun Google belum terhubung.',
+                AGY_NOT_INSTALLED: 'Antigravity CLI belum terpasang.',
+                DISABLED: 'Antigravity dimatikan di konfigurasi.',
+                TIMEOUT: 'Antigravity tidak menjawab. Coba Perbarui sebentar lagi.',
+                QUOTA_UNREADABLE: 'Format kuota dari Antigravity tidak dikenali.',
+            };
+
+            const loadQuota = async (fresh) => {
+                if (!loggedIn) { return; }
+                if (fresh) { quotaBody.innerHTML = '<p class="ap-note">Membaca kuota…</p>'; }
+                try {
+                    const response = await fetch(quotaUrl + (fresh ? '?fresh=1' : ''), {headers: {'Accept': 'application/json'}});
+                    if (!response.ok) { throw new Error(String(response.status)); }
+                    const data = await response.json();
+                    if (data.error || !data.groups.length) {
+                        quotaBody.innerHTML = `<p class="form-alert">${escapeHtml(quotaErrors[data.error] || ('Kuota tidak terbaca (' + (data.error || 'kosong') + ').'))}</p>`;
+                        return;
+                    }
+                    const windows = {'5h': 'Batas 5 jam', weekly: 'Batas mingguan'};
+                    quotaBody.innerHTML = data.groups.map((group) => `
+                        <div class="ap-quota-account">
+                            <div class="ap-quota-head"><strong>${escapeHtml(group.name)}</strong>${group.models ? `<small class="form-hint">${escapeHtml(group.models)}</small>` : ''}</div>
+                            ${group.buckets.map((bucket) => {
+                                const percent = bucket.remaining * 100;
+                                const reset = bucket.reset_at ? new Date(bucket.reset_at) : null;
+                                const left = reset ? (reset.getTime() - Date.now()) / 1000 : null;
+                                const note = reset ? 'Penuh lagi ' + (left > 60 ? 'dalam ' + duration(left) + ' · ' : '') + reset.toLocaleString('id-ID', {weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'}) : '';
+                                const level = percent <= 5 ? 'is-empty' : (percent <= 25 ? 'is-low' : '');
+                                return row(windows[bucket.window] || bucket.window, 'sisa ' + (percent >= 99.5 || percent < 1 ? Math.round(percent) : percent.toFixed(1)) + '%', percent, level, note);
+                            }).join('')}
+                        </div>`).join('') + `<p class="ap-quota-reset" style="margin-top:6px;">Dibaca ${new Date(data.fetched_at).toLocaleTimeString('id-ID', {hour: '2-digit', minute: '2-digit'})}</p>`;
+                } catch (error) {
+                    quotaBody.innerHTML = '<p class="form-alert">Kuota tidak bisa dibaca sekarang.</p>';
+                }
+            };
+
+            let netPeak = 1;
+            const loadServer = async () => {
+                try {
+                    const response = await fetch(serverUrl, {headers: {'Accept': 'application/json'}});
+                    if (!response.ok) { throw new Error(String(response.status)); }
+                    const data = await response.json();
+                    const rows = [];
+                    if (data.disk) {
+                        rows.push(row('Storage', bytes(data.disk.used) + ' / ' + bytes(data.disk.total), data.disk.percent, usageLevel(data.disk.percent), bytes(data.disk.free) + ' kosong · ' + data.disk.percent + '% terpakai'));
+                    }
+                    if (data.memory) {
+                        const swap = data.memory.swap_total > 0 ? ' · swap ' + bytes(data.memory.swap_used) + ' / ' + bytes(data.memory.swap_total) : '';
+                        rows.push(row('RAM', bytes(data.memory.used) + ' / ' + bytes(data.memory.total), data.memory.percent, usageLevel(data.memory.percent), bytes(data.memory.available) + ' tersedia' + swap));
+                    }
+                    const cpu = data.cpu;
+                    const load = cpu.load ? cpu.load.map((v) => v.toFixed(2)).join(' · ') : '-';
+                    const cpuPercent = cpu.percent ?? (cpu.load ? Math.min(100, cpu.load[0] / cpu.cores * 100) : 0);
+                    rows.push(row('CPU', cpu.percent !== null ? cpu.percent.toFixed(1) + '%' : '-', cpuPercent, usageLevel(cpuPercent), 'Load 1/5/15 menit: ' + load + ' · ' + cpu.cores + ' core'));
+                    if (data.network) {
+                        const net = data.network;
+                        netPeak = Math.max(netPeak, net.rx_rate, net.tx_rate);
+                        rows.push(row('Network masuk (' + net.interface + ')', rate(net.rx_rate), net.rx_rate / netPeak * 100, '', 'Total sejak boot: ' + bytes(net.rx_total)));
+                        rows.push(row('Network keluar (' + net.interface + ')', rate(net.tx_rate), net.tx_rate / netPeak * 100, '', 'Total sejak boot: ' + bytes(net.tx_total) + ' · bar relatif terhadap puncak sejak halaman dibuka'));
+                    }
+                    serverBody.innerHTML = rows.join('');
+                    uptimePill.textContent = data.uptime ? 'Nyala ' + duration(data.uptime) : 'Server';
+                } catch (error) {
+                    serverBody.innerHTML = '<p class="form-alert">Pemakaian server tidak bisa dibaca sekarang.</p>';
+                }
+            };
+
+            document.querySelector('[data-quota-refresh]').addEventListener('click', () => loadQuota(true));
+            loadQuota(false);
+            loadServer();
+            setInterval(() => { if (!document.hidden) { loadServer(); } }, 5000);
+            setInterval(() => { if (!document.hidden) { loadQuota(false); } }, 60000);
 
             codeForm.addEventListener('submit', async (event) => {
                 event.preventDefault();
