@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Exceptions\AiUnavailableException;
 use App\Jobs\ExecuteExecutionTaskJob;
 use App\Models\ExecutionRun;
 use App\Models\Notification;
@@ -11,8 +10,7 @@ use App\Models\Setting;
 use App\Models\Story;
 use App\Models\User;
 use App\Services\ActiveModelService;
-use App\Services\AgentToolRunner;
-use App\Services\CliProxyApiClient;
+use App\Services\AntigravityClient;
 use App\Support\Ai\AiQuota;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -35,13 +33,13 @@ class AiQuotaWarningTest extends TestCase
     public function test_gateway_quota_429_is_not_retried_and_warns_everywhere_until_model_works_again(): void
     {
         $user = User::factory()->create();
-        config(['ai.cliproxy.agents_enabled' => true, 'ai.cliproxy.base_url' => 'http://127.0.0.1:8317', 'ai.cliproxy.api_key' => 'k']);
+        config(['ai.antigravity.enabled' => true, 'ai.cliproxy.base_url' => 'http://127.0.0.1:8317', 'ai.cliproxy.api_key' => 'k']);
         Http::fake([
             'http://127.0.0.1:8317/v1/chat/completions' => Http::sequence()
                 ->push(['error' => ['message' => 'Resource has been exhausted (e.g. check quota).']], 429)
                 ->push(['choices' => [['message' => ['role' => 'assistant', 'content' => 'ok']]]], 200),
         ]);
-        $client = app(CliProxyApiClient::class);
+        $client = app(AntigravityClient::class);
 
         $first = $client->chatResilient('gemini-3.5-flash-lite', 'sys', 'halo');
         $this->assertNull($first['text']);
@@ -73,10 +71,8 @@ class AiQuotaWarningTest extends TestCase
         $run = ExecutionRun::query()->create(['story_id' => $story->id, 'requested_by' => $owner->id, 'status' => 'EXECUTING']);
         $task = $run->tasks()->create(['title' => 'T', 'description' => 'D', 'assignee' => 'backend-developer', 'status' => 'PENDING']);
 
-        $runner = $this->mock(AgentToolRunner::class, function ($mock): void {
-            $mock->shouldReceive('run')->andThrow(new AiUnavailableException('QUOTA_EXHAUSTED', 'Kuota habis'));
-        });
-        (new ExecuteExecutionTaskJob($run->id, $task->id))->handle(new WorktreeManager, $runner);
+        $this->fakeDeveloper(fn () => ['ok' => false, 'exit' => 1, 'output' => 'QUOTA_EXHAUSTED: Kuota habis', 'error' => 'QUOTA_EXHAUSTED', 'usage' => []]);
+        (new ExecuteExecutionTaskJob($run->id, $task->id))->handle(new WorktreeManager);
 
         $run->refresh();
         $this->assertSame(ExecutionRun::NEEDS_PO, $run->status);
@@ -101,7 +97,7 @@ class AiQuotaWarningTest extends TestCase
         $this->actingAs($user)->get('/projects')->assertOk()->assertSee('Kuota AI habis')->assertSee('gemini-3.1-flash-lite');
 
         // PO mengganti model aktif lewat AI Providers: peringatan hilang seketika.
-        $this->actingAs($user)->post(route('ai-providers.active-model.update'), ['active_model' => 'deepseek-v4.1-flash']);
+        $this->actingAs($user)->post(route('ai-model.models.update'), ['active_model' => 'deepseek-v4.1-flash']);
         $this->assertNull(AiQuota::current());
         $this->actingAs($user)->get('/projects')->assertOk()->assertDontSee('Kuota AI habis');
         $this->actingAs($user)->getJson(route('activity.active'))->assertJsonPath('alert', null);

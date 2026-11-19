@@ -9,7 +9,7 @@ use App\Models\ExecutionRun;
 use App\Models\Project;
 use App\Models\Sprint;
 use App\Services\ChatDisclosurePolicy;
-use App\Services\HermesClient;
+use App\Services\ScrumMasterClient;
 use App\Support\Chat\CodeContext;
 use App\Support\Chat\SprintChat;
 use Illuminate\Http\JsonResponse;
@@ -21,7 +21,7 @@ use RuntimeException;
 
 class ChatController extends Controller
 {
-    public function index(Request $request, HermesClient $hermes, ChatDisclosurePolicy $disclosurePolicy): View
+    public function index(Request $request, ScrumMasterClient $hermes, ChatDisclosurePolicy $disclosurePolicy): View
     {
         $agent = collect(config('agents.profiles'))->firstWhere('slug', 'scrum-master');
         $user = $request->user();
@@ -110,7 +110,7 @@ class ChatController extends Controller
         return redirect()->route('chat.index');
     }
 
-    public function store(Request $request, HermesClient $hermes, ChatDisclosurePolicy $disclosurePolicy): JsonResponse
+    public function store(Request $request, ScrumMasterClient $hermes, ChatDisclosurePolicy $disclosurePolicy): JsonResponse
     {
         // Chat menunggu AI (termasuk retry pada model yang sama bila
         // upstream gangguan; tidak ada fallback ke model lain).
@@ -278,11 +278,11 @@ class ChatController extends Controller
     {
         return match ($errorCode) {
             'UPSTREAM_OVERLOADED', 'RATE_LIMITED' => 'Server AI sedang penuh. Tunggu 1–2 menit lalu coba lagi.',
-            'QUOTA_EXHAUSTED' => 'Kuota model AI habis. Ganti model aktif di menu AI Providers, atau tunggu kuota pulih (biasanya beberapa jam).',
+            'QUOTA_EXHAUSTED' => 'Kuota model AI habis. Ganti model aktif di halaman AI Model, atau tunggu kuota pulih (biasanya beberapa jam).',
             'TIMEOUT' => 'AI terlalu lama merespons. Coba lagi sebentar.',
-            'AUTH_FAILED' => 'Kunci akses AI bermasalah. Periksa kembali koneksi provider di menu AI Providers.',
-            'PROVIDER_AUTH_INCOMPLETE' => 'Koneksi akun AI di server belum lengkap (akun Google/Antigravity kehilangan project_id). Putuskan lalu hubungkan ulang provider Google di menu AI Providers, kemudian coba chat lagi.',
-            'GATEWAY_UNREACHABLE' => 'Gateway AI tidak dapat dihubungi. Pastikan layanan gateway AI di server berjalan.',
+            'NOT_LOGGED_IN' => 'Akun Google untuk AI belum terhubung atau sesinya habis. Hubungkan ulang di halaman AI Model.',
+            'AGY_NOT_INSTALLED' => 'Antigravity CLI belum terpasang di server. Hubungi admin.',
+            'AGY_FAILED' => 'AI Agent gagal memproses pesan. Coba lagi sebentar.',
             'MODEL_NOT_FOUND' => 'Model AI tidak tersedia. Pilih model lain di konfigurasi agen.',
             'DISABLED' => 'Jalur AI sedang dimatikan oleh admin. Hubungi admin untuk mengaktifkannya.',
             'BAD_REQUEST' => 'Permintaan ke AI tidak valid. Coba ulangi dengan pesan yang berbeda.',

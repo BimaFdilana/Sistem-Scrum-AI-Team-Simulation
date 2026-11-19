@@ -3,12 +3,14 @@
 namespace Tests\Feature;
 
 use App\Jobs\ExecuteExecutionTaskJob;
+use App\Jobs\ReviewExecutionTaskJob;
 use App\Models\ExecutionRun;
 use App\Models\PermissionRequest;
 use App\Models\Project;
 use App\Models\Story;
 use App\Models\User;
 use App\Support\Workspace\PatchApplier;
+use App\Support\Workspace\WorktreeManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -93,7 +95,7 @@ class ExecutionPipelineTest extends TestCase
 
     public function test_qa_revision_limit_is_two(): void
     {
-        $this->assertSame(2, \App\Jobs\ReviewExecutionTaskJob::MAX_REVISIONS);
+        $this->assertSame(2, ReviewExecutionTaskJob::MAX_REVISIONS);
     }
 
     public function test_failed_execution_task_cleans_up_orphan_worktree_and_branch(): void
@@ -101,7 +103,7 @@ class ExecutionPipelineTest extends TestCase
         $baseline = storage_path('framework/testing/worktree-cleanup-'.uniqid());
         mkdir($baseline, 0700, true);
         file_put_contents($baseline.'/README.md', 'baseline');
-        $worktrees = new \App\Support\Workspace\WorktreeManager;
+        $worktrees = new WorktreeManager;
         $worktrees->ensureRepo($baseline);
 
         $owner = User::factory()->create();
@@ -120,18 +122,13 @@ class ExecutionPipelineTest extends TestCase
         ]);
 
         // AI gagal setelah worktree dibuat.
-        $runner = $this->mock(\App\Services\AgentToolRunner::class, function ($mock): void {
-            $mock->shouldReceive('run')->andThrow(new \RuntimeException('AI down'));
-        });
+        $this->fakeDeveloper(fn () => throw new \RuntimeException('AI down'));
 
         $branch = 'wt-'.$run->id.'-'.$task->id.'-1';
         $worktreePath = dirname($baseline).'/worktrees/'.$branch;
 
         try {
-            (new ExecuteExecutionTaskJob($run->id, $task->id))->handle(
-                $worktrees,
-                $runner,
-            );
+            (new ExecuteExecutionTaskJob($run->id, $task->id))->handle($worktrees);
             $this->fail('Job seharusnya melempar ulang exception.');
         } catch (\RuntimeException $e) {
             $this->assertSame('AI down', $e->getMessage());

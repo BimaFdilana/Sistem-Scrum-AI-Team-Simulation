@@ -2,13 +2,16 @@
 
 namespace App\Console\Commands;
 
+use App\Models\DemoServer;
+use App\Models\ExecutionTask;
 use App\Models\Project;
 use App\Services\ActiveModelService;
+use App\Services\AntigravityClient;
+use App\Services\StrictModelResolver;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Http;
 use Symfony\Component\Process\Process;
 
 /**
@@ -20,18 +23,18 @@ use Symfony\Component\Process\Process;
  */
 class DoctorCommand extends Command
 {
-    protected $signature = 'scrumspace:doctor {--skip-opencode : Lewati uji tulis OpenCode} {--quick : Lewati uji yang memanggil model}';
+    protected $signature = 'scrumspace:doctor {--skip-agent : Lewati uji tulis agen developer} {--quick : Lewati uji yang memanggil model}';
 
-    protected $description = 'Periksa kesiapan sistem: gateway, model, OpenCode, baseline, queue, disk, demo';
+    protected $description = 'Periksa kesiapan sistem: Antigravity, model, agen developer, baseline, queue, disk, demo';
 
     private array $rows = [];
 
     public function handle(): int
     {
         $this->checkDatabase();
-        $this->checkGateway();
+        $this->checkAntigravity();
         $this->checkModel();
-        $this->checkOpenCode();
+        $this->checkDeveloperAgent();
         $this->checkQueue();
         $this->checkBaselines();
         $this->checkResources();
@@ -75,28 +78,23 @@ class DoctorCommand extends Command
         }
     }
 
-    private function checkGateway(): void
+    private function checkAntigravity(): void
     {
-        $base = rtrim((string) config('ai.cliproxy.base_url', 'http://127.0.0.1:8317'), '/');
-        try {
-            $response = Http::timeout(8)->withHeaders(['Authorization' => 'Bearer '.config('ai.cliproxy.api_key')])
-                ->get($base.'/v1/models');
-            if ($response->successful()) {
-                $count = count((array) ($response->json('data') ?? []));
-                $this->record('Gateway model', 'OK', $count.' model tersedia');
-            } else {
-                $this->record('Gateway model', 'GAGAL', 'HTTP '.$response->status());
-            }
-        } catch (\Throwable $e) {
-            $this->record('Gateway model', 'GAGAL', $e->getMessage());
+        $status = app(AntigravityClient::class)->status(true);
+        if (! $status['installed']) {
+            $this->record('Antigravity CLI', 'GAGAL', 'tidak ada di '.app(AntigravityClient::class)->binary());
+
+            return;
         }
+        $this->record('Antigravity CLI', 'OK', 'versi '.($status['version'] ?? '?'));
+        $this->record('Login akun Google', $status['logged_in'] ? 'OK' : 'GAGAL', $status['logged_in'] ? $status['model_count'].' model tersedia' : 'belum login — hubungkan di halaman AI Model');
     }
 
     private function checkModel(): void
     {
         $model = app(ActiveModelService::class)->current();
         if (! $model) {
-            $this->record('Model aktif', 'GAGAL', 'Belum dipilih di menu AI Providers');
+            $this->record('Model aktif', 'GAGAL', 'Belum dipilih di halaman AI Model');
 
             return;
         }
@@ -108,7 +106,7 @@ class DoctorCommand extends Command
 
         try {
             $started = microtime(true);
-            $reply = app(\App\Services\CliProxyApiClient::class)->chat((string) $model, 'Jawab satu kata.', 'ping', 30);
+            $reply = app(AntigravityClient::class)->chat((string) $model, 'Jawab satu kata.', 'ping', 60);
             $ms = (int) round((microtime(true) - $started) * 1000);
             if (is_string($reply) && trim($reply) !== '') {
                 $this->record('Model menjawab', 'OK', $ms.' ms');
@@ -120,17 +118,15 @@ class DoctorCommand extends Command
         }
     }
 
-    private function checkOpenCode(): void
+    private function checkDeveloperAgent(): void
     {
-        $binary = (string) config('ai.opencode.binary', '/usr/bin/opencode');
-        if (! is_executable($binary)) {
-            $this->record('OpenCode binary', 'GAGAL', 'tidak ada di '.$binary);
-
+        if ($this->option('skip-agent') || $this->option('quick')) {
             return;
         }
-        $this->record('OpenCode binary', 'OK', $binary);
+        $model = app(StrictModelResolver::class)->resolve('backend-developer');
+        if ($model === null) {
+            $this->record('Agen developer menulis file', 'GAGAL', 'model Backend Developer belum dipilih');
 
-        if ($this->option('skip-opencode') || $this->option('quick')) {
             return;
         }
 
@@ -143,20 +139,16 @@ class DoctorCommand extends Command
             (new Process(['git', 'add', '.'], $dir))->run();
             (new Process(['git', '-c', 'user.email=doctor@local', '-c', 'user.name=doctor', 'commit', '-qm', 'init'], $dir))->run();
 
-            $result = app(\App\Support\Execution\OpenCodeRunner::class)->run(
-                $dir,
-                'Buat file doctor.txt berisi tepat: ok. Gunakan tool tulis file.',
-                180
-            );
+            $result = app(AntigravityClient::class)->runTask('scrumspace-backend', $dir, 'Buat file doctor.txt berisi tepat: ok. Gunakan tool tulis file.', $model, 180);
             $written = is_file($dir.'/doctor.txt') && trim((string) file_get_contents($dir.'/doctor.txt')) !== '';
 
             if ($written) {
-                $this->record('OpenCode menulis file', 'OK', 'model '.app()->make(\App\Support\Execution\OpenCodeRunner::class)->model());
+                $this->record('Agen developer menulis file', 'OK', 'model '.$model);
             } else {
-                $this->record('OpenCode menulis file', 'GAGAL', 'exit='.(string) $result['exit'].' '.mb_substr((string) $result['output'], -80));
+                $this->record('Agen developer menulis file', 'GAGAL', 'exit='.(string) $result['exit'].' '.mb_substr((string) $result['output'], -80));
             }
         } catch (\Throwable $e) {
-            $this->record('OpenCode menulis file', 'GAGAL', $e->getMessage());
+            $this->record('Agen developer menulis file', 'GAGAL', $e->getMessage());
         } finally {
             File::deleteDirectory($dir);
         }
@@ -182,7 +174,7 @@ class DoctorCommand extends Command
         }
 
         try {
-            $stuck = \App\Models\ExecutionTask::query()
+            $stuck = ExecutionTask::query()
                 ->whereIn('status', ['IN_PROGRESS', 'IN_REVIEW'])
                 ->where('last_progress_at', '<', now()->subMinutes(20))
                 ->count();
@@ -208,6 +200,7 @@ class DoctorCommand extends Command
             $path = (string) $project->workspace_path;
             if (! is_dir($path)) {
                 $this->record('Baseline #'.$project->id, 'GAGAL', 'folder tidak ada: '.$path);
+
                 continue;
             }
             try {
@@ -242,7 +235,7 @@ class DoctorCommand extends Command
     private function checkDemo(): void
     {
         try {
-            $problem = \App\Models\DemoServer::query()->where('status', 'RUNNING')->count();
+            $problem = DemoServer::query()->where('status', 'RUNNING')->count();
             $this->record('Demo berjalan', 'OK', $problem.' server demo aktif');
         } catch (\Throwable $e) {
             $this->record('Demo berjalan', 'PERINGATAN', $e->getMessage());

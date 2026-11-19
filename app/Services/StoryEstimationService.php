@@ -38,41 +38,19 @@ class StoryEstimationService
 
     public function __construct(
         private readonly AgentProfileClient $agents,
-        private readonly HermesClient $scrumMaster,
+        private readonly ScrumMasterClient $scrumMaster,
         private readonly ChatDisclosurePolicy $disclosure,
     ) {}
 
-    /**
-     * Jalur estimasi Hermes (perintah Pilih 2 Nov 2026, urutan dibalik:
-     * estimasi Hermes dulu, verifikasi PO sesudahnya): vote spesialis
-     * dan ringkasan SM dihasilkan profile Hermes native, bukan gateway
-     * Laravel. Ronde, parsing, deadlock, dan laporan TIDAK berubah.
-     * Default tetap 'gateway' — jalur Hermes hanya aktif bila
-     * ESTIMATION_DRIVER=hermes di env live. Tidak ada fallback:
-     * bila profile Hermes gagal, vote gagal dengan kode yang jelas.
-     */
-    private function useHermes(): bool
-    {
-        return config('ai.estimation_driver') === 'hermes';
-    }
-
-    /** Satu jawaban estimasi, lewat mesin yang aktif (gateway / Hermes). */
+    /** Satu jawaban estimasi dari agen spesialis (Antigravity). */
     private function specialistAnswer(string $slug, string $prompt, string $conversationId): string
     {
-        if ($this->useHermes()) {
-            return app(HermesProfileChat::class)->chat($slug, $prompt, $conversationId);
-        }
-
         return $this->agents->sendMessage($slug, $prompt, $conversationId, false);
     }
 
-    /** Satu jawaban SM, lewat mesin yang aktif (gateway / Hermes). */
+    /** Satu jawaban SM (Antigravity). */
     private function scrumMasterAnswer(string $prompt, string $conversationId): string
     {
-        if ($this->useHermes()) {
-            return app(HermesProfileChat::class)->chat('scrum-master', $prompt, $conversationId);
-        }
-
         return $this->scrumMaster->sendMessage($prompt, $conversationId);
     }
 
@@ -274,14 +252,13 @@ class StoryEstimationService
         $attemptedModel = $exception instanceof AiUnavailableException ? $exception->attemptedModel : null;
         Log::warning('Story estimation vote failed validation', [
             'run_id' => $run->id, 'story_id' => $run->story_id, 'profile_slug' => $slug, 'round' => $round,
-            'engine' => $this->useHermes() ? 'hermes_profile' : 'gateway',
-            'attempted_profile' => $this->useHermes() ? HermesProfileChat::profileNameForSlug($slug) : null,
+            'engine' => 'antigravity',
             'error_code' => $this->failureCode($exception, $run),
             // Kode mentah dari gateway (mis. RATE_LIMITED) + model/provider
             // yang dicoba, agar penyebab tidak lagi tertutup kode generik.
             'upstream_error' => $exception instanceof AiUnavailableException ? $exception->errorCode : null,
             'attempted_model' => $attemptedModel,
-            'attempted_provider' => $attemptedModel !== null ? app(CliProxyApiClient::class)->providerForModel($attemptedModel) : null,
+            'attempted_provider' => $attemptedModel !== null ? AiUsageRecorder::providerForModel($attemptedModel) : null,
             // Kategori pola yang cocok dicatat (bukan teksnya) agar
             // diagnosis berikutnya tepat tanpa membuka nilai secret.
             'matched_categories' => $this->disclosure->matchedSecretCategories($excerpt),

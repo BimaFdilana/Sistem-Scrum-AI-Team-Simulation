@@ -8,8 +8,7 @@ use App\Models\Story;
 use App\Models\StoryEstimationRun;
 use App\Models\User;
 use App\Services\AgentProfileClient;
-use App\Services\HermesClient;
-use App\Services\HermesProfileChat;
+use App\Services\ScrumMasterClient;
 use App\Services\StoryEstimationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery;
@@ -129,29 +128,6 @@ class StoryEstimationPointNormalizationTest extends TestCase
         $this->assertStringContainsString('[1,2,3,5,8,13]', $prompt);
     }
 
-    /** Parser stream-json: ambil event result, gabungkan potongan, fallback ke teks mentah. */
-    public function test_stream_json_result_parsing(): void
-    {
-        $chat = app(HermesProfileChat::class);
-        $method = new ReflectionMethod($chat, 'extractResultText');
-        $method->setAccessible(true);
-
-        // Event result adalah sumber jawaban, bukan potongan text.
-        $stream = implode("\n", [
-            '{"type":"text","text":"{\\"estimate_points\\":2,"}',
-            '{"type":"text","text":"\\"rationale\\":\\"kecil\\"}"}',
-            '{"type":"result","session_id":"local-x","exit_code":0,"text":"{\\"estimate_points\\":2,\\"rationale\\":\\"kecil\\"}"}',
-        ]);
-        $this->assertSame('{"estimate_points":2,"rationale":"kecil"}', $method->invoke($chat, $stream, 'backend-developer'));
-
-        // Stream terputus sebelum result: potongan text digabung.
-        $partial = '{"type":"text","text":"{\\"estimate_points\\":5,"}'."\n".'{"type":"text","text":"\\"rationale\\":\\"sedang\\"}"}';
-        $this->assertSame('{"estimate_points":5,"rationale":"sedang"}', $method->invoke($chat, $partial, 'backend-developer'));
-
-        // Bukan stream-json (versi Hermes lawas): keluaran dipakai apa adanya.
-        $this->assertSame('halo', $method->invoke($chat, 'halo', 'backend-developer'));
-    }
-
     private function estimationPrompt(): string
     {
         [$story, $owner] = $this->story();
@@ -183,9 +159,9 @@ class StoryEstimationPointNormalizationTest extends TestCase
         $agents->shouldReceive('sendMessage')->andReturnUsing(fn ($slug, $prompt) => $responder($slug, $prompt));
         $this->app->instance(AgentProfileClient::class, $agents);
 
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->andReturn('Laporan berdasar diskusi.');
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
     }
 
     /** @return array{0: Story, 1: User} */

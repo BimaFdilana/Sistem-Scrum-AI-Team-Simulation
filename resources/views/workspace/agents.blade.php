@@ -41,7 +41,7 @@
                     @endif
                     {{-- Konfigurasi Agent per peran dihapus 3 Nov 2026: model
                          kini dipilih sekali untuk semua agent di halaman AI Providers. --}}
-                    <a class="button button-secondary" href="{{ route('ai-providers.index') }}">Model AI</a>
+                    <a class="button button-secondary" href="{{ route('ai-model.index') }}">Model AI</a>
                     <a class="button button-secondary" href="{{ $activityUrl }}">Log activity</a>
                 </div>
             </article>

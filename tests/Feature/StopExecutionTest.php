@@ -12,16 +12,12 @@ use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\Story;
 use App\Models\User;
-use App\Services\AgentToolRunner;
 use App\Support\Chat\SprintChat;
 use App\Support\Chat\StopIntent;
 use App\Support\Execution\ExecutionStopper;
-use App\Support\Execution\OpenCodeRunner;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
-use Illuminate\Support\Facades\Cache;
-use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 /** Tanya Scrum Master: PO bisa menghentikan eksekusi secara paksa lewat chat atau tombol. */
@@ -127,29 +123,8 @@ class StopExecutionTest extends TestCase
 
         $this->assertTrue(ExecutionStopper::wasStopped($run));
         // Job yang masuk setelah henti paksa tidak mengerjakan apa pun.
-        (new ExecuteExecutionTaskJob($run->id, $pending->id))->handle(app(WorktreeManager::class), app(AgentToolRunner::class));
+        (new ExecuteExecutionTaskJob($run->id, $pending->id))->handle(app(WorktreeManager::class));
         $this->assertSame('FAILED', $run->fresh()->status);
         $this->assertSame(ExecutionStopper::CODE, $run->fresh()->error_code);
-    }
-
-    public function test_opencode_process_is_killed_when_stop_flag_is_set(): void
-    {
-        $dir = storage_path('framework/testing/oc-'.uniqid());
-        mkdir($dir, 0700, true);
-        $process = new Process(['sleep', '60'], $dir, null, null, 120);
-        $process->start();
-
-        Cache::put(ExecutionStopper::flagKey($dir), 1, 60);
-        $wait = new \ReflectionMethod(OpenCodeRunner::class, 'waitWatchingQuota');
-        $started = microtime(true);
-        $ended = $wait->invoke(new OpenCodeRunner, $process, 'scrumgateway/x', $dir);
-
-        $this->assertSame('stopped', $ended);
-        $this->assertFalse($process->isRunning());
-        $this->assertLessThan(15, microtime(true) - $started);
-
-        // run() baru membersihkan penanda lama agar tidak membunuh pekerjaan berikutnya.
-        ExecutionStopper::clearFlag($dir);
-        $this->assertFalse(ExecutionStopper::stopRequested($dir));
     }
 }

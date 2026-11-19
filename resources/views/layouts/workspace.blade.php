@@ -97,7 +97,7 @@
 
             <nav class="nav-group" aria-label="Pengaturan">
                 <p class="nav-caption">PENGATURAN</p>
-                <a class="nav-link {{ $is(['ai-providers']) }}" href="{{ route('ai-providers.index') }}"><span class="nav-dot"></span>Model AI</a>
+                <a class="nav-link {{ $is(['ai-providers']) }}" href="{{ route('ai-model.index') }}"><span class="nav-dot"></span>Model AI</a>
                 <a class="nav-link {{ $is(['agents', 'agent-chat', 'agent-activity']) }}" href="{{ route('agents.index') }}"><span class="nav-dot"></span>Tim Agen</a>
                 <a class="nav-link {{ $is(['actors']) }}" href="{{ route('actors.index') }}"><span class="nav-dot"></span>Aktor</a>
             </nav>
@@ -141,7 +141,7 @@
                             <p class="quota-countdown">Waktu pulih belum diketahui dari penyedia. Sistem mengecek otomatis{{ $quotaView['next_check'] ? '; cek berikutnya '.$quotaView['next_check'].' WIB' : '' }}.</p>
                         @endif
                     </div>
-                    <a class="button button-primary" href="{{ route('ai-providers.index') }}">Ganti model</a>
+                    <a class="button button-primary" href="{{ route('ai-model.index') }}">Ganti model</a>
                 </div>
             @endif
             <div class="page-content">

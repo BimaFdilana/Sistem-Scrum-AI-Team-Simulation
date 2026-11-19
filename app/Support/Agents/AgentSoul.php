@@ -14,7 +14,7 @@ class AgentSoul
             : null;
     }
 
-    /** Baris soul untuk ditempel ke prompt (SM via HermesClient tidak punya system prompt). */
+    /** Baris soul untuk ditempel ke prompt (SM via ScrumMasterClient tidak punya system prompt). */
     public static function promptLine(string $slug): string
     {
         $soul = self::for($slug);

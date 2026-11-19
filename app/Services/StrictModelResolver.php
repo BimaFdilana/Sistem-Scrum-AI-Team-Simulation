@@ -51,61 +51,33 @@ class StrictModelResolver
             ];
         }
 
-        // SATU model untuk semua peran (sejak halaman Konfigurasi Agent
-        // dihapus 3 Nov 2026): sumber utamanya setting global `active_model`
-        // yang dipilih PO di halaman AI Providers.
+        // Model per peran (pengganti peran, lalu model global) yang dipilih PO
+        // di halaman AI Model. Tidak ada model cadangan diam-diam.
         try {
-            $model = app(ActiveModelService::class)->current();
+            $model = app(ActiveModelService::class)->forRole($role);
         } catch (Throwable) {
             $model = null;
         }
 
-        if (is_string($model) && trim($model) !== '') {
-            if ($available !== [] && ! in_array($model, $available, true)) {
-                return [
-                    'model' => null,
-                    'state' => self::STATE_NOT_AVAILABLE,
-                    'message' => "Model {$model} yang dipilih tidak ditemukan di daftar model gateway saat ini — perbarui pilihan di halaman AI Providers, alur tidak dijalankan.",
-                    'short_reason' => 'Model yang dipilih tidak tersedia di gateway saat ini.',
-                ];
-            }
-
-            return ['model' => $model, 'state' => self::STATE_OK, 'message' => '', 'short_reason' => ''];
-        }
-
-        // Kompatibilitas migrasi: instalasi lama belum punya setting global.
-        // Pakai snapshot per peran yang masih terverifikasi, supaya tidak ada
-        // alur yang berhenti hanya karena menu lama dihapus. Begitu PO memilih
-        // model di halaman AI Providers, jalur ini tidak terpakai lagi.
-        $snapshot = app(AgentConfiguration::class)->current($role);
-        $legacyModel = is_array($snapshot) ? ($snapshot['model'] ?? null) : null;
-
-        if (! is_string($legacyModel) || trim($legacyModel) === '') {
+        if ($model === null) {
             return [
                 'model' => null,
                 'state' => self::STATE_NOT_CHOSEN,
-                'message' => 'Model AI belum dipilih di halaman AI Providers — alur tidak dijalankan.',
-                'short_reason' => 'Model belum dipilih di halaman AI Providers.',
-            ];
-        }
-        if (($snapshot['status'] ?? null) !== 'verified') {
-            return [
-                'model' => null,
-                'state' => self::STATE_NOT_VERIFIED,
-                'message' => 'Model AI belum terverifikasi — pilih ulang di halaman AI Providers, alur tidak dijalankan.',
-                'short_reason' => 'Model belum terverifikasi.',
-            ];
-        }
-        if ($available !== [] && ! in_array($legacyModel, $available, true)) {
-            return [
-                'model' => null,
-                'state' => self::STATE_NOT_AVAILABLE,
-                'message' => "Model {$legacyModel} tidak ditemukan di daftar model gateway saat ini — perbarui pilihan di halaman AI Providers, alur tidak dijalankan.",
-                'short_reason' => 'Model yang dipilih tidak tersedia di gateway saat ini.',
+                'message' => 'Model AI belum dipilih di halaman AI Model — alur tidak dijalankan.',
+                'short_reason' => 'Model belum dipilih di halaman AI Model.',
             ];
         }
 
-        return ['model' => $legacyModel, 'state' => self::STATE_OK, 'message' => '', 'short_reason' => ''];
+        if ($available !== [] && ! in_array($model, $available, true)) {
+            return [
+                'model' => null,
+                'state' => self::STATE_NOT_AVAILABLE,
+                'message' => "Model {$model} yang dipilih tidak tersedia di akun Antigravity saat ini — perbarui pilihan di halaman AI Model, alur tidak dijalankan.",
+                'short_reason' => 'Model yang dipilih tidak tersedia di akun Antigravity.',
+            ];
+        }
+
+        return ['model' => $model, 'state' => self::STATE_OK, 'message' => '', 'short_reason' => ''];
     }
 
     public function resolve(string $role): ?string
@@ -146,7 +118,7 @@ class StrictModelResolver
     public function availableModelIds(): array
     {
         try {
-            return array_column(app(CliProxyApiClient::class)->models(), 'id');
+            return app(AntigravityClient::class)->modelIds();
         } catch (Throwable) {
             return [];
         }
@@ -165,6 +137,6 @@ class StrictModelResolver
         $available = $this->availableModelIds();
         $list = $available === [] ? 'tidak dapat dimuat saat ini' : implode(', ', array_slice($available, 0, 30));
 
-        return "MODEL_PROBLEMATIC: model {$model} bermasalah dan tidak bisa dipakai (ditolak gateway, tidak ditemukan, atau dinonaktifkan). Sistem TIDAK menggantinya secara diam-diam ke model lain. Model yang tersedia saat ini: {$list}. Silakan ganti pilihan model di halaman Konfigurasi Agent, lalu ulangi (retry) alur ini.";
+        return "MODEL_PROBLEMATIC: model {$model} bermasalah dan tidak bisa dipakai (tidak dikenali atau tidak tersedia di akun Antigravity). Sistem TIDAK menggantinya secara diam-diam ke model lain. Model yang tersedia saat ini: {$list}. Silakan ganti pilihan model di halaman AI Model, lalu ulangi (retry) alur ini.";
     }
 }

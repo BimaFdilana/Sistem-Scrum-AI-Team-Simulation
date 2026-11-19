@@ -11,7 +11,7 @@ use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\Story;
 use App\Models\User;
-use App\Services\HermesClient;
+use App\Services\ScrumMasterClient;
 use App\Support\Chat\ChatCommandReporter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
@@ -48,7 +48,7 @@ class ChatCommandUnderstandingTest extends TestCase
 
     private function smReplies(string $json): void
     {
-        $this->mock(HermesClient::class, function (MockInterface $mock) use ($json): void {
+        $this->mock(ScrumMasterClient::class, function (MockInterface $mock) use ($json): void {
             $mock->shouldReceive('sendMessage')->andReturn($json);
             $mock->shouldReceive('isAvailable')->andReturn(true);
         });

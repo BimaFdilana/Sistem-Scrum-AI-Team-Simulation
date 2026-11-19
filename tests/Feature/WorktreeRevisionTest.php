@@ -8,7 +8,6 @@ use App\Models\ExecutionRun;
 use App\Models\Project;
 use App\Models\Story;
 use App\Models\User;
-use App\Support\Workspace\PatchApplier;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
@@ -118,22 +117,15 @@ class WorktreeRevisionTest extends TestCase
             'title' => 'T1', 'description' => 'D1', 'assignee' => 'backend-developer', 'status' => 'PENDING',
         ]);
 
-        $runner = $this->mock(\App\Services\AgentToolRunner::class, function ($mock): void {
-            $mock->shouldReceive('run')->twice()->andReturnUsing(function (string $slug, string $worktree) {
-                static $call = 0;
-                $call++;
-                if ($call === 1) {
-                    file_put_contents($worktree.'/satu.css', '.a{}');
+        $call = 0;
+        $this->fakeDeveloper(function (string $agent, string $worktree) use (&$call) {
+            $call++;
+            file_put_contents($worktree.($call === 1 ? '/satu.css' : '/dua.css'), $call === 1 ? '.a{}' : '.b{}');
 
-                    return ['files' => ['satu.css'], 'summary' => 'Satu.'];
-                }
-                file_put_contents($worktree.'/dua.css', '.b{}');
-
-                return ['files' => ['dua.css'], 'summary' => 'Dua.'];
-            });
+            return null;
         });
 
-        (new ExecuteExecutionTaskJob($run->id, $task->id))->handle($worktrees, $runner);
+        (new ExecuteExecutionTaskJob($run->id, $task->id))->handle($worktrees);
         $this->assertSame('IN_REVIEW', $task->fresh()->status);
         $firstWorktree = $task->fresh()->worktree_path;
         $this->assertStringEndsWith('wt-'.$run->id.'-'.$task->id.'-1', $firstWorktree);
@@ -142,7 +134,7 @@ class WorktreeRevisionTest extends TestCase
         $task->forceFill(['status' => 'REVISION', 'qa_feedback' => 'Perbaiki.'])->save();
         $run->forceFill(['status' => 'REVIEWING'])->save();
 
-        (new ExecuteExecutionTaskJob($run->id, $task->id))->handle($worktrees, $runner);
+        (new ExecuteExecutionTaskJob($run->id, $task->id))->handle($worktrees);
 
         $this->assertSame('IN_REVIEW', $task->fresh()->status);
         $worktree = $task->fresh()->worktree_path;

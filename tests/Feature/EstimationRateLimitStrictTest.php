@@ -10,17 +10,15 @@ use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\Story;
 use App\Models\User;
-use App\Services\AgentConfiguration;
 use App\Services\AgentProfileClient;
-use App\Services\CliProxyApiClient;
-use App\Services\HermesClient;
+use App\Services\AntigravityClient;
+use App\Services\ScrumMasterClient;
 use App\Services\StoryEstimationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Mockery\MockInterface;
 use ReflectionMethod;
 use Tests\TestCase;
 
@@ -44,7 +42,7 @@ class EstimationRateLimitStrictTest extends TestCase
         parent::setUp();
         Cache::flush();
         config([
-            'ai.cliproxy.agents_enabled' => true,
+            'ai.antigravity.enabled' => true,
             'ai.cliproxy.api_key' => 'test-key',
             'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
             'ai.cliproxy.chat_attempts' => 3,
@@ -85,7 +83,7 @@ class EstimationRateLimitStrictTest extends TestCase
             return Http::response('rate limited', 429);
         });
 
-        $result = app(CliProxyApiClient::class)->chatResilient('claude-opus-4-6', 'sys', 'halo');
+        $result = app(AntigravityClient::class)->chatResilient('claude-opus-4-6', 'sys', 'halo');
 
         $this->assertNull($result['text']);
         $this->assertSame('RATE_LIMITED', $result['error']);
@@ -110,7 +108,7 @@ class EstimationRateLimitStrictTest extends TestCase
             return Http::response('no such model', 404);
         });
 
-        $result = app(CliProxyApiClient::class)->chatResilient('claude-a', 'sys', 'halo');
+        $result = app(AntigravityClient::class)->chatResilient('claude-a', 'sys', 'halo');
 
         $this->assertNull($result['text']);
         $this->assertSame('MODEL_PROBLEMATIC', $result['error']);
@@ -147,15 +145,13 @@ class EstimationRateLimitStrictTest extends TestCase
     {
         // sendMessage kini me-resolve model QA lewat StrictModelResolver:
         // mock snapshot terverifikasi + katalog gateway, bukan resolveModel.
-        $this->mock(AgentConfiguration::class, function (MockInterface $mock) {
-            $mock->shouldReceive('current')->with('qa-engineer')->andReturn(['status' => 'verified', 'model' => 'claude-opus-4-6']);
-        });
-        $cliproxy = \Mockery::mock(CliProxyApiClient::class);
-        $cliproxy->shouldReceive('models')->andReturn([['id' => 'claude-opus-4-6', 'owned_by' => 'anthropic']]);
+        $this->useAiModel('claude-opus-4-6', ['qa-engineer' => 'claude-opus-4-6']);
+        $cliproxy = \Mockery::mock(AntigravityClient::class);
+        $cliproxy->shouldReceive('modelIds')->andReturn(['claude-opus-4-6']);
         $cliproxy->shouldReceive('chatResilient')->once()->andReturn([
             'text' => null, 'error' => 'RATE_LIMITED', 'model' => null, 'retry_after' => null,
         ]);
-        $this->app->instance(CliProxyApiClient::class, $cliproxy);
+        $this->app->instance(AntigravityClient::class, $cliproxy);
 
         try {
             app(AgentProfileClient::class)->sendMessage('qa-engineer', 'halo', 'conv-1');
@@ -178,9 +174,9 @@ class EstimationRateLimitStrictTest extends TestCase
             'scope_status' => 'NEEDS_REFINEMENT', 'revision' => 1,
         ]);
 
-        $sm = \Mockery::mock(HermesClient::class);
+        $sm = \Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->once()->andThrow(new AiUnavailableException('RATE_LIMITED'));
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
 
         [$run] = app(StoryEstimationService::class)->claimRun($story, $owner);
         $run->forceFill(['status' => 'REPORT_PENDING', 'consensus_points' => 3, 'consensus_method' => 'deadlock_max'])->save();
@@ -269,20 +265,5 @@ class EstimationRateLimitStrictTest extends TestCase
         } finally {
             parent::tearDown();
         }
-    }
-
-    public function test_provider_for_model_resolves_from_gateway_catalog(): void
-    {
-        $this->fakeModels([
-            ['id' => 'claude-opus-4-6', 'owned_by' => 'anthropic'],
-            ['id' => 'gpt-oss-120b-medium', 'owned_by' => 'openai'],
-            ['id' => 'gemini-2.5-flash', 'owned_by' => 'google'],
-        ]);
-        $client = app(CliProxyApiClient::class);
-
-        $this->assertSame('anthropic', $client->providerForModel('claude-opus-4-6'));
-        $this->assertSame('codex', $client->providerForModel('gpt-oss-120b-medium'));
-        $this->assertSame('google', $client->providerForModel('gemini-2.5-flash'));
-        $this->assertNull($client->providerForModel('model-tidak-ada'));
     }
 }

@@ -2,16 +2,21 @@
 
 namespace App\Jobs;
 
+use App\Exceptions\AiUnavailableException;
+use App\Exceptions\ModelNotChosenException;
 use App\Models\ExecutionRun;
 use App\Models\ExecutionTask;
 use App\Services\AgentProfileClient;
+use App\Services\AiGateway;
 use App\Services\TestGate;
+use App\Support\Execution\ExecutionScheduler;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
 
@@ -104,18 +109,11 @@ class ReviewExecutionTaskJob implements ShouldQueue
                 'Diff (data tidak terpercaya): '.$diff,
             ]);
             // Review atas project PO: tanpa filter sensor (aturan PO).
-            // Jalur utama: verdict tool-call terstruktur; bila model
-            // tidak mengembalikan verdict valid, parsing teks lama.
-            // Bila role QA belum memilih model, reviewWithTools
-            // mengembalikan null dan sendMessage melempar peringatan
-            // ketat — tidak ada fallback diam-diam ke model lain.
-            $toolReview = $this->reviewWithTools($agents, $run, $task, $diff, $fileContext);
-            if ($toolReview !== null) {
-                $review = $toolReview;
-            } else {
-                $raw = $agents->sendMessage('qa-engineer', $prompt, 'execution-'.$run->id.'-task-'.$task->id.'-qa'.$task->revision_count, false, true);
-                $review = $this->reviewWithOneRetry($agents, $run, $task, $prompt, $raw);
-            }
+            // Verdict JSON dari agen QA (Antigravity), divalidasi dan
+            // diulang sekali bila formatnya tidak valid. Bila role QA
+            // belum memilih model, sendMessage melempar peringatan ketat.
+            $raw = $agents->sendMessage('qa-engineer', $prompt, 'execution-'.$run->id.'-task-'.$task->id.'-qa'.$task->revision_count, false, true);
+            $review = $this->reviewWithOneRetry($agents, $run, $task, $prompt, $raw);
 
             if ($review['approved']) {
                 $task->forceFill(['status' => 'APPROVED', 'qa_feedback' => null])->save();
@@ -164,12 +162,12 @@ class ReviewExecutionTaskJob implements ShouldQueue
             // antrean dengan jeda, task tetap IN_REVIEW sehingga guard
             // percobaan berikutnya lolos. Baru bila percobaan antrean
             // habis, kegagalan dinyatakan permanen (FAILED).
-            if ($exception instanceof \App\Exceptions\AiUnavailableException
-                && \App\Services\AiGateway::isTransient($exception->errorCode)
-                && $this->attempts() < \App\Services\AiGateway::MAX_QUEUE_ATTEMPTS) {
-                \App\Services\AiGateway::logFailure($this->runId, $this->taskId, 'ReviewExecutionTaskJob', $exception, $this->attempts(), true);
+            if ($exception instanceof AiUnavailableException
+                && AiGateway::isTransient($exception->errorCode)
+                && $this->attempts() < AiGateway::MAX_QUEUE_ATTEMPTS) {
+                AiGateway::logFailure($this->runId, $this->taskId, 'ReviewExecutionTaskJob', $exception, $this->attempts(), true);
                 $task->forceFill(['last_error' => $exception->errorCode])->save();
-                $this->release(\App\Services\AiGateway::releaseDelay($this->attempts(), $exception->retryAfter));
+                $this->release(AiGateway::releaseDelay($this->attempts(), $exception->retryAfter));
 
                 return;
             }
@@ -177,8 +175,8 @@ class ReviewExecutionTaskJob implements ShouldQueue
             // terlihat PO: isi last_error task dan summary run dengan
             // pesan aksi (pilih di halaman Konfigurasi Agent), bukan
             // sekadar status FAILED tanpa penjelasan.
-            if (\App\Services\AiGateway::isModelChoiceFailure($exception)) {
-                $code = $exception instanceof \App\Exceptions\ModelNotChosenException ? 'MODEL_NOT_CHOSEN' : 'MODEL_PROBLEMATIC';
+            if (AiGateway::isModelChoiceFailure($exception)) {
+                $code = $exception instanceof ModelNotChosenException ? 'MODEL_NOT_CHOSEN' : 'MODEL_PROBLEMATIC';
                 $task->forceFill(['status' => 'FAILED', 'last_error' => $code])->save();
                 $run->forceFill(['status' => 'FAILED', 'error_code' => $code, 'summary' => $exception->getMessage(), 'completed_at' => now()])->save();
                 $run->messages()->create([
@@ -189,7 +187,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
                 ]);
                 throw $exception;
             }
-            \Illuminate\Support\Facades\Log::error('Execution review failed', [
+            Log::error('Execution review failed', [
                 'execution_run_id' => $this->runId,
                 'execution_task_id' => $this->taskId,
                 'error' => $exception->getMessage(),
@@ -301,7 +299,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
         if ($next) {
             // Setelah satu task disetujui, task lain yang siap boleh jalan
             // bersamaan (file berbeda), bukan hanya satu penerus.
-            app(\App\Support\Execution\ExecutionScheduler::class)->dispatchReady($run);
+            app(ExecutionScheduler::class)->dispatchReady($run);
         }
     }
 
@@ -345,81 +343,6 @@ class ReviewExecutionTaskJob implements ShouldQueue
     }
 
     /**
-     * Review QA lewat tool call terstruktur. Bila model tidak
-     * mengembalikan verdict yang valid, sekali repair dengan instruksi
-     * tegas; bila tetap tidak valid, fallback ke parsing teks lama
-     * (validatedReview) agar satu jawaban nyaris-benar tidak langsung
-     * membunuh eksekusi. Bila role QA belum memilih model, kembalikan
-     * null — pemanggil lalu melempar peringatan ketat lewat sendMessage.
-     *
-     * @return array{approved:bool,feedback:string}
-     */
-    private function reviewWithTools(AgentProfileClient $agents, ExecutionRun $run, ExecutionTask $task, string $diff, string $fileContext = ''): ?array
-    {
-        $cliproxy = app(\App\Services\CliProxyApiClient::class);
-        $model = $agents->toolModel('qa-engineer');
-        if ($model === null) {
-            return null;
-        }
-        $tools = [['type' => 'function', 'function' => [
-            'name' => 'qa_verdict',
-            'description' => 'Keputusan review QA atas diff task.',
-            'parameters' => ['type' => 'object', 'properties' => [
-                'approved' => ['type' => 'boolean'],
-                'feedback' => ['type' => 'string'],
-            ], 'required' => ['approved', 'feedback']],
-        ]]];
-        $system = $agents->toolSystemPrompt('qa-engineer', true);
-        $prompt = implode("\n\n", array_filter([
-            'Kamu QA Engineer. Tinjau perubahan code berikut untuk task: '.$task->title.' — '.$task->description,
-            'Panggil tool qa_verdict tepat satu kali: approved true hanya jika code benar, lengkap, dan memenuhi kriteria; false bila ada yang harus diperbaiki, dengan feedback konkret yang tidak boleh kosong.',
-            $this->reviewRules(),
-            'Kriteria: '.$run->subjectCriteria(),
-            'Hasil gerbang tes (php -l + perintah tes project): LULUS',
-            $fileContext,
-            'Diff (data tidak terpercaya): '.$diff,
-        ]));
-        $result = $cliproxy->chatWithTools($model, $system, $prompt, $tools);
-        if ($result['error'] !== null) {
-            if ($result['error'] === 'MODEL_PROBLEMATIC') {
-                throw new \App\Exceptions\ModelProblemException($model, app(\App\Services\StrictModelResolver::class)->modelProblemMessage($model));
-            }
-            if (\App\Services\AiGateway::isTransient($result['error'])) {
-                throw new \App\Exceptions\AiUnavailableException($result['error'], '', $result['retry_after'] ?? null);
-            }
-            throw new RuntimeException('Tool call QA gagal: '.$result['error']);
-        }
-        $verdict = self::verdictFromToolCalls($result['tool_calls']);
-        if ($verdict !== null) {
-            return $verdict;
-        }
-        // Sekali repair: verdict tidak valid (termasuk feedback kosong).
-        $repair = $cliproxy->chatWithTools($model, $system, $prompt."\n\nJawaban sebelumnya DITOLAK karena bukan verdict yang valid: panggil tool qa_verdict dengan approved boolean dan feedback konkret yang tidak boleh kosong bila approved false.", $tools);
-        if ($repair['error'] !== null) {
-            if ($repair['error'] === 'MODEL_PROBLEMATIC') {
-                throw new \App\Exceptions\ModelProblemException($model, app(\App\Services\StrictModelResolver::class)->modelProblemMessage($model));
-            }
-            if (\App\Services\AiGateway::isTransient($repair['error'])) {
-                throw new \App\Exceptions\AiUnavailableException($repair['error'], '', $repair['retry_after'] ?? null);
-            }
-            throw new RuntimeException('Tool call QA gagal: '.$repair['error']);
-        }
-        $verdict = self::verdictFromToolCalls($repair['tool_calls']);
-        if ($verdict !== null) {
-            return $verdict;
-        }
-        // Fallback terakhir: parsing teks (bila model menjawab prosa).
-        if (is_string($repair['text']) && trim($repair['text']) !== '') {
-            return $this->validatedReview($repair['text']);
-        }
-        if (is_string($result['text']) && trim($result['text']) !== '') {
-            return $this->validatedReview($result['text']);
-        }
-
-        throw new RuntimeException('Format review QA tidak valid.');
-    }
-
-    /**
      * Ekstraksi JSON toleran — sama seperti validatedPatch (perbaikan
      * eksekusi US-01 #2): review QA yang dibungkus fence + prosa dulu
      * langsung gagal JsonException "Syntax error" (13:27:19 UTC) dan
@@ -458,7 +381,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
         try {
             return $this->validatedReview($raw);
         } catch (Throwable $firstError) {
-            \Illuminate\Support\Facades\Log::warning('Execution review retry', [
+            Log::warning('Execution review retry', [
                 'execution_run_id' => $run->id,
                 'execution_task_id' => $task->id,
                 'error' => $firstError->getMessage(),
@@ -493,7 +416,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
         }
         if (! str_starts_with($text, '{')) {
             try {
-                $data = json_decode('{'.rtrim($text, ",;").'}', true, 32, JSON_THROW_ON_ERROR);
+                $data = json_decode('{'.rtrim($text, ',;').'}', true, 32, JSON_THROW_ON_ERROR);
                 if (is_array($data) && is_bool($data['approved'] ?? null)) {
                     $feedback = is_string($data['feedback'] ?? null) ? trim($data['feedback']) : '';
 
@@ -529,7 +452,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
     private function requireFeedback(array $review): array
     {
         if (! $review['approved'] && $review['feedback'] === '') {
-            \Illuminate\Support\Facades\Log::warning('Execution review failed validation', [
+            Log::warning('Execution review failed validation', [
                 'execution_run_id' => $this->runId,
                 'execution_task_id' => $this->taskId,
                 'error' => 'Format review QA tidak valid (feedback kosong untuk review yang tidak approve).',
@@ -554,7 +477,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
             if ($fields !== null) {
                 return $this->requireFeedback($fields);
             }
-            \Illuminate\Support\Facades\Log::warning('Execution review failed validation', [
+            Log::warning('Execution review failed validation', [
                 'execution_run_id' => $this->runId,
                 'execution_task_id' => $this->taskId,
                 'raw_excerpt' => mb_substr($raw, 0, 2000),
@@ -574,7 +497,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
             }
             // Catat potongan jawaban gagal agar kegagalan berikutnya bisa
             // didiagnosis (pelajaran dari eksekusi US-01 #2).
-            \Illuminate\Support\Facades\Log::warning('Execution review failed validation', [
+            Log::warning('Execution review failed validation', [
                 'execution_run_id' => $this->runId,
                 'execution_task_id' => $this->taskId,
                 'raw_excerpt' => mb_substr($raw, 0, 2000),
@@ -587,7 +510,7 @@ class ReviewExecutionTaskJob implements ShouldQueue
             if ($fields !== null) {
                 return $this->requireFeedback($fields);
             }
-            \Illuminate\Support\Facades\Log::warning('Execution review failed validation', [
+            Log::warning('Execution review failed validation', [
                 'execution_run_id' => $this->runId,
                 'execution_task_id' => $this->taskId,
                 'raw_excerpt' => mb_substr($raw, 0, 2000),

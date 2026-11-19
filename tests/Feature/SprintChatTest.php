@@ -7,13 +7,11 @@ use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\Story;
 use App\Models\User;
-use App\Services\AgentConfiguration;
 use App\Support\Chat\SprintChat;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
-use Mockery\MockInterface;
 use Tests\TestCase;
 
 /** Chat Scrum Master dipisah per sprint; laporan SM masuk ke sprint-nya. */
@@ -23,10 +21,8 @@ class SprintChatTest extends TestCase
 
     private function mockStrictSm(): void
     {
-        config(['ai.cliproxy.agents_enabled' => true, 'ai.cliproxy.api_key' => 'k', 'ai.cliproxy.base_url' => 'http://127.0.0.1:8317']);
-        $this->mock(AgentConfiguration::class, function (MockInterface $mock) {
-            $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'gpt-5.6-sol']);
-        });
+        config(['ai.antigravity.enabled' => true, 'ai.cliproxy.api_key' => 'k', 'ai.cliproxy.base_url' => 'http://127.0.0.1:8317']);
+        $this->useAiModel('gpt-5.6-sol', ['scrum-master' => 'gpt-5.6-sol']);
         Http::fake([
             'http://127.0.0.1:8317/v1/models' => Http::response(['data' => [['id' => 'gpt-5.6-sol', 'owned_by' => 'openai']]]),
             'http://127.0.0.1:8317/v1/chat/completions' => Http::response(['choices' => [['message' => ['role' => 'assistant', 'content' => 'Siap.']]]]),

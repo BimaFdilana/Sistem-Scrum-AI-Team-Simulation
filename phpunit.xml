@@ -29,10 +29,10 @@
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
-        <env name="CLIPROXY_AGENTS_ENABLED" value="false"/>
-        <env name="OPENCODE_ENABLED" value="false"/>
-        <env name="CLIPROXY_API_KEY" value="test-key" force="true"/>
-        <env name="CLIPROXY_BASE_URL" value="http://127.0.0.1:8317" force="true"/>
+        <!-- Tes tidak pernah menjalankan agy sungguhan (lihat Tests\Support\FakeAntigravityClient). -->
+        <env name="ANTIGRAVITY_ENABLED" value="false"/>
+        <env name="ANTIGRAVITY_BINARY" value="/nonexistent/agy-test" force="true"/>
+        <env name="ANTIGRAVITY_CHAT_ATTEMPTS" value="3"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>

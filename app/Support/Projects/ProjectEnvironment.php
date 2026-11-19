@@ -15,7 +15,7 @@ class ProjectEnvironment
     /** Awalan konfigurasi Laravel/ScrumSpace yang tidak boleh bocor ke project. */
     private const PREFIXES = [
         'APP_', 'DB_', 'CACHE_', 'SESSION_', 'QUEUE_', 'REDIS_', 'MAIL_', 'BROADCAST_', 'FILESYSTEM_', 'LOG_', 'AWS_',
-        'GITHUB_', 'GH_', 'CLIPROXY_', 'HERMES_', 'OPENCODE_', 'WEBHOOK_', 'DEMO_', 'EXECUTION_', 'AI_', 'BCRYPT_',
+        'GITHUB_', 'GH_', 'ANTIGRAVITY_', 'GEMINI_', 'GOOGLE_', 'AGY_', 'CLIPROXY_', 'HERMES_', 'OPENCODE_', 'WEBHOOK_', 'DEMO_', 'EXECUTION_', 'AI_', 'BCRYPT_',
         'PULSE_', 'TELESCOPE_', 'NIGHTWATCH_', 'SANCTUM_',
     ];
 

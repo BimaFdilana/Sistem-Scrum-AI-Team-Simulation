@@ -66,8 +66,8 @@ class AiQuota
                         'user_id' => $userId,
                         'type' => 'ai_quota',
                         'title' => 'Kuota AI habis',
-                        'message' => 'Model '.$model.' ditolak penyedia karena kuota habis. Estimasi, eksekusi, dan chat Scrum Master berhenti sampai kuota pulih atau model aktif diganti di AI Providers.',
-                        'link' => route('ai-providers.index', [], false),
+                        'message' => 'Model '.$model.' ditolak penyedia karena kuota habis. Estimasi, eksekusi, dan chat Scrum Master berhenti sampai kuota pulih atau model aktif diganti di halaman AI Model.',
+                        'link' => route('ai-model.index', [], false),
                     ]);
                 }
             }

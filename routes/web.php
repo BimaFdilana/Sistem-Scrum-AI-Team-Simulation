@@ -2,7 +2,7 @@
 
 use App\Http\Controllers\ActivityController;
 use App\Http\Controllers\ActorController;
-use App\Http\Controllers\AiProviderController;
+use App\Http\Controllers\AiModelController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\ChatCommandController;
 use App\Http\Controllers\ChatController;
@@ -46,22 +46,17 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/chat/commands/{command}/rethink', [ChatCommandController::class, 'rethink'])->middleware('throttle:6,1')->name('chat.commands.rethink');
     Route::get('/chat/commands/{command}/phase', [ChatCommandController::class, 'phase'])->name('chat.commands.phase');
     Route::get('/agents', [WorkspaceController::class, 'agents'])->name('agents.index');
-    Route::get('/ai-providers', [AiProviderController::class, 'index'])->name('ai-providers.index');
-    // Satu model untuk semua peran agent, dipilih di halaman AI Providers.
-    // Menggantikan halaman Konfigurasi Agent per peran (dihapus 3 Nov 2026).
-    Route::post('/ai-providers/active-model', [AiProviderController::class, 'updateActiveModel'])
-        ->middleware('throttle:20,1')->name('ai-providers.active-model.update');
-    Route::post('/ai-providers/quota/refresh', [AiProviderController::class, 'refreshQuota'])
-        ->middleware('throttle:4,1')->name('ai-providers.quota.refresh');
-    Route::get('/ai-providers/{provider}/connect', [AiProviderController::class, 'connect'])->name('ai-providers.connect');
-    Route::post('/ai-providers/{provider}/callback', [AiProviderController::class, 'callback'])->middleware('throttle:20,1')->name('ai-providers.callback');
-    Route::post('/ai-providers/{provider}/disconnect', [AiProviderController::class, 'disconnect'])->name('ai-providers.disconnect');
-    Route::post('/ai-providers/api-keys', [AiProviderController::class, 'storeApiKeyAccount'])->middleware('throttle:20,1')->name('ai-providers.api-keys.store');
-    Route::post('/ai-providers/api-keys/check', [AiProviderController::class, 'checkApiKeyConnection'])->middleware('throttle:20,1')->name('ai-providers.api-keys.check');
-    Route::post('/ai-providers/api-keys/{provider}/{group}/keys', [AiProviderController::class, 'storeApiKey'])->middleware('throttle:20,1')->name('ai-providers.api-keys.keys.store');
-    Route::delete('/ai-providers/api-keys/{provider}/{group}/keys/{index}', [AiProviderController::class, 'destroyApiKey'])->name('ai-providers.api-keys.keys.destroy');
-    Route::delete('/ai-providers/api-keys/{provider}/{group}', [AiProviderController::class, 'destroyApiKeyAccount'])->name('ai-providers.api-keys.destroy');
-    Route::post('/ai-providers/api-keys/{provider}/{group}/models', [AiProviderController::class, 'updateApiKeyModels'])->middleware('throttle:20,1')->name('ai-providers.api-keys.models.update');
+    // Halaman AI Model: login akun Google untuk Antigravity CLI, model global
+    // dan per peran, uji koneksi. URL lama /ai-providers diarahkan ke sini.
+    Route::redirect('/ai-providers', '/ai-model');
+    Route::get('/ai-model', [AiModelController::class, 'index'])->name('ai-model.index');
+    Route::post('/ai-model/models', [AiModelController::class, 'updateModels'])->middleware('throttle:20,1')->name('ai-model.models.update');
+    Route::post('/ai-model/models/refresh', [AiModelController::class, 'refreshModels'])->middleware('throttle:6,1')->name('ai-model.models.refresh');
+    Route::post('/ai-model/test', [AiModelController::class, 'test'])->middleware('throttle:6,1')->name('ai-model.test');
+    Route::post('/ai-model/login', [AiModelController::class, 'startLogin'])->middleware('throttle:6,1')->name('ai-model.login');
+    Route::post('/ai-model/logout', [AiModelController::class, 'startLogout'])->middleware('throttle:6,1')->name('ai-model.logout');
+    Route::get('/ai-model/session/{session}', [AiModelController::class, 'sessionState'])->middleware('throttle:120,1')->name('ai-model.session');
+    Route::post('/ai-model/session/{session}/code', [AiModelController::class, 'submitCode'])->middleware('throttle:10,1')->name('ai-model.session.code');
     Route::get('/settings/github', [GithubSettingsController::class, 'edit'])->name('settings.github.edit');
     Route::post('/settings/github', [GithubSettingsController::class, 'update'])->middleware('throttle:10,1')->name('settings.github.update');
     Route::post('/settings/github/test', [GithubSettingsController::class, 'test'])->middleware('throttle:10,1')->name('settings.github.test');

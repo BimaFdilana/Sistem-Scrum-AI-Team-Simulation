@@ -9,7 +9,7 @@ use App\Models\ChatConversation;
 use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\Story;
-use App\Services\HermesClient;
+use App\Services\ScrumMasterClient;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -57,7 +57,7 @@ class SprintController extends Controller
         return redirect()->route('projects.show', $project)->with('status', 'Sprint dibuat. Tambahkan User Story ke dalam '.$sprint->name.'.');
     }
 
-    public function generateGoal(Request $request, Sprint $sprint, HermesClient $hermes): RedirectResponse
+    public function generateGoal(Request $request, Sprint $sprint, ScrumMasterClient $hermes): RedirectResponse
     {
         if (! DB::table('migrations')->where('migration', '2026_10_08_000001_make_sprint_goal_and_legacy_dates_optional')->exists()) {
             return back()->withErrors(['goal' => 'Pembuatan Sprint Goal menunggu migrasi Sprint Backlog. Data tidak diubah.']);

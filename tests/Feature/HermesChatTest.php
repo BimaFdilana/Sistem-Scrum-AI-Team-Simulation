@@ -4,11 +4,9 @@ namespace Tests\Feature;
 
 use App\Models\Project;
 use App\Models\User;
-use App\Services\AgentConfiguration;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
-use Mockery\MockInterface;
 use Tests\TestCase;
 
 /**
@@ -25,13 +23,11 @@ class HermesChatTest extends TestCase
     private function mockStrictSm(string $model = 'gpt-5.6-sol'): void
     {
         config([
-            'ai.cliproxy.agents_enabled' => true,
+            'ai.antigravity.enabled' => true,
             'ai.cliproxy.api_key' => 'test-key',
             'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
         ]);
-        $this->mock(AgentConfiguration::class, function (MockInterface $mock) use ($model) {
-            $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => $model]);
-        });
+        $this->useAiModel($model, ['scrum-master' => $model]);
     }
 
     private function fakeGatewayChat(string $text, string $model = 'gpt-5.6-sol'): void
@@ -65,7 +61,6 @@ class HermesChatTest extends TestCase
         ]);
 
         Http::assertSent(fn (Request $request): bool => $request->url() === 'http://127.0.0.1:8317/v1/chat/completions'
-            && $request->hasHeader('Authorization', 'Bearer test-key')
             && $request['model'] === 'gpt-5.6-sol'
             && $request['messages'][0]['role'] === 'system'
             && str_contains($request['messages'][0]['content'], 'ScrumSpace platform itself')
@@ -137,11 +132,9 @@ class HermesChatTest extends TestCase
             'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
             'ai.cliproxy.management_key' => 'test-mgmt-key',
             'ai.cliproxy.api_key' => 'test-key',
-            'ai.cliproxy.agents_enabled' => true,
+            'ai.antigravity.enabled' => true,
         ]);
-        $this->mock(AgentConfiguration::class, function (MockInterface $mock) {
-            $mock->shouldReceive('current')->andReturn(['status' => 'verified', 'model' => 'gpt-5.6-sol']);
-        });
+        $this->useAiModel('gpt-5.6-sol');
 
         Http::fake([
             'http://127.0.0.1:8317/v0/management/auth-files' => Http::response(['files' => [[
@@ -169,7 +162,7 @@ class HermesChatTest extends TestCase
         // belum-memilih (aturan tanpa-default) — bukan pesan generik
         // lama — dan tetap tidak membocorkan kunci apa pun.
         config([
-            'ai.cliproxy.agents_enabled' => true,
+            'ai.antigravity.enabled' => true,
             'ai.cliproxy.api_key' => 'must-not-leak',
             'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
         ]);
@@ -179,7 +172,7 @@ class HermesChatTest extends TestCase
         $this->actingAs(User::factory()->create())
             ->postJson('/chat/messages', ['message' => 'Halo'])
             ->assertServiceUnavailable()
-            ->assertJsonPath('message', 'Model AI belum dipilih di halaman AI Providers — alur tidak dijalankan.');
+            ->assertJsonPath('message', 'Model AI belum dipilih di halaman AI Model — alur tidak dijalankan.');
 
         $this->get('/chat')->assertOk()->assertDontSee('must-not-leak');
     }

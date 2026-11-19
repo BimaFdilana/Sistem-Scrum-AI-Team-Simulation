@@ -8,7 +8,7 @@ use App\Models\PermissionRequest;
 use App\Models\Story;
 use App\Services\AiGateway;
 use App\Services\ChatDisclosurePolicy;
-use App\Services\HermesClient;
+use App\Services\ScrumMasterClient;
 use App\Support\Agents\AgentSoul;
 use App\Support\Chat\CodeContext;
 use App\Support\Execution\ExecutionScheduler;
@@ -37,7 +37,7 @@ class BreakdownExecutionJob implements ShouldQueue
 
     public function __construct(public readonly int $runId) {}
 
-    public function handle(HermesClient $scrumMaster, ChatDisclosurePolicy $disclosure): void
+    public function handle(ScrumMasterClient $scrumMaster, ChatDisclosurePolicy $disclosure): void
     {
         $run = ExecutionRun::query()->with(['story.project'])->find($this->runId);
         if (! $run || $run->status !== 'QUEUED') {

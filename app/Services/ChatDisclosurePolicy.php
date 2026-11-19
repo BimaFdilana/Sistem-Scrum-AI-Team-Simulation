@@ -37,7 +37,7 @@ class ChatDisclosurePolicy
 
     public function safeResponseFor(string $message, ?string $agentName = null, bool $projectContext = false): ?string
     {
-        if (preg_match('/\bhermes\b/i', $message) === 1) {
+        if (preg_match('/\b(hermes|antigravity|agy)\b/i', $message) === 1) {
             if ($agentName !== null && $agentName !== 'Scrum Master') {
                 return 'Saya adalah AI Agent '.$agentName.' dan menggunakan tools AI Agent yang tersedia di workspace. Detail implementasi internal tidak dibagikan.';
             }

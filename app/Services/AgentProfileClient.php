@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\AiUnavailableException;
 use App\Exceptions\ModelProblemException;
 use App\Support\Agents\AgentSoul;
 use RuntimeException;
@@ -63,14 +64,13 @@ class AgentProfileClient
         // tidak ada panggilan model sama sekali — tidak ada fallback ke
         // jalur konsultasi legacy maupun ke model lain.
         $resolver = app(StrictModelResolver::class);
-        $cliproxy = app(CliProxyApiClient::class);
         $model = $resolver->require($slug);
-        $result = $cliproxy->chatResilient($model, $systemPrompt, $message);
+        $result = app(AntigravityClient::class)->chatResilient($model, $systemPrompt, $message);
         if ($result['text'] === null) {
             if (($result['error'] ?? null) === 'MODEL_PROBLEMATIC') {
                 throw new ModelProblemException($model, $resolver->modelProblemMessage($model));
             }
-            throw new \App\Exceptions\AiUnavailableException($result['error'] ?? 'UNKNOWN', '', $result['retry_after'] ?? null, $model);
+            throw new AiUnavailableException($result['error'] ?? 'UNKNOWN', '', $result['retry_after'] ?? null, $model);
         }
 
         if ($applyDisclosureFilter && app(ChatDisclosurePolicy::class)->containsSensitiveDisclosure($result['text'])) {

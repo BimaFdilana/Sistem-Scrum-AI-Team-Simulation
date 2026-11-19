@@ -3,7 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\ChatCommand;
-use App\Services\HermesClient;
+use App\Services\ScrumMasterClient;
 use App\Support\Agents\AgentSoul;
 use App\Support\Chat\CodeContext;
 use Illuminate\Bus\Queueable;
@@ -35,7 +35,7 @@ class UnderstandChatCommandJob implements ShouldQueue
 
     public function __construct(public int $commandId) {}
 
-    public function handle(HermesClient $scrumMaster): void
+    public function handle(ScrumMasterClient $scrumMaster): void
     {
         $command = ChatCommand::query()->with(['conversation', 'project', 'sprint'])->find($this->commandId);
         if ($command === null || $command->phase !== ChatCommand::UNDERSTANDING || $command->conversation === null) {

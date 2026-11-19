@@ -12,9 +12,8 @@ use App\Models\Project;
 use App\Models\Story;
 use App\Models\User;
 use App\Services\AgentProfileClient;
-use App\Services\AgentToolRunner;
 use App\Services\ChatDisclosurePolicy;
-use App\Services\HermesClient;
+use App\Services\ScrumMasterClient;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -62,7 +61,7 @@ class SequentialExecutionTest extends TestCase
         $run = ExecutionRun::query()->create([
             'story_id' => $story->id, 'requested_by' => $owner->id, 'status' => 'QUEUED',
         ]);
-        $fake = Mockery::mock(HermesClient::class);
+        $fake = Mockery::mock(ScrumMasterClient::class);
         $fake->shouldReceive('sendMessage')->once()->andReturn($this->withCriteria(['tasks' => [
             ['title' => 'Partial dulu', 'description' => 'Buat partial.', 'assignee' => 'backend-developer', 'files' => []],
             ['title' => 'Baru styling', 'description' => 'Pakai partial task sebelumnya.', 'assignee' => 'frontend-developer', 'files' => []],
@@ -164,14 +163,13 @@ class SequentialExecutionTest extends TestCase
         ]);
 
         $capturedPrompt = null;
-        $runner = Mockery::mock(AgentToolRunner::class);
-        $runner->shouldReceive('run')->once()->withArgs(function ($slug, $worktree, $prompt) use (&$capturedPrompt) {
+        $this->fakeDeveloper(function ($agent, $worktree, $prompt) use (&$capturedPrompt) {
             $capturedPrompt = $prompt;
             file_put_contents($worktree.'/file2.txt', 'dari task kedua');
 
-            return true;
-        })->andReturn(['files' => ['file2.txt'], 'summary' => 'Menambah konfigurasi ambang']);
-        (new ExecuteExecutionTaskJob($run->id, $second->id))->handle($worktrees, $runner);
+            return null;
+        });
+        (new ExecuteExecutionTaskJob($run->id, $second->id))->handle($worktrees);
 
         $second = $second->fresh();
         $this->assertSame('IN_REVIEW', $second->status);

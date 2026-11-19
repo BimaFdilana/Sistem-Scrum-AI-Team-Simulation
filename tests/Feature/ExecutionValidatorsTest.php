@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Jobs\ExecuteExecutionTaskJob;
 use App\Jobs\ReviewExecutionTaskJob;
 use Tests\TestCase;
 
@@ -14,37 +13,6 @@ class ExecutionValidatorsTest extends TestCase
         $ref->setAccessible(true);
 
         return $ref->invoke($job, $raw);
-    }
-
-    private function makePatchJson(): string
-    {
-        return json_encode(['files' => [
-            ['path' => 'resources/css/components/_scroll-to-top.css', 'action' => 'create', 'content' => '.to-top{display:none}'],
-        ], 'summary' => 'Styling tombol scroll-to-top.']);
-    }
-
-    public function test_fenced_patch_json_is_accepted(): void
-    {
-        // Regresi eksekusi US-01 #2: patch task #2 dibungkus fence + prosa
-        // dulu langsung gagal JsonException "Syntax error".
-        $job = new ExecuteExecutionTaskJob(0, 0);
-        $patch = $this->callPrivate($job, 'validatedPatch', "Berikut patch-nya:\n```json\n".$this->makePatchJson()."\n```");
-
-        $this->assertSame('resources/css/components/_scroll-to-top.css', $patch['files'][0]['path']);
-    }
-
-    public function test_prose_wrapped_patch_json_is_accepted(): void
-    {
-        $job = new ExecuteExecutionTaskJob(0, 0);
-        $patch = $this->callPrivate($job, 'validatedPatch', 'Tentu, ini patch-nya: '.$this->makePatchJson().' Semoga membantu.');
-
-        $this->assertSame('Styling tombol scroll-to-top.', $patch['summary']);
-    }
-
-    public function test_refusal_text_fails_patch_validation(): void
-    {
-        $this->expectException(\Throwable::class);
-        $this->callPrivate(new ExecuteExecutionTaskJob(0, 0), 'validatedPatch', 'Maaf, saya tidak dapat membantu.');
     }
 
     public function test_fenced_review_json_is_accepted(): void

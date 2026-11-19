@@ -5,13 +5,11 @@ namespace Tests\Feature;
 use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\User;
-use App\Services\AgentConfiguration;
 use App\Services\ChatDisclosurePolicy;
 use App\Support\Chat\CodeContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
-use Mockery\MockInterface;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
@@ -65,8 +63,8 @@ class ScrumMasterReadsCodeTest extends TestCase
         $project = $this->project();
         $backlog = $project->backlog()->firstOrCreate([], ['name' => 'B']);
         $sprint = Sprint::create(['backlog_id' => $backlog->id, 'project_id' => $project->id, 'name' => 'Sprint 2', 'status' => 'ACTIVE', 'revision' => 1]);
-        config(['ai.cliproxy.agents_enabled' => true, 'ai.cliproxy.api_key' => 'k', 'ai.cliproxy.base_url' => 'http://127.0.0.1:8317']);
-        $this->mock(AgentConfiguration::class, fn (MockInterface $m) => $m->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'm1']));
+        config(['ai.antigravity.enabled' => true, 'ai.cliproxy.api_key' => 'k', 'ai.cliproxy.base_url' => 'http://127.0.0.1:8317']);
+        $this->useAiModel('m1', ['scrum-master' => 'm1']);
         Http::fake([
             'http://127.0.0.1:8317/v1/models' => Http::response(['data' => [['id' => 'm1', 'owned_by' => 'x']]]),
             'http://127.0.0.1:8317/v1/chat/completions' => Http::response(['choices' => [['message' => ['role' => 'assistant', 'content' => 'Karena kolom nominal kosong.']]]]),

@@ -9,7 +9,7 @@ use App\Models\Project;
 use App\Models\Story;
 use App\Models\User;
 use App\Services\ChatDisclosurePolicy;
-use App\Services\HermesClient;
+use App\Services\ScrumMasterClient;
 use App\Support\Execution\ExecutionScheduler;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -88,7 +88,7 @@ class SchedulerSafetyTest extends TestCase
         $worktrees->shouldNotReceive('head');
         (new MergeExecutionJob($run->id))->handle(
             $worktrees,
-            Mockery::mock(HermesClient::class),
+            Mockery::mock(ScrumMasterClient::class),
             app(ChatDisclosurePolicy::class),
         );
 

@@ -10,13 +10,11 @@ use App\Models\Sprint;
 use App\Models\Story;
 use App\Models\StoryEstimationRun;
 use App\Models\User;
-use App\Services\AgentConfiguration;
 use App\Services\StoryEstimationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
-use Mockery\MockInterface;
 use Tests\TestCase;
 
 class StoryEstimationAsyncTest extends TestCase
@@ -129,7 +127,7 @@ class StoryEstimationAsyncTest extends TestCase
     {
         $job = new EstimateStoryAgentJob(1, 1);
 
-        $this->assertSame(180, $job->timeout);
+        $this->assertSame(600, $job->timeout);
         $this->assertGreaterThan($job->timeout, config('queue.connections.database.retry_after'));
     }
 
@@ -239,13 +237,11 @@ class StoryEstimationAsyncTest extends TestCase
     {
         // Vote QA kini lewat gateway dengan model dari menu.
         config([
-            'ai.cliproxy.agents_enabled' => true,
+            'ai.antigravity.enabled' => true,
             'ai.cliproxy.api_key' => 'test-key',
             'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
         ]);
-        $this->mock(AgentConfiguration::class, function (MockInterface $mock) {
-            $mock->shouldReceive('current')->with('qa-engineer')->andReturn(['status' => 'verified', 'model' => 'qa-model']);
-        });
+        $this->useAiModel('qa-model', ['qa-engineer' => 'qa-model']);
         Http::fake([
             'http://127.0.0.1:8317/v1/models' => Http::response(['data' => [['id' => 'qa-model', 'owned_by' => 'openai']]]),
             'http://127.0.0.1:8317/v1/chat/completions' => Http::response(['choices' => [['message' => ['content' => 'Saya menilai story ini 5 poin.']]]]),

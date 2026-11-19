@@ -8,7 +8,6 @@ use App\Models\ExecutionRun;
 use App\Models\Project;
 use App\Models\Story;
 use App\Models\User;
-use App\Services\AgentToolRunner;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -120,10 +119,7 @@ class RunsWatchdogTest extends TestCase
     {
         [, $run, $task] = $this->runWithStalledTask(); // sudah IN_PROGRESS
 
-        (new ExecuteExecutionTaskJob($run->id, $task->id))->handle(
-            app(WorktreeManager::class),
-            app(AgentToolRunner::class),
-        );
+        (new ExecuteExecutionTaskJob($run->id, $task->id))->handle(app(WorktreeManager::class));
 
         $this->assertSame('IN_PROGRESS', $task->fresh()->status);
         $this->assertSame(0, (int) $task->fresh()->attempt_seq);

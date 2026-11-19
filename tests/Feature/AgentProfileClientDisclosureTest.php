@@ -3,22 +3,23 @@
 namespace Tests\Feature;
 
 use App\Services\AgentProfileClient;
+use App\Services\AntigravityClient;
 use App\Services\ChatDisclosurePolicy;
-use App\Services\CliProxyApiClient;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery;
 use Tests\TestCase;
 
 class AgentProfileClientDisclosureTest extends TestCase
 {
+    use RefreshDatabase;
+
     private function mockCliproxy(string $text, ?callable $captureSystemPrompt = null): void
     {
         // sendMessage kini me-resolve model QA lewat StrictModelResolver:
         // mock snapshot terverifikasi + katalog gateway, bukan resolveModel.
-        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
-            $mock->shouldReceive('current')->with('qa-engineer')->andReturn(['status' => 'verified', 'model' => 'gemini-test']);
-        });
-        $cliproxy = Mockery::mock(CliProxyApiClient::class);
-        $cliproxy->shouldReceive('models')->andReturn([['id' => 'gemini-test', 'owned_by' => 'google']]);
+        $this->useAiModel('gemini-test', ['qa-engineer' => 'gemini-test']);
+        $cliproxy = Mockery::mock(AntigravityClient::class);
+        $cliproxy->shouldReceive('modelIds')->andReturn(['gemini-test']);
         $cliproxy->shouldReceive('chatResilient')->withArgs(function ($model, $systemPrompt, $message) use ($captureSystemPrompt) {
             if ($captureSystemPrompt !== null) {
                 $captureSystemPrompt($systemPrompt);
@@ -26,7 +27,7 @@ class AgentProfileClientDisclosureTest extends TestCase
 
             return true;
         })->andReturn(['text' => $text, 'error' => null, 'model' => 'gemini-test']);
-        $this->app->instance(CliProxyApiClient::class, $cliproxy);
+        $this->app->instance(AntigravityClient::class, $cliproxy);
     }
 
     public function test_qa_words_no_longer_replace_structured_vote(): void

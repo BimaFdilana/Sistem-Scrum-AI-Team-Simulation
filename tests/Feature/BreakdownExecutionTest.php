@@ -8,10 +8,9 @@ use App\Models\PermissionRequest;
 use App\Models\Project;
 use App\Models\Story;
 use App\Models\User;
-use App\Services\AgentConfiguration;
+use App\Services\AntigravityClient;
 use App\Services\ChatDisclosurePolicy;
-use App\Services\CliProxyApiClient;
-use App\Services\HermesClient;
+use App\Services\ScrumMasterClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery;
 use Tests\TestCase;
@@ -92,7 +91,7 @@ class BreakdownExecutionTest extends TestCase
     private function breakdownWith(string $smAnswer): ExecutionRun
     {
         $run = $this->makeRun();
-        $fake = Mockery::mock(HermesClient::class);
+        $fake = Mockery::mock(ScrumMasterClient::class);
         $fake->shouldReceive('sendMessage')->once()->andReturn($smAnswer);
         (new BreakdownExecutionJob($run->id))->handle($fake, app(ChatDisclosurePolicy::class));
 
@@ -127,7 +126,7 @@ class BreakdownExecutionTest extends TestCase
     public function test_refusal_text_fails_breakdown_without_tasks(): void
     {
         $run = $this->makeRun();
-        $fake = Mockery::mock(HermesClient::class);
+        $fake = Mockery::mock(ScrumMasterClient::class);
         // Satu percobaan awal + dua kesempatan perbaikan; ketiganya menolak.
         $fake->shouldReceive('sendMessage')->times(3)->andReturn(ChatDisclosurePolicy::SAFE_RESPONSE);
 
@@ -149,19 +148,17 @@ class BreakdownExecutionTest extends TestCase
         $captured = null;
         // sendMessage SM kini ketat: mock snapshot terverifikasi +
         // katalog gateway, bukan resolveModel.
-        $config = Mockery::mock(AgentConfiguration::class);
-        $config->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'gemini-test']);
-        $this->app->instance(AgentConfiguration::class, $config);
-        $cliproxy = Mockery::mock(CliProxyApiClient::class);
-        $cliproxy->shouldReceive('models')->andReturn([['id' => 'gemini-test', 'owned_by' => 'google']]);
+        $this->useAiModel('gemini-test');
+        $cliproxy = Mockery::mock(AntigravityClient::class);
+        $cliproxy->shouldReceive('modelIds')->andReturn(['gemini-test']);
         $cliproxy->shouldReceive('chatResilient')->withArgs(function ($model, $systemPrompt, $message) use (&$captured) {
             $captured = $systemPrompt;
 
             return true;
         })->andReturn(['text' => $this->tasksJson(), 'error' => null, 'model' => 'gemini-test']);
-        $this->app->instance(CliProxyApiClient::class, $cliproxy);
+        $this->app->instance(AntigravityClient::class, $cliproxy);
 
-        app(HermesClient::class)->sendMessage('Pecah story.', 'test-breakdown');
+        app(ScrumMasterClient::class)->sendMessage('Pecah story.', 'test-breakdown');
 
         $this->assertNotNull($captured);
         // Project PO terbuka — termasuk mendaftar files yang diubah.
@@ -198,7 +195,7 @@ class BreakdownExecutionTest extends TestCase
         ]]]);
 
         $prompts = [];
-        $fake = Mockery::mock(HermesClient::class);
+        $fake = Mockery::mock(ScrumMasterClient::class);
         $fake->shouldReceive('sendMessage')->twice()->andReturnUsing(function (string $prompt) use (&$prompts, $broken, $fixed) {
             $prompts[] = $prompt;
 
@@ -233,7 +230,7 @@ class BreakdownExecutionTest extends TestCase
             'files' => ['app/Http/Controllers/OrderController.php'],
         ]]]);
 
-        $fake = Mockery::mock(HermesClient::class);
+        $fake = Mockery::mock(ScrumMasterClient::class);
         $fake->shouldReceive('sendMessage')->times(3)->andReturn($bad, $bad, $bad);
 
         try {
@@ -261,7 +258,7 @@ class BreakdownExecutionTest extends TestCase
             'files' => ['app/Http/Controllers/TransaksiController.php'],
         ]]]);
 
-        $fake = Mockery::mock(HermesClient::class);
+        $fake = Mockery::mock(ScrumMasterClient::class);
         $fake->shouldReceive('sendMessage')->once()->andReturn($answers);
 
         (new BreakdownExecutionJob($run->id))->handle($fake, app(ChatDisclosurePolicy::class));
@@ -289,7 +286,7 @@ class BreakdownExecutionTest extends TestCase
         ]]]);
 
         $prompts = [];
-        $fake = Mockery::mock(HermesClient::class);
+        $fake = Mockery::mock(ScrumMasterClient::class);
         $fake->shouldReceive('sendMessage')->twice()->andReturnUsing(function (string $prompt) use (&$prompts, $incomplete, $complete) {
             $prompts[] = $prompt;
 
@@ -324,7 +321,7 @@ class BreakdownExecutionTest extends TestCase
         ]]);
 
         $prompts = [];
-        $fake = Mockery::mock(HermesClient::class);
+        $fake = Mockery::mock(ScrumMasterClient::class);
         $fake->shouldReceive('sendMessage')->twice()->andReturnUsing(function (string $prompt) use (&$prompts, $noCriteria, $complete) {
             $prompts[] = $prompt;
 
@@ -355,7 +352,7 @@ class BreakdownExecutionTest extends TestCase
             ['criterion' => 'Klik menggulir halus ke atas.', 'tasks' => [1]],
         ]]);
 
-        $fake = Mockery::mock(HermesClient::class);
+        $fake = Mockery::mock(ScrumMasterClient::class);
         $fake->shouldReceive('sendMessage')->times(3)->andReturn($orphan);
 
         try {
@@ -376,7 +373,7 @@ class BreakdownExecutionTest extends TestCase
             ['criterion' => 'Tombol muncul setelah scroll.', 'tasks' => [1]],
         ]]);
 
-        $fake = Mockery::mock(HermesClient::class);
+        $fake = Mockery::mock(ScrumMasterClient::class);
         $fake->shouldReceive('sendMessage')->times(3)->andReturn($partial);
 
         try {

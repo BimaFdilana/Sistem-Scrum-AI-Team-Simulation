@@ -21,6 +21,7 @@ class FriendlyText
         '/\bHermes\b/i' => 'agen cadangan',
         '/\bOpenCode\b/i' => 'developer AI',
         '/\bCLIProxyAPI\b/i' => 'gateway AI',
+        '/\bAntigravity(?:\s+CLI)?\b/i' => 'developer AI',
         '/\/usr\/bin\/(?:opencode|hermes)/i' => 'developer AI',
     ];
 
@@ -34,6 +35,9 @@ class FriendlyText
         'KANBAN_NO_CHANGES' => 'TANPA_PERUBAHAN_KODE',
         'HERMES_PROFILE_NOT_FOUND' => 'PROFIL_AGEN_TIDAK_ADA',
         'HERMES_PROFILE_MISSING' => 'PROFIL_AGEN_TIDAK_ADA',
+        'AGENT_FAILED' => 'DEVELOPER_AI_GAGAL',
+        'AGENT_NO_CHANGES' => 'TANPA_PERUBAHAN_KODE',
+        'AI_NOT_LOGGED_IN' => 'AKUN_AI_BELUM_TERHUBUNG',
     ];
 
     public static function clean(?string $text): string

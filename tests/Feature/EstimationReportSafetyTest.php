@@ -9,7 +9,7 @@ use App\Models\Sprint;
 use App\Models\Story;
 use App\Models\StoryEstimationRun;
 use App\Models\User;
-use App\Services\HermesClient;
+use App\Services\ScrumMasterClient;
 use App\Services\StoryEstimationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -84,13 +84,13 @@ class EstimationReportSafetyTest extends TestCase
         $run = $this->pendingRun();
         $baseline = DB::transactionLevel();
         $levels = [];
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->andReturnUsing(function () use (&$levels) {
             $levels[] = DB::transactionLevel();
 
             return 'Tim sepakat 3 poin setelah diskusi.';
         });
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
 
         $result = app(StoryEstimationService::class)->report($run, $this->owner);
 
@@ -103,9 +103,9 @@ class EstimationReportSafetyTest extends TestCase
     public function test_invalid_summary_keeps_run_pending_for_retry(): void
     {
         $run = $this->pendingRun();
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->once()->andReturn('');
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
 
         $result = app(StoryEstimationService::class)->report($run, $this->owner);
 
@@ -116,9 +116,9 @@ class EstimationReportSafetyTest extends TestCase
     public function test_report_job_saves_consensus_after_scrum_master_keeps_failing(): void
     {
         $run = $this->pendingRun();
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->andReturn('');
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
         $job = new SendStoryEstimationReportJob($run->id);
         $job->tries = 1; // percobaan terakhir
 

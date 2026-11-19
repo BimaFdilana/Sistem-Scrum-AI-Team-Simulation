@@ -9,7 +9,7 @@ use App\Models\Story;
 use App\Models\StoryEstimationRun;
 use App\Models\User;
 use App\Services\AgentProfileClient;
-use App\Services\HermesClient;
+use App\Services\ScrumMasterClient;
 use App\Services\StoryEstimationService;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -159,13 +159,13 @@ class StoryEstimationConsensusCoreTest extends TestCase
             return json_encode(['estimate_points' => 5, 'rationale' => 'Ukuran sah', 'response' => 'Setuju semua.', 'explicit_agree' => true]);
         });
         $this->app->instance(AgentProfileClient::class, $agents);
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->once()->andReturnUsing(function () use ($story) {
             $story->sprint->update(['status' => 'ACTIVE']);
 
             return 'Laporan sah.';
         });
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
         $this->assertNotSame('COMPLETED', $run->status);
         $this->assertNull($story->fresh()->estimate_points);
@@ -231,9 +231,9 @@ class StoryEstimationConsensusCoreTest extends TestCase
             return json_encode(['estimate_points' => 5, 'rationale' => 'Ukuran sah', 'response' => 'Setuju semua.', 'explicit_agree' => true]);
         });
         $this->app->instance(AgentProfileClient::class, $agents);
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldNotReceive('sendMessage');
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
         $cancelled = false;
         DB::listen(function ($query) use (&$cancelled, $story): void {
             if (! $cancelled && str_contains($query->sql, 'select "status" from "story_estimation_runs"')
@@ -261,9 +261,9 @@ class StoryEstimationConsensusCoreTest extends TestCase
             return json_encode(['estimate_points' => 5, 'rationale' => 'Ukuran sah', 'response' => 'Setuju semua.', 'explicit_agree' => true]);
         });
         $this->app->instance(AgentProfileClient::class, $agents);
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->once()->andReturn('');
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
         $service = app(StoryEstimationService::class);
         $run = $service->estimate($story, $owner);
         $this->assertSame('REPORT_PENDING', $run->status);
@@ -287,13 +287,13 @@ class StoryEstimationConsensusCoreTest extends TestCase
             return json_encode(['estimate_points' => $point, 'rationale' => 'Analisis nyata '.$slug.' putaran '.$round] + ($round === 2 ? ['response' => 'Menanggapi pendapat tim.', 'explicit_agree' => true] : ($round === 1 ? [] : ['explicit_agree' => true])));
         });
         $this->app->instance(AgentProfileClient::class, $agents);
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->twice()->withArgs(function ($prompt) {
             $this->assertStringContainsString('Analisis nyata qa-engineer putaran 2', $prompt);
 
             return true;
         })->andReturn('Laporan berdasar diskusi.');
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
 
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
 
@@ -330,9 +330,9 @@ class StoryEstimationConsensusCoreTest extends TestCase
             return '{"estimate_points":5,"explicit_agree":true,"rationale":"Konfirmasi akhir 5."}';
         });
         $this->app->instance(AgentProfileClient::class, $agents);
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->twice()->andReturn('Laporan berdasar bukti.');
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
 
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
 
@@ -361,9 +361,9 @@ class StoryEstimationConsensusCoreTest extends TestCase
                     : ['estimate_points' => 5, 'explicit_agree' => false, 'rationale' => 'Konfirmasi ditolak']));
         });
         $this->app->instance(AgentProfileClient::class, $agents);
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->twice()->andReturn('Laporan final.');
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
 
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
 
@@ -386,9 +386,9 @@ class StoryEstimationConsensusCoreTest extends TestCase
                     ? ['response' => 'Tidak setuju dengan argumen lain.', 'explicit_agree' => false] : ($round === 1 ? [] : ['explicit_agree' => true])));
         });
         $this->app->instance(AgentProfileClient::class, $agents);
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->twice()->andReturn('Ringkasan deadlock: maksimum 8.');
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
 
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
 
@@ -416,14 +416,14 @@ class StoryEstimationConsensusCoreTest extends TestCase
             return json_encode(['estimate_points' => 8, 'rationale' => 'Penilaian scope '.$slug, 'response' => 'Setuju pada estimasi 8.', 'explicit_agree' => true]);
         });
         $this->app->instance(AgentProfileClient::class, $agents);
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->times(3)->andReturnUsing(function ($prompt) {
             static $calls = 0;
             $this->assertStringContainsString('Penilaian scope backend-developer', $prompt);
 
             return ++$calls === 1 ? '' : 'Laporan atas poin delapan.';
         });
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
 
         $service = app(StoryEstimationService::class);
         $run = $service->estimate($story, $owner);
@@ -458,9 +458,9 @@ class StoryEstimationConsensusCoreTest extends TestCase
             return json_encode(['estimate_points' => 5, 'rationale' => 'Mandiri', 'response' => 'Belum ada persetujuan.', 'explicit_agree' => false]);
         });
         $this->app->instance(AgentProfileClient::class, $agents);
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->twice()->andReturn('Ringkasan: maksimum 5.');
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
 
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
 
@@ -482,9 +482,9 @@ class StoryEstimationConsensusCoreTest extends TestCase
                 + ($round === 2 ? ['response' => 'Kesimpulan bersama.', 'explicit_agree' => true] : ($round === 1 ? [] : ['explicit_agree' => true])));
         });
         $this->app->instance(AgentProfileClient::class, $agents);
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->once()->andReturn('');
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
         $service = app(StoryEstimationService::class);
         $run = $service->estimate($story, $owner);
         $this->assertSame('REPORT_PENDING', $run->status);
@@ -509,9 +509,9 @@ class StoryEstimationConsensusCoreTest extends TestCase
             ? json_encode(['estimate_points' => 5, 'rationale' => "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBg==\n-----END PRIVATE KEY-----"])
             : '{"estimate_points":"lima","rationale":"Alasan sah"}');
         $this->app->instance(AgentProfileClient::class, $agents);
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldNotReceive('sendMessage');
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
 
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
 
@@ -536,9 +536,9 @@ class StoryEstimationConsensusCoreTest extends TestCase
                 + ($round > 1 ? ['response' => 'Masih beda pendapat.', 'explicit_agree' => false] : ($round === 1 ? [] : ['explicit_agree' => true])));
         });
         $this->app->instance(AgentProfileClient::class, $agents);
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldNotReceive('sendMessage');
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
 
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
 
@@ -558,9 +558,9 @@ class StoryEstimationConsensusCoreTest extends TestCase
                 + ($round === 2 ? ['response' => 'Sepakat dua.', 'explicit_agree' => true] : ($round === 1 ? [] : ['explicit_agree' => true])));
         });
         $this->app->instance(AgentProfileClient::class, $agents);
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->twice()->andReturn('Laporan dua poin.');
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
         $service = app(StoryEstimationService::class);
 
         $first = $service->estimate($story, $owner);
@@ -582,9 +582,9 @@ class StoryEstimationConsensusCoreTest extends TestCase
                 + ($round === 2 ? ['response' => 'Saya sudah membaca pesan tim dan setuju 5.', 'explicit_agree' => true] : ($round === 1 ? [] : ['explicit_agree' => true])));
         });
         $this->app->instance(AgentProfileClient::class, $agents);
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->twice()->andReturn('Tim sepakat lima poin.');
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
 
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
 

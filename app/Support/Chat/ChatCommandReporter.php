@@ -74,7 +74,7 @@ class ChatCommandReporter
                 .($summary !== '' ? "\n\nCatatan QA: ".Str::limit($summary, 400) : '')
                 ."\n\nCoba hasilnya di demo (Pengaturan & Demo project), lalu pilih **Terima** atau **Tandai Gagal** di bawah.",
             'NEEDS_PO' => $run->error_code === 'QUOTA_EXHAUSTED'
-                ? "⚠ Pekerjaan dijeda karena kuota model AI habis.\n\n".Str::limit($summary, 400)."\n\nSetelah mengganti model aktif di AI Providers (atau kuota pulih), klik **Lanjutkan**. Pekerjaan diteruskan dari task yang tertahan."
+                ? "⚠ Pekerjaan dijeda karena kuota model AI habis.\n\n".Str::limit($summary, 400)."\n\nSetelah mengganti model aktif di halaman AI Model (atau kuota pulih), klik **Lanjutkan**. Pekerjaan diteruskan dari task yang tertahan."
                 : 'Pekerjaan berhenti dan butuh keputusan Anda: '.Str::limit($summary !== '' ? $summary : 'lihat detail proses.', 500)
                 ."\n\nKlik **Lanjutkan** untuk mencoba lagi, atau **Tandai Gagal**.",
             'FAILED' => $run->error_code === 'STOPPED_BY_PO'
@@ -114,7 +114,7 @@ class ChatCommandReporter
             || str_contains($text, 'exceeded the timeout') || str_contains($text, 'timed out') || str_contains($text, 'waktu habis')) {
             return 'too_big';
         }
-        if (in_array($code, ['BREAKDOWN_FAILED', 'OPENCODE_NO_CHANGES', 'REVIEW_FAILED'], true)) {
+        if (in_array($code, ['BREAKDOWN_FAILED', 'OPENCODE_NO_CHANGES', 'AGENT_NO_CHANGES', 'REVIEW_FAILED'], true)) {
             return 'unclear';
         }
 
@@ -126,8 +126,8 @@ class ChatCommandReporter
     {
         return match (self::failureKind($run)) {
             'setup' => AiQuota::isQuotaText((string) $run->summary) || $run->error_code === 'QUOTA_EXHAUSTED'
-                ? 'Penyebab: kuota model AI habis. Ganti model aktif di menu AI Providers, atau tunggu kuota pulih.'
-                : 'Penyebab: model AI belum dipilih atau sedang bermasalah. Buka menu AI Providers dan pilih model yang tersedia.',
+                ? 'Penyebab: kuota model AI habis. Ganti model aktif di halaman AI Model, atau tunggu kuota pulih.'
+                : 'Penyebab: model AI belum dipilih atau sedang bermasalah. Buka halaman AI Model dan pilih model yang tersedia.',
             'too_big' => 'Penyebab: pekerjaannya terlalu besar untuk satu putaran (developer kehabisan waktu atau QA terus menemukan masalah).',
             'unclear' => 'Penyebab: Scrum Master tidak bisa memetakan perintah menjadi tugas yang jelas (kriteria terlalu banyak, terlalu umum, atau tidak ada perubahan kode yang dihasilkan).',
             default => 'Penyebab: gangguan sementara pada AI atau koneksi server.',

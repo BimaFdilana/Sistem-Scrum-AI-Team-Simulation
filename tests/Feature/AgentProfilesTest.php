@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -29,13 +28,11 @@ class AgentProfilesTest extends TestCase
         // Chat SM kini lewat gateway CLIProxyAPI dengan model SM dari
         // menu (aturan tanpa-default) — bukan lagi endpoint legacy.
         config([
-            'ai.cliproxy.agents_enabled' => true,
+            'ai.antigravity.enabled' => true,
             'ai.cliproxy.api_key' => 'test-key',
             'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
         ]);
-        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
-            $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'sm-model']);
-        });
+        $this->useAiModel('sm-model', ['scrum-master' => 'sm-model']);
         Http::fake([
             'http://127.0.0.1:8317/v1/models' => Http::response(['data' => [['id' => 'sm-model', 'owned_by' => 'openai']]]),
             'http://127.0.0.1:8317/v1/chat/completions' => Http::response([

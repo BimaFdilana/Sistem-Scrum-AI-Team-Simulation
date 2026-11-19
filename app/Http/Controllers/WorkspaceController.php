@@ -2,18 +2,23 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Task;
+use App\Models\ExecutionMessage;
+use App\Models\ExecutionRun;
+use App\Models\PermissionRequest;
+use App\Models\Project;
+use App\Models\Story;
 use App\Models\StoryEstimationAgentRun;
+use App\Models\Task;
 use App\Services\AiStatusService;
-use App\Services\HermesClient;
+use App\Services\ScrumMasterClient;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
 
 class WorkspaceController extends Controller
 {
-    public function dashboard(HermesClient $hermes): View
+    public function dashboard(ScrumMasterClient $hermes): View
     {
-        $stories = \App\Models\Story::query()
+        $stories = Story::query()
             ->with(['project', 'actor', 'executionRuns.tasks'])
             ->latest('id')
             ->get();
@@ -21,17 +26,17 @@ class WorkspaceController extends Controller
         $accepted = $stories->filter(fn ($story) => $story->isAccepted())->count();
 
         $activeRuns = Schema::hasTable('execution_runs')
-            ? \App\Models\ExecutionRun::query()
+            ? ExecutionRun::query()
                 ->whereIn('status', ['QUEUED', 'BREAKDOWN', 'AWAITING_PERMISSION', 'EXECUTING', 'REVIEWING', 'QA_REVIEW', 'MERGING'])
                 ->count()
             : 0;
 
         $pendingPermissions = Schema::hasTable('permission_requests')
-            ? \App\Models\PermissionRequest::query()->where('status', 'PENDING')->count()
+            ? PermissionRequest::query()->where('status', 'PENDING')->count()
             : 0;
 
         $activities = Schema::hasTable('execution_messages')
-            ? \App\Models\ExecutionMessage::query()
+            ? ExecutionMessage::query()
                 ->with('run.story')
                 ->latest('id')
                 ->limit(8)
@@ -43,7 +48,7 @@ class WorkspaceController extends Controller
             'hermesConnected' => $hermes->isAvailable(),
             'boardStories' => $stories,
             'stats' => [
-                'projects' => \App\Models\Project::query()->count(),
+                'projects' => Project::query()->count(),
                 'stories' => $stories->count(),
                 'accepted' => $accepted,
                 'active_runs' => $activeRuns,

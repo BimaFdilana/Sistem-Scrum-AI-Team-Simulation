@@ -3,27 +3,23 @@
 namespace App\Jobs;
 
 use App\Exceptions\AiUnavailableException;
+use App\Exceptions\ModelProblemException;
 use App\Models\ExecutionRun;
 use App\Models\ExecutionTask;
 use App\Models\Notification;
-use App\Models\PermissionRequest;
 use App\Models\Project;
-use App\Services\AgentProfileClient;
-use App\Services\AgentToolRunner;
 use App\Services\AiGateway;
-use App\Services\CliProxyApiClient;
-use App\Services\KanbanClient;
+use App\Services\AntigravityClient;
 use App\Services\StrictModelResolver;
 use App\Support\Ai\AiQuota;
+use App\Support\Ai\ProjectMemory;
 use App\Support\Execution\DirectWorkspace;
 use App\Support\Execution\ExecutionStopper;
 use App\Support\Execution\ExecutorPlanner;
-use App\Support\Execution\OpenCodeRunner;
 use App\Support\Execution\ProjectFacts;
 use App\Support\Execution\TaskCompletion;
 use App\Support\Execution\TaskFileScope;
 use App\Support\Ui\FriendlyText;
-use App\Support\Workspace\PatchApplier;
 use App\Support\Workspace\WorktreeManager;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -32,9 +28,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use RuntimeException;
 use Symfony\Component\Process\Exception\ProcessSignaledException;
-use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Throwable;
 
 /**
@@ -53,15 +47,14 @@ class ExecuteExecutionTaskJob implements ShouldQueue
         public readonly int $runId,
         public readonly int $taskId,
     ) {
-        // Tugas Hermes bisa berjalan jauh lebih lama dari loop lama
-        // (simulasi US-01: 248 detik) — beri ruang, tetap dengan batas
+        // Task agen developer Antigravity bisa berjalan lama (task_timeout
+        // 1500 detik) — beri ruang, tetap dengan batas
         // agar kegagalan tetap tercatat bersih.
-        $this->timeout = config('ai.execution_driver') === 'hermes' ? 1800 : 600;
+        $this->timeout = 1800;
     }
 
     public function handle(
         WorktreeManager $worktrees,
-        AgentToolRunner $runner,
     ): void {
         $run = ExecutionRun::query()->find($this->runId);
         $task = ExecutionTask::query()->find($this->taskId);
@@ -177,7 +170,6 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                 $task->forceFill(['worktree_path' => $worktree, 'branch' => $branch, 'chain_base' => $chainBase, 'attempt_seq' => $attempt])->save();
             }
 
-            $useHermes = config('ai.execution_driver') === 'hermes';
             // Konteks hasil task sebelumnya yang sudah QA-APPROVED dalam
             // run yang sama — dibangun SEKALI di sini (shared) sehingga
             // berlaku untuk driver internal maupun Hermes. Ringkas:
@@ -186,20 +178,11 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             $previousSection = $previousContext !== ''
                 ? 'Hasil task sebelumnya dalam run ini (sudah disetujui QA — bangun di atasnya, jangan mengubah keputusan/interface yang sudah diputuskan kecuali task ini memintanya):'."\n".$previousContext
                 : '';
-            // Prompt Hermes tidak menyebut tool lama (read_file/apply_edit/
-            // submit_task tidak ada di Hermes) — ia bekerja dengan tool
-            // file-nya sendiri di worktree; aturan kerja keras ditambahkan
-            // HermesTaskRunner di akhir prompt.
-            // File-scope (keputusan 1 Nov): todo dikirim ke Hermes BERSAMA
-            // daftar file terkait perubahan ini, agar Hermes tidak mengubah
-            // file/project yang salah. Sumber daftar: payload PermissionRequest
-            // yang disetujui PO untuk run ini (di sanalah SM menyimpan
-            // files per task); bila tidak ada, fallback ke bagian FILE di
-            // description task. Daftar ini hanya instruksi di prompt —
-            // tidak mengubah gerbang permission, QA, merge, atau demo.
-            $fileScopeSection = $useHermes ? $this->fileScopeSection($run, $task, $project?->name) : '';
+            // Daftar FILE TERKAIT dari rencana SM yang disetujui PO dikirim
+            // bersama task agar agen tidak mengubah file/project yang salah.
+            $fileScopeSection = $this->fileScopeSection($run, $task, $project?->name);
             $factsSection = $this->projectFactsSection($project);
-            $prompt = $useHermes ? implode("\n\n", array_filter([
+            $prompt = implode("\n\n", array_filter([
                 "Kamu {$task->assigneeName()}. Kerjakan task berikut pada project Laravel di direktori kerja ini.",
                 $originalStatus === 'REVISION' && $task->qa_feedback
                     ? 'REVISI (putaran '.($task->revision_count + 1).'): perbaiki berdasarkan feedback QA berikut: '.$task->qa_feedback
@@ -208,110 +191,11 @@ class ExecuteExecutionTaskJob implements ShouldQueue
                 $previousSection,
                 $this->criteriaSection($run, $task),
                 $factsSection,
-            ])) : implode("\n\n", array_filter([
-                "Kamu {$task->assigneeName()}. Kerjakan task berikut pada project Laravel HANYA lewat tool yang tersedia.",
-                'Langkah: baca file yang relevan dengan read_file, ubah dengan apply_edit (old_text harus cocok persis tepat satu kali), buat file baru dengan create_file, dan akhiri dengan submit_task berisi ringkasan perubahan. Jangan menulis code di teks chat.',
-                $originalStatus === 'REVISION' && $task->qa_feedback
-                    ? 'REVISI (putaran '.($task->revision_count + 1).'): perbaiki berdasarkan feedback QA berikut: '.$task->qa_feedback
-                    : 'Task: '.$task->title.' — '.$task->description,
-                $previousSection,
-                $this->criteriaSection($run, $task),
-                $factsSection,
             ]));
 
-            // Jalur OpenCode (bila peran ini diaktifkan di OPENCODE_ROLES):
-            // coding agent eksternal mengedit worktree, lalu Laravel tetap
-            // melakukan commit + QA + merge seperti biasa.
-            if ($executor === ExecutorPlanner::OPENCODE) {
-                $this->executeWithOpenCode($run, $task, $worktree, $prompt, $worktrees, $baseline);
-
-                return;
-            }
-            // JALUR KANBAN (perubahan 1 Nov, atas perintah Bima): eksekutor
-            // bukan lagi Laravel yang memanggil Hermes satu query
-            // (HermesTaskRunner) — Laravel hanya membuat board project +
-            // kartu todo, lalu MENUNGGU lewat KanbanExecutionPollJob.
-            // Yang mengerjakan kartu adalah worker profile Hermes lewat
-            // dispatcher gateway. Board diturunkan dari project yang
-            // tertaut dengan user story run ini (satu project = satu
-            // board), bukan dibuat manual per story. Gerbang tetap di
-            // Laravel: izin PO sudah lewat sebelum job ini, dan commit +
-            // diff + QA + test gate + merge tetap terjadi di poll job
-            // setelah kartu done — bukan oleh worker kanban.
-            // Pembuat kartu di sini adalah kode ini yang menerjemahkan
-            // todo list breakdown SM; SM profile sendiri belum membuat
-            // kartu lewat tool kanban_create (langkah lanjutan, lihat
-            // KanbanClient). HermesTaskRunner tidak lagi dipakai job ini.
-            if ($useHermes) {
-                if (! $project) {
-                    throw new RuntimeException('Project run tidak ditemukan untuk board kanban.');
-                }
-                $kanban = app(KanbanClient::class);
-                $board = $kanban->boardSlugForProject($project);
-                $kanban->ensureBoard($board, $project->name, 'Board eksekusi project '.$project->name.' dari website Scrum — user story, estimasi multi-agent, dan task todo dari Scrum Master.');
-                $profile = collect(config('agents.profiles', []))
-                    ->firstWhere('slug', $task->assignee)['profile'] ?? $task->assignee;
-                $cardBody = $prompt."\n\nATURAN PENYELESAIAN KANBAN: kerjakan hanya di direktori kerja ini, jangan commit, push, atau merge, jangan mengubah file di luar FILE TERKAIT, dan tandai kartu selesai dengan tool kanban_complete setelah memverifikasi perubahanmu (bukan sebelum). JANGAN menjalankan perintah git apa pun (termasuk git worktree/prune/checkout/commit/clean) — Laravel yang mengurus seluruh operasi git, dan perintah git dari worker pernah merusak registrasi worktree sehingga run gagal. Laravel akan melakukan commit, QA, test gate, dan merge setelah kartu selesai.";
-                $cardId = $kanban->createTask(
-                    $board,
-                    'Task #'.$task->id.': '.$task->title,
-                    $cardBody,
-                    $profile,
-                    $worktree,
-                    'scrum-exec-'.$run->id.'-'.$task->id.'-'.$attempt,
-                );
-                // Titik awal watchdog: aktivitas dihitung sejak kartu dibuat.
-                $task->forceFill(['last_progress_at' => now()])->save();
-                $run->messages()->create([
-                    'execution_task_id' => $task->id,
-                    'sender_slug' => 'scrum-master',
-                    'recipient_slug' => $task->assignee,
-                    'content' => 'Task dikirim ke agen cadangan ('.$profile.') dan sedang dikerjakan.',
-                    'metadata' => ['kanban_board' => $board, 'kanban_task_id' => $cardId, 'revision' => $task->revision_count],
-                ]);
-                KanbanExecutionPollJob::dispatch($run->id, $task->id);
-
-                return;
-            }
-            // Pekerjaan atas project PO: tanpa filter sensor (aturan PO:
-            // tidak ada batasan terhadap project, termasuk env/kuncinya).
-            // Jalur tool-call menggantikan patch JSON di chat (sumber
-            // gagal parse eksekusi US-01 #1–#8): runner mengeksekusi
-            // tiap tool terhadap worktree dan mengembalikan daftar file
-            // yang berubah + ringkasan; kegagalan di tengah loop
-            // mengembalikan worktree ke kondisi semula.
-            $result = $runner->run($task->assignee, $worktree, $prompt, true, [
-                'execution_run_id' => $run->id,
-                'execution_task_id' => $task->id,
-                'source' => 'execution',
-            ]);
-            $applied = $result['files'];
-            $patch = ['summary' => $result['summary']];
-
-            if (ExecutionStopper::wasStopped($run)) {
-                $this->afterStop($run, $task);
-
-                return;
-            }
-            AiQuota::recovered();
-            $worktrees->commit($worktree, 'Task #'.$task->id.': '.$task->title);
-
-            $run->messages()->create([
-                'execution_task_id' => $task->id,
-                'sender_slug' => $task->assignee,
-                'recipient_slug' => 'qa-engineer',
-                'content' => $patch['summary'].' ('.count($applied).' file: '.implode(', ', array_slice($applied, 0, 5)).(count($applied) > 5 ? ', ...' : '').')',
-                'metadata' => ['files' => $applied, 'revision' => $task->revision_count],
-            ]);
-
-            // Simpan diff hasil host per task agar halaman eksekusi bisa
-            // menampilkannya walau cabang/worktree sudah dibersihkan.
-            // Diff terhadap chain base (bukan baseline) agar tetap PER TASK
-            // pada model berantai; task pertama / run lama (chain_base
-            // kosong) tetap memakai HEAD seperti dulu.
-            $diffSnapshot = $worktrees->diff($baseline, $branch, $task->chain_base ?: 'HEAD');
-
-            app(TaskCompletion::class)->submitForQa($run, $task, $diffSnapshot);
+            // Agen developer Antigravity mengedit worktree; Laravel tetap yang
+            // memeriksa perubahan, commit, QA, dan merge.
+            $this->executeWithAntigravity($run, $task, $worktree, $prompt, $worktrees, $baseline);
         } catch (Throwable $exception) {
             // PO menghentikan eksekusi: jangan menimpa status, jeda, atau mencoba ulang.
             if (ExecutionStopper::wasStopped($run)) {
@@ -348,11 +232,7 @@ class ExecuteExecutionTaskJob implements ShouldQueue
 
                 return;
             }
-            // Batas waktu habis saat model sedang dijeda penyedia = kuota, bukan agen yang gagal.
-            $timedOutOnQuota = $exception instanceof ProcessTimedOutException
-                && rescue(fn () => app(CliProxyApiClient::class)->modelCooldown(app(OpenCodeRunner::class)->model()), null, false) !== null;
             if (($exception instanceof AiUnavailableException && $exception->errorCode === 'QUOTA_EXHAUSTED')
-                || $timedOutOnQuota
                 || AiQuota::isQuotaText($exception->getMessage())) {
                 $this->pauseForQuota($run, $task, $exception->getMessage());
 
@@ -536,137 +416,12 @@ class ExecuteExecutionTaskJob implements ShouldQueue
     }
 
     /**
-     * Ekstraksi JSON toleran — sama seperti vote estimasi (68878fb) dan
-     * breakdown (435016d). Sebelum perbaikan ini, validatedPatch hanya
-     * mengupas fence bila fence persis di awal/akhir jawaban, sehingga
-     * fence + prosa dari agent langsung menggagalkan eksekusi dengan
-     * JsonException "Syntax error" (kasus eksekusi US-01 #2, task #2).
+     * Jalur Antigravity: agen developer (profil peran agy) mengedit worktree
+     * langsung, lalu Laravel memeriksa file yang berubah, commit, dan
+     * mengirim ke QA. Error sementara dilempar sebagai AiUnavailableException
+     * agar job dilepas kembali ke antrean oleh penanganan di handle().
      */
-    private function extractJsonObject(string $raw): ?string
-    {
-        $text = trim($raw);
-        if (preg_match('/```(?:json)?\s*(.*?)```/s', $text, $matches)) {
-            $text = trim($matches[1]);
-        }
-        $start = strpos($text, '{');
-        $end = strrpos($text, '}');
-        if ($start === false || $end === false || $end <= $start) {
-            return null;
-        }
-
-        return substr($text, $start, $end - $start + 1);
-    }
-
-    /** @return array{files:array,summary:string} */
-    private function validatedPatch(string $raw): array
-    {
-        if (strlen($raw) > 2000000) {
-            throw new RuntimeException('Patch terlalu besar.');
-        }
-        $candidate = $this->extractJsonObject($raw);
-        if ($candidate === null) {
-            // Kegagalan eksekusi US-01 #3 (13:42:12 UTC) justru jalur ini:
-            // RuntimeException tanpa payload tercatat, sehingga bentuk
-            // jawaban agent tidak bisa didiagnosis. Catat selalu.
-            Log::warning('Execution patch failed validation', [
-                'execution_run_id' => $this->runId,
-                'execution_task_id' => $this->taskId,
-                'raw_excerpt' => mb_substr($raw, 0, 2000),
-                'error' => 'Format patch agent tidak valid (tanpa kurung kurawal).',
-            ]);
-            throw new RuntimeException('Format patch agent tidak valid.');
-        }
-        try {
-            $data = json_decode($candidate, true, 32, JSON_THROW_ON_ERROR);
-        } catch (\JsonException $exception) {
-            // Catat potongan jawaban gagal — kegagalan eksekusi US-01 #2
-            // dulu tidak bisa didiagnosis karena payload mentah tidak
-            // tercatat di mana pun.
-            Log::warning('Execution patch failed validation', [
-                'execution_run_id' => $this->runId,
-                'execution_task_id' => $this->taskId,
-                'raw_excerpt' => mb_substr($raw, 0, 2000),
-                'error' => $exception->getMessage(),
-            ]);
-            throw $exception;
-        }
-        if (! is_array($data) || ! is_array($data['files'] ?? null) || ! is_string($data['summary'] ?? null)) {
-            Log::warning('Execution patch failed validation', [
-                'execution_run_id' => $this->runId,
-                'execution_task_id' => $this->taskId,
-                'raw_excerpt' => mb_substr($raw, 0, 2000),
-                'error' => 'Format patch agent tidak valid (bentuk JSON salah).',
-            ]);
-            throw new RuntimeException('Format patch agent tidak valid.');
-        }
-
-        return ['files' => array_values($data['files']), 'summary' => trim($data['summary'])];
-    }
-
-    /**
-     * Retry otomatis 1x dengan patch yang lebih kecil (maks 2 file) bila patch
-     * asli ditolak validasi penerapan ATAU gagal validasi bentuk (kasus
-     * eksekusi US-01 #3). Guard patch_retry_count mencegah infinite loop:
-     * retry tidak pernah me-retry lagi — gagal -> notifikasi + throw.
-     *
-     * @return array{applied:string[],patch:array{files:array,summary:string}}
-     */
-    private function retryWithSmallerPatch(
-        AgentProfileClient $agents,
-        ExecutionRun $run,
-        ExecutionTask $task,
-        PatchApplier $patcher,
-        string $worktree,
-        Throwable $validationError,
-    ): array {
-        if ($task->patch_retry_count >= 1) {
-            // Seharusnya tidak terjadi (hanya dipanggil sekali), tapi jaga-jaga.
-            // Notifikasi ditangani oleh failRun() di outer catch — jangan duplikasi.
-            throw $validationError;
-        }
-
-        $task->forceFill(['patch_retry_count' => $task->patch_retry_count + 1])->save();
-
-        // Catatan: $task->status sudah IN_PROGRESS di titik ini, jadi deteksi
-        // revisi QA dari qa_feedback yang terisi (bukan dari status).
-        $isQaRevision = filled($task->qa_feedback);
-
-        $retryPrompt = implode("\n\n", array_filter([
-            "Patch kamu DITOLAK sistem karena: {$validationError->getMessage()}",
-            'Pecah menjadi patch yang LEBIH KECIL: maksimal 2 file saja, kirim ulang hanya file yang paling penting dulu.',
-            'Kembalikan JSON tepat: {"files":[{"path":"relatif/ke/file.php","action":"create|update|delete","content":"isi lengkap file"}],"summary":"ringkasan perubahan"}.',
-            'Aturan: path relatif dari root project, tanpa .. atau path absolut; action delete tanpa content; tulis code lengkap yang valid, bukan potongan; JANGAN sertakan penjelasan di luar JSON.',
-            // Jangan hilangkan konteks QA saat retry di putaran revisi.
-            $isQaRevision
-                ? 'REVISI (putaran '.($task->revision_count + 1).'): perbaiki berdasarkan feedback QA berikut, lalu kirim ulang SEMUA file yang berubah: '.$task->qa_feedback
-                : null,
-            'Task: '.$task->title.' — '.$task->description,
-        ]));
-
-        try {
-            $rawRetry = $agents->sendMessage(
-                $task->assignee,
-                $retryPrompt,
-                'execution-'.$run->id.'-task-'.$task->id.'-retry1',
-                false,
-                true
-            );
-            $patchRetry = $this->validatedPatch($rawRetry);
-            $applied = $patcher->apply($worktree, $patchRetry['files'], true);
-
-            return ['applied' => $applied, 'patch' => $patchRetry];
-        } catch (Throwable $retryError) {
-            throw $retryError;
-        }
-    }
-
-    /**
-     * Jalankan task lewat OpenCode CLI, lalu serahkan ke jalur QA yang sama.
-     *
-     * Tidak ada kartu kanban di jalur ini: OpenCode mengedit worktree secara
-     * langsung, Laravel memverifikasi perubahan file sebelum commit.
-     */
-    private function executeWithOpenCode(
+    private function executeWithAntigravity(
         ExecutionRun $run,
         ExecutionTask $task,
         string $worktree,
@@ -674,8 +429,11 @@ class ExecuteExecutionTaskJob implements ShouldQueue
         WorktreeManager $worktrees,
         string $baseline
     ): void {
-        $task->forceFill(['last_progress_at' => now()])->save();
+        $model = app(StrictModelResolver::class)->require($task->assignee ?: 'backend-developer');
+        $agent = (string) (config('ai.antigravity.role_agents.'.$task->assignee) ?: 'scrumspace-backend');
+        $usageContext = ['execution_run_id' => $run->id, 'execution_task_id' => $task->id, 'source' => 'execution'];
 
+        $task->forceFill(['last_progress_at' => now()])->save();
         $run->messages()->create([
             'execution_task_id' => $task->id,
             'sender_slug' => 'scrum-master',
@@ -683,72 +441,42 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             'content' => 'Task #'.$task->id.' dikirim ke developer AI.',
         ]);
 
-        $result = app(OpenCodeRunner::class)->run(
-            $worktree,
-            $prompt."\n\n".$this->openCodeRules()
-        );
+        // Memori proyek (keputusan PO, pelajaran QA, riwayat kode) dipasang
+        // sebagai rules agy di worktree, dikecualikan dari git.
+        if ($project = $run->project()) {
+            rescue(fn () => app(ProjectMemory::class)->installInto($worktree, $project), null, true);
+        }
 
+        $client = app(AntigravityClient::class);
+        $result = $client->runTask($agent, $worktree, $prompt."\n\n".$this->agentRules(), $model, 0, $usageContext);
         $task->forceFill(['last_progress_at' => now()])->save();
 
-        if (ExecutionStopper::wasStopped($run) || str_contains((string) $result['output'], 'STOPPED_BY_PO')) {
+        if (ExecutionStopper::wasStopped($run) || $result['error'] === 'STOPPED_BY_PO') {
             $this->afterStop($run, $task);
 
             return;
         }
 
-        // Provider kadang memblokir jawaban model lewat content filter
-        // (terjadi pada run #4). Coba sekali dengan model cadangan sebelum
-        // menyerahkan task ke Hermes.
-        if (! $result['ok'] && str_contains(strtolower($result['output']), 'content filter')) {
-            $fallbackModel = (string) config('ai.opencode.fallback_model', '');
-            if ($fallbackModel !== '') {
-                $retry = app(OpenCodeRunner::class)->run($worktree, $prompt, 0, $fallbackModel);
-                if ($retry['ok']) {
-                    $result = $retry;
-                }
-            }
-        }
+        $files = $result['ok'] ? $worktrees->dirtyFiles($worktree) : [];
 
-        if (! $result['ok'] && AiQuota::isQuotaText($result['output'])) {
-            // Kuota habis: worker cadangan memakai model yang sama, jadi jangan dialihkan.
-            $this->pauseForQuota($run, $task, (string) $result['output']);
-
-            return;
+        // Sekali lagi dengan instruksi lebih tegas bila agen selesai tanpa
+        // menulis file (pelajaran run #7 OpenCode: habis untuk eksplorasi).
+        if ($result['ok'] && $files === []) {
+            $strict = 'TULIS FILE SEKARANG. Jangan menjalankan php artisan, tinker, composer, atau tes apa pun. '
+                ."Jangan membaca lebih dari 3 file. Ubah file target yang disebut di FILE TERKAIT.\n\n".$prompt;
+            $result = $client->runTask($agent, $worktree, $strict."\n\n".$this->agentRules(), $model, 0, $usageContext);
+            $task->forceFill(['last_progress_at' => now()])->save();
+            $files = $result['ok'] ? $worktrees->dirtyFiles($worktree) : [];
         }
 
         if (! $result['ok']) {
-            if ($this->fallbackToHermes($run, $task, 'Developer AI gagal (kode '.$result['exit'].'): '.FriendlyText::clean($result['output']))) {
-                return;
-            }
-
-            $this->failRun($run, $task, 'OPENCODE_FAILED', $worktrees, $baseline, 'Developer AI gagal (kode '.$result['exit'].'): '.FriendlyText::clean($result['output']));
+            $this->handleAntigravityFailure($run, $task, $result, $model, $worktrees, $baseline);
 
             return;
         }
 
-        // OpenCode mengedit working tree (belum commit) — periksa status
-        // worktree, bukan diff commit branch.
-        $files = $worktrees->dirtyFiles($worktree);
-
-        // Percobaan kedua dengan instruksi lebih tegas: pada run #7 OpenCode
-        // menghabiskan langkah untuk eksplorasi (php artisan tinker) lalu
-        // selesai tanpa menulis file, sehingga task view jatuh ke Hermes.
         if ($files === []) {
-            $strict = 'TULIS FILE SEKARANG. Jangan menjalankan php artisan, tinker, composer, curl, atau tes apa pun. '
-                ."Jangan membaca lebih dari 3 file. Gunakan tool write/edit pada file target yang disebut di FILE TERKAIT.\n\n".$prompt;
-
-            $retry = app(OpenCodeRunner::class)->run($worktree, $strict."\n\n".$this->openCodeRules());
-            if ($retry['ok']) {
-                $files = $worktrees->dirtyFiles($worktree);
-            }
-        }
-
-        if ($files === []) {
-            if ($this->fallbackToHermes($run, $task, 'Developer AI selesai tanpa mengubah file (2 percobaan).')) {
-                return;
-            }
-
-            $this->failRun($run, $task, 'OPENCODE_NO_CHANGES', $worktrees, $baseline, 'Developer AI selesai tanpa mengubah file apa pun.');
+            $this->failRun($run, $task, 'AGENT_NO_CHANGES', $worktrees, $baseline, 'Developer AI selesai tanpa mengubah file apa pun (2 percobaan).');
 
             return;
         }
@@ -761,19 +489,41 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             'sender_slug' => $task->assignee,
             'recipient_slug' => 'qa-engineer',
             'content' => 'Developer AI selesai: '.count($files).' file ('.implode(', ', array_slice($files, 0, 5)).(count($files) > 5 ? ', ...' : '').').',
-            'metadata' => ['files' => $files, 'driver' => 'opencode', 'revision' => $task->revision_count],
+            'metadata' => ['files' => $files, 'driver' => 'antigravity', 'revision' => $task->revision_count],
         ]);
 
         app(TaskCompletion::class)->submitForQa($run, $task, $worktrees->diff($baseline, $task->branch, $task->chain_base ?: 'HEAD'));
     }
 
     /**
-     * Fallback otomatis: task yang gagal di OpenCode dikerjakan ulang Hermes.
-     * Hanya untuk kebijakan auto/ab — pada kebijakan opencode, PO memang
-     * meminta OpenCode, jadi kegagalan harus terlihat.
+     * @param  array{ok: bool, exit: ?int, output: string, error: ?string, usage: array}  $result
      */
-    /** Aturan tegas untuk OpenCode agar menulis file, bukan menjelajah. */
-    private function openCodeRules(): string
+    private function handleAntigravityFailure(ExecutionRun $run, ExecutionTask $task, array $result, string $model, WorktreeManager $worktrees, string $baseline): void
+    {
+        $error = (string) ($result['error'] ?? 'AGY_FAILED');
+
+        if ($error === 'QUOTA_EXHAUSTED') {
+            $this->pauseForQuota($run, $task, (string) $result['output']);
+
+            return;
+        }
+        if ($error === 'MODEL_PROBLEMATIC') {
+            throw new ModelProblemException($model, app(StrictModelResolver::class)->modelProblemMessage($model));
+        }
+        if (AiGateway::isTransient($error)) {
+            throw new AiUnavailableException($error, 'Developer AI: '.FriendlyText::clean($result['output']), null, $model);
+        }
+        if ($error === 'NOT_LOGGED_IN') {
+            $this->failRun($run, $task, 'AI_NOT_LOGGED_IN', $worktrees, $baseline, 'Akun Antigravity belum login atau sesi login habis. Hubungkan ulang akun Google di halaman AI Model, lalu jalankan ulang story.');
+
+            return;
+        }
+
+        $this->failRun($run, $task, 'AGENT_FAILED', $worktrees, $baseline, 'Developer AI gagal (kode '.$result['exit'].'): '.FriendlyText::clean($result['output']));
+    }
+
+    /** Aturan tegas untuk agen developer agar menulis file, bukan menjelajah. */
+    private function agentRules(): string
     {
         return implode("\n", [
             'ATURAN WAJIB:',
@@ -784,43 +534,6 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             '5. Perubahan file tetap dibatasi pada FILE TERKAIT; .env hanya dibaca, jangan diubah tanpa diminta.',
             '6. Selesaikan tanpa menunggu konfirmasi; jawaban teks tanpa perubahan file dianggap gagal.',
         ]);
-    }
-
-    /**
-     * Hanya untuk kebijakan auto/ab — pada kebijakan opencode, PO memang
-     * meminta OpenCode, jadi kegagalan harus terlihat.
-     */
-    private function fallbackToHermes(ExecutionRun $run, ExecutionTask $task, string $reason): bool
-    {
-        // Saklar operasional: OPENCODE_FALLBACK=never membuat kegagalan
-        // OpenCode menghentikan run (fail fast) alih-alih berpindah ke
-        // Hermes. Default 'hermes' menjaga run tetap selesai.
-        if (strtolower((string) config('ai.opencode.fallback', 'hermes')) === 'never') {
-            return false;
-        }
-
-        $policy = $run->executor_policy ?: 'auto';
-        if (! in_array($policy, ['auto', 'ab'], true) || $task->executor_override === 'hermes') {
-            return false;
-        }
-
-        app(ExecutorPlanner::class)->fallbackTo($task, 'hermes');
-        $task->forceFill([
-            'status' => 'REVISION',
-            'last_error' => 'OPENCODE_FALLBACK',
-            'last_progress_at' => now(),
-        ])->save();
-
-        $run->messages()->create([
-            'execution_task_id' => $task->id,
-            'sender_slug' => 'scrum-master',
-            'recipient_slug' => $task->assignee,
-            'content' => 'Dialihkan otomatis: '.FriendlyText::clean($reason).' Task dilanjutkan oleh agen cadangan.',
-        ]);
-
-        ExecuteExecutionTaskJob::dispatch($run->id, $task->id);
-
-        return true;
     }
 
     /**
@@ -838,12 +551,12 @@ class ExecuteExecutionTaskJob implements ShouldQueue
             'execution_task_id' => $task->id,
             'sender_slug' => 'scrum-master',
             'recipient_slug' => 'product-owner',
-            'content' => 'Task #'.$task->id.' dijeda: kuota model AI habis. Ganti model aktif di AI Providers atau tunggu kuota pulih, lalu klik Lanjutkan.',
+            'content' => 'Task #'.$task->id.' dijeda: kuota model AI habis. Ganti model aktif di halaman AI Model atau tunggu kuota pulih, lalu klik Lanjutkan.',
         ]);
         $run->transitionTo(ExecutionRun::NEEDS_PO, ['EXECUTING', 'REVIEWING', 'QA_REVIEW'], [
             'error_code' => 'QUOTA_EXHAUSTED',
             'summary' => 'Kuota model AI'.(is_string($model) ? ' '.$model : '').' habis, jadi tim berhenti di task #'.$task->id.' ('.$task->title.'). '
-                .'Ganti model aktif di menu AI Providers atau tunggu kuota pulih (biasanya beberapa jam), lalu klik Lanjutkan.',
+                .'Ganti model aktif di halaman AI Model atau tunggu kuota pulih (biasanya beberapa jam), lalu klik Lanjutkan.',
         ]);
     }
 

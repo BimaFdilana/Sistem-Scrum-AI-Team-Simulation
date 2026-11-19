@@ -5,7 +5,7 @@ namespace App\Jobs;
 use App\Models\ExecutionRun;
 use App\Services\ChatDisclosurePolicy;
 use App\Services\GithubProjectService;
-use App\Services\HermesClient;
+use App\Services\ScrumMasterClient;
 use App\Services\TestGate;
 use App\Support\Agents\AgentSoul;
 use App\Support\Chat\SprintChat;
@@ -36,7 +36,7 @@ class MergeExecutionJob implements ShouldQueue
 
     public function handle(
         WorktreeManager $worktrees,
-        HermesClient $scrumMaster,
+        ScrumMasterClient $scrumMaster,
         ChatDisclosurePolicy $disclosure,
     ): void {
         $run = ExecutionRun::query()->with(['tasks', 'story.project'])->find($this->runId);
@@ -57,7 +57,7 @@ class MergeExecutionJob implements ShouldQueue
         }
     }
 
-    private function merge(ExecutionRun $run, WorktreeManager $worktrees, HermesClient $scrumMaster, ChatDisclosurePolicy $disclosure): void
+    private function merge(ExecutionRun $run, WorktreeManager $worktrees, ScrumMasterClient $scrumMaster, ChatDisclosurePolicy $disclosure): void
     {
         $run->refresh();
         if ($run->status !== 'MERGING') {
@@ -200,7 +200,7 @@ class MergeExecutionJob implements ShouldQueue
         }
     }
 
-    private function summarize(ExecutionRun $run, HermesClient $scrumMaster, ChatDisclosurePolicy $disclosure): string
+    private function summarize(ExecutionRun $run, ScrumMasterClient $scrumMaster, ChatDisclosurePolicy $disclosure): string
     {
         $taskLines = $run->tasks->map(fn ($task) => '- '.$task->title.' ('.$task->assigneeName().', revisi QA: '.$task->revision_count.')')->implode("\n");
         $conversation = SprintChat::forStory($run->requested_by, $run->story, 'Eksekusi '.$run->subjectLabel());

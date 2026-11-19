@@ -7,7 +7,7 @@ use App\Models\Sprint;
 use App\Models\Story;
 use App\Models\User;
 use App\Services\AgentProfileClient;
-use App\Services\HermesClient;
+use App\Services\ScrumMasterClient;
 use App\Services\StoryEstimationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery;
@@ -38,9 +38,9 @@ class StoryEstimationDisclosureTest extends TestCase
             ]);
         });
         $this->app->instance(AgentProfileClient::class, $agents);
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->andReturn('Laporan berdasar diskusi.');
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
 
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
 
@@ -70,9 +70,9 @@ class StoryEstimationDisclosureTest extends TestCase
             ]);
         });
         $this->app->instance(AgentProfileClient::class, $agents);
-        $sm = Mockery::mock(HermesClient::class);
+        $sm = Mockery::mock(ScrumMasterClient::class);
         $sm->shouldReceive('sendMessage')->andReturn('Laporan berdasar diskusi.');
-        $this->app->instance(HermesClient::class, $sm);
+        $this->app->instance(ScrumMasterClient::class, $sm);
 
         $run = app(StoryEstimationService::class)->estimate($story, $owner);
 

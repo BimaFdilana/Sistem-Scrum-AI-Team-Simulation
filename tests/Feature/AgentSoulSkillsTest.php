@@ -6,7 +6,6 @@ use App\Models\Actor;
 use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\Story;
-use App\Models\StoryEstimationRun;
 use App\Models\User;
 use App\Support\Agents\AgentSoul;
 use App\Support\Workspace\ProjectInspector;
@@ -170,16 +169,11 @@ class AgentSoulSkillsTest extends TestCase
         // dari menu (aturan tanpa-default) — bukan lagi endpoint
         // per-role legacy.
         config([
-            'ai.cliproxy.agents_enabled' => true,
+            'ai.antigravity.enabled' => true,
             'ai.cliproxy.api_key' => 'test-key',
             'ai.cliproxy.base_url' => 'http://127.0.0.1:8317',
         ]);
-        $this->mock(\App\Services\AgentConfiguration::class, function (\Mockery\MockInterface $mock) {
-            $mock->shouldReceive('current')->with('backend-developer')->andReturn(['status' => 'verified', 'model' => 'be-model']);
-            $mock->shouldReceive('current')->with('frontend-developer')->andReturn(['status' => 'verified', 'model' => 'fe-model']);
-            $mock->shouldReceive('current')->with('qa-engineer')->andReturn(['status' => 'verified', 'model' => 'qa-model']);
-            $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'sm-model']);
-        });
+        $this->useAiModel('be-model', ['backend-developer' => 'be-model', 'frontend-developer' => 'fe-model', 'qa-engineer' => 'qa-model', 'scrum-master' => 'sm-model']);
     }
 
     /** @return array{User, Project, Story} */

@@ -6,10 +6,8 @@ use App\Models\Actor;
 use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\User;
-use App\Services\AgentConfiguration;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
-use Mockery\MockInterface;
 use Tests\TestCase;
 
 class SprintsTest extends TestCase
@@ -57,10 +55,8 @@ class SprintsTest extends TestCase
             'http://127.0.0.1:8317/v1/models' => Http::response(['data' => [['id' => 'sm-model', 'owned_by' => 'openai']]]),
         ]);
         // Sprint goal SM kini ketat: perlu pilihan SM di menu.
-        config(['ai.cliproxy.agents_enabled' => true, 'ai.cliproxy.api_key' => 'test-key', 'ai.cliproxy.base_url' => 'http://127.0.0.1:8317']);
-        $this->mock(AgentConfiguration::class, function (MockInterface $mock) {
-            $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'sm-model']);
-        });
+        config(['ai.antigravity.enabled' => true, 'ai.cliproxy.api_key' => 'test-key', 'ai.cliproxy.base_url' => 'http://127.0.0.1:8317']);
+        $this->useAiModel('sm-model', ['scrum-master' => 'sm-model']);
         $owner = User::factory()->create();
         $project = $this->createProject();
         $sprint = $this->createSprint($project);
@@ -88,10 +84,8 @@ class SprintsTest extends TestCase
             '*/chat/completions' => Http::response([], 503),
             'http://127.0.0.1:8317/v1/models' => Http::response(['data' => [['id' => 'sm-model', 'owned_by' => 'openai']]]),
         ]);
-        config(['ai.cliproxy.agents_enabled' => true, 'ai.cliproxy.api_key' => 'test-key', 'ai.cliproxy.base_url' => 'http://127.0.0.1:8317']);
-        $this->mock(AgentConfiguration::class, function (MockInterface $mock) {
-            $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'sm-model']);
-        });
+        config(['ai.antigravity.enabled' => true, 'ai.cliproxy.api_key' => 'test-key', 'ai.cliproxy.base_url' => 'http://127.0.0.1:8317']);
+        $this->useAiModel('sm-model', ['scrum-master' => 'sm-model']);
         $owner = User::factory()->create();
         $project = $this->createProject();
         $sprint = $this->createSprint($project);
@@ -109,10 +103,8 @@ class SprintsTest extends TestCase
             '*/chat/completions' => Http::response(['choices' => [['message' => ['content' => 'Menyelesaikan akses aman untuk pengguna.']]]]),
             'http://127.0.0.1:8317/v1/models' => Http::response(['data' => [['id' => 'sm-model', 'owned_by' => 'openai']]]),
         ]);
-        config(['ai.cliproxy.agents_enabled' => true, 'ai.cliproxy.api_key' => 'test-key', 'ai.cliproxy.base_url' => 'http://127.0.0.1:8317']);
-        $this->mock(AgentConfiguration::class, function (MockInterface $mock) {
-            $mock->shouldReceive('current')->with('scrum-master')->andReturn(['status' => 'verified', 'model' => 'sm-model']);
-        });
+        config(['ai.antigravity.enabled' => true, 'ai.cliproxy.api_key' => 'test-key', 'ai.cliproxy.base_url' => 'http://127.0.0.1:8317']);
+        $this->useAiModel('sm-model', ['scrum-master' => 'sm-model']);
         $owner = User::factory()->create();
         $project = $this->createProject();
         $sprint = $this->createSprint($project);

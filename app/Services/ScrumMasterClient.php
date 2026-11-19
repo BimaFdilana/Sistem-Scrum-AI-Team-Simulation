@@ -4,7 +4,7 @@ namespace App\Services;
 
 use App\Exceptions\ModelProblemException;
 
-class HermesClient
+class ScrumMasterClient
 {
     // Aturan pembatasan yang disetujui PO (2026-10-29), sama seperti
     // AgentProfileClient: prompt lama melarang "directories, file names,
@@ -32,11 +32,10 @@ POLICY;
         // ada panggilan model sama sekali — tidak ada fallback ke
         // jalur konsultasi legacy maupun ke model lain.
         $resolver = app(StrictModelResolver::class);
-        $cliproxy = app(CliProxyApiClient::class);
         $model = $resolver->require('scrum-master');
         $soulLine = \App\Support\Agents\AgentSoul::promptLine('scrum-master');
         $systemPrompt = self::DISCLOSURE_POLICY.($soulLine !== '' ? "\n\n".$soulLine : '');
-        $result = $cliproxy->chatResilient($model, $systemPrompt, $message, 120, $image);
+        $result = app(AntigravityClient::class)->chatResilient($model, $systemPrompt, $message, 0, $image);
         if ($result['text'] === null) {
             if (($result['error'] ?? null) === 'MODEL_PROBLEMATIC') {
                 throw new ModelProblemException($model, $resolver->modelProblemMessage($model));
