@@ -207,6 +207,7 @@ class DemoServerManager
         $phpBinary = $profile?->php_binary ?: CliPhp::path();
         $port = $this->allocatePort();
         $log = storage_path('logs/demo-project-'.$project->id.'.log');
+        self::trimLog($log);
 
         // Database demo memakai SQLite lokal: host demo tidak menyediakan
         // MySQL, sementara project PO sering dikonfigurasi DB_CONNECTION=mysql.
@@ -230,9 +231,7 @@ class DemoServerManager
             $envPrefix .= ' '.escapeshellarg($key.'='.$value);
         }
 
-        $shell = 'setsid env'.$envPrefix.' '.escapeshellarg($phpBinary)
-            .' -S 0.0.0.0:'.$port.' -t '.escapeshellarg($docroot)
-            .' </dev/null > '.escapeshellarg($log).' 2>&1 & echo $!';
+        $shell = self::launchCommand($envPrefix, $phpBinary, self::bindHost(), $port, $docroot, $log);
 
         $launcher = new Process(['bash', '-lc', $shell], $projectRoot, ProjectEnvironment::scrubbed());
         $launcher->setTimeout(20);
@@ -673,6 +672,50 @@ class DemoServerManager
             '['.date('c').'] db:seed exit='.$process->getExitCode()."\n".mb_substr($process->getOutput().$process->getErrorOutput(), -2000)."\n",
             FILE_APPEND
         );
+        if (! $process->isSuccessful()) {
+            return;
+        }
+
+        // Data contoh khusus demo (mis. DemoUsulanSeeder): tanpa ini daftar di demo
+        // selalu kosong dan PO tidak bisa mencoba fitur berbasis data.
+        foreach (self::demoSeeders($projectRoot) as $class) {
+            $seeder = new Process(
+                [CliPhp::path(), 'artisan', 'db:seed', '--class='.$class, '--force', '--no-interaction'],
+                $projectRoot,
+                array_merge(ProjectEnvironment::scrubbed(), $env),
+                null,
+                240
+            );
+            $seeder->run();
+            file_put_contents(
+                $log,
+                '['.date('c').'] db:seed --class='.$class.' exit='.$seeder->getExitCode()."\n".mb_substr($seeder->getOutput().$seeder->getErrorOutput(), -1000)."\n",
+                FILE_APPEND
+            );
+        }
+    }
+
+    /**
+     * Seeder data contoh demo: database/seeders/Demo*Seeder.php yang belum
+     * dipanggil oleh DatabaseSeeder (agar datanya tidak tergandakan).
+     *
+     * @return array<int, string>
+     */
+    public static function demoSeeders(string $projectRoot): array
+    {
+        $dir = rtrim($projectRoot, '/').'/database/seeders';
+        $main = (string) @file_get_contents($dir.'/DatabaseSeeder.php');
+        $classes = [];
+        foreach (glob($dir.'/Demo*Seeder.php') ?: [] as $file) {
+            $name = basename($file, '.php');
+            if (! preg_match('/^Demo[A-Za-z0-9_]*Seeder$/', $name) || preg_match('/\b'.$name.'\b/', $main)) {
+                continue;
+            }
+            $classes[] = 'Database\\Seeders\\'.$name;
+        }
+        sort($classes);
+
+        return $classes;
     }
 
     /**
@@ -707,6 +750,24 @@ class DemoServerManager
         }
 
         return 'Demo tidak menjawab di '.$url.' setelah 10 detik. Log: '.$this->logTail($log);
+    }
+
+    /** Log demo kini ditambahkan (>>), jadi pangkas bila sudah besar: simpan bagian terbaru. */
+    public static function trimLog(string $log, int $maxBytes = 1048576, int $keepBytes = 262144): void
+    {
+        $size = @filesize($log);
+        if ($size === false || $size <= $maxBytes) {
+            return;
+        }
+        $handle = @fopen($log, 'rb');
+        if ($handle === false) {
+            return;
+        }
+        fseek($handle, -$keepBytes, SEEK_END);
+        $tail = (string) stream_get_contents($handle);
+        fclose($handle);
+        $newline = strpos($tail, "\n");
+        @file_put_contents($log, $newline === false ? $tail : substr($tail, $newline + 1));
     }
 
     /** Ambil 2 baris terakhir log demo untuk pesan error. */
@@ -941,7 +1002,9 @@ class DemoServerManager
     /** Matikan proses php -S yang memakai port tertentu. */
     private function killByPort(int $port): void
     {
-        $process = new Process(['pgrep', '-f', '-S 0.0.0.0:'.$port]);
+        // Demo bisa mendengar di 0.0.0.0 atau 127.0.0.1 (lihat bindHost()).
+        $pattern = '-S (0\\.0\\.0\\.0|127\\.0\\.0\\.1):'.$port.'( |$)';
+        $process = new Process(['pgrep', '-f', '--', $pattern]);
         $process->run();
         foreach (preg_split('/\s+/', trim($process->getOutput())) as $pid) {
             if ($pid !== '' && (int) $pid > 0) {
@@ -949,7 +1012,7 @@ class DemoServerManager
             }
         }
         sleep(1);
-        $again = new Process(['pgrep', '-f', '-S 0.0.0.0:'.$port]);
+        $again = new Process(['pgrep', '-f', '--', $pattern]);
         $again->run();
         foreach (preg_split('/\s+/', trim($again->getOutput())) as $pid) {
             if ($pid !== '' && (int) $pid > 0) {
@@ -982,6 +1045,32 @@ class DemoServerManager
         }
 
         return $killed;
+    }
+
+    /**
+     * Alamat dengar server demo. Bila demo dibuka lewat subdomain (nginx di
+     * server yang sama meneruskan ke port demo), cukup loopback: port demo
+     * tidak perlu terbuka di semua antarmuka jaringan.
+     */
+    public static function bindHost(): string
+    {
+        return trim((string) config('demo.public_host', '')) !== '' ? '127.0.0.1' : '0.0.0.0';
+    }
+
+    /**
+     * Perintah bash yang menjalankan server demo terlepas penuh dan mencetak PID-nya.
+     * Subshell menutup semua file descriptor warisan (>2) sebelum exec: tanpa itu
+     * server demo ikut memegang pipe/soket pemanggil, dan pemanggil yang menunggu
+     * pipe itu (mis. perintah artisan dari terminal) tidak pernah selesai.
+     */
+    public static function launchCommand(string $envPrefix, string $phpBinary, string $host, int $port, string $docroot, string $log): string
+    {
+        $closeInherited = 'for fd in /proc/$BASHPID/fd/*; do n=${fd##*/}; [ "$n" -gt 2 ] 2>/dev/null && eval "exec $n>&-" 2>/dev/null; done;';
+
+        return '( '.$closeInherited.' exec setsid env'.$envPrefix.' '.escapeshellarg($phpBinary)
+            .' -S '.$host.':'.$port.' -t '.escapeshellarg($docroot)
+            // >> agar catatan migrasi/seed sebelum server start tidak tertimpa.
+            .' </dev/null >> '.escapeshellarg($log).' 2>&1 ) & echo $!';
     }
 
     public function url(DemoServer $demo, string $host): string
