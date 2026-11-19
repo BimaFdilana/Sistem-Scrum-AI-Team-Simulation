@@ -4,6 +4,8 @@
     @php
         $modelName = fn (?string $id) => collect($models)->firstWhere('id', $id)['name'] ?? $id;
         $loggedIn = $status['logged_in'];
+        $customRoles = collect($roleModels)->filter()->count();
+        $usageMax = max(1, (int) collect($usage['models'])->max('total'));
     @endphp
 
     <section class="page-heading">
@@ -19,164 +21,200 @@
         <p class="success-banner">{{ session('status') }}</p>
     @endif
     @if (session('error'))
-        <p class="form-alert">{{ session('error') }}</p>
+        <p class="form-alert am-flash">{{ session('error') }}</p>
     @endif
 
-    <div class="ap-top">
-        <article class="ap-card" id="akun-google">
-            <div class="ap-card-head">
-                <div>
-                    <p class="section-kicker">AKUN GOOGLE</p>
-                    <h2>Antigravity</h2>
-                </div>
-                <span class="ap-model-pill {{ $loggedIn ? '' : 'is-empty' }}">{{ $loggedIn ? 'Terhubung' : 'Belum terhubung' }}</span>
-            </div>
+    {{-- Ringkasan ------------------------------------------------------- --}}
+    <section class="am-summary" aria-label="Ringkasan">
+        <div class="am-tile">
+            <span class="am-tile-label">Akun Google</span>
+            <strong class="am-tile-value"><i class="status-dot {{ $loggedIn ? 'status-ready' : 'status-idle' }}"></i>{{ $loggedIn ? 'Terhubung' : 'Belum terhubung' }}</strong>
+            <span class="am-tile-meta">{{ $status['installed'] ? 'Antigravity '.($status['version'] ? 'v'.$status['version'] : 'terpasang') : 'Antigravity belum terpasang' }}</span>
+        </div>
+        <div class="am-tile">
+            <span class="am-tile-label">Model utama</span>
+            <strong class="am-tile-value {{ $activeModel ? '' : 'is-warning' }}">{{ $activeModel ? $modelName($activeModel) : 'Belum dipilih' }}</strong>
+            <span class="am-tile-meta">{{ $customRoles > 0 ? $customRoles.' peran memakai model khusus' : 'Dipakai semua peran' }}</span>
+        </div>
+        <div class="am-tile">
+            <span class="am-tile-label">Kuota Gemini · 5 jam</span>
+            <strong class="am-tile-value" data-summary-quota>{{ $loggedIn ? '…' : '-' }}</strong>
+            <span class="am-tile-meta" data-summary-quota-meta>{{ $loggedIn ? 'Membaca kuota' : 'Hubungkan akun dulu' }}</span>
+        </div>
+        <div class="am-tile">
+            <span class="am-tile-label">Server</span>
+            <strong class="am-tile-value" data-summary-server>…</strong>
+            <span class="am-tile-meta" data-summary-server-meta>Membaca pemakaian</span>
+        </div>
+    </section>
 
-            <div class="ap-health">
-                <div class="ap-health-row">
-                    <span>Antigravity CLI</span>
-                    <span><i class="status-dot {{ $status['installed'] ? 'status-ready' : 'status-idle' }}"></i>
-                        {{ $status['installed'] ? 'terpasang'.($status['version'] ? ' · versi '.$status['version'] : '') : 'belum terpasang' }}</span>
-                </div>
-                <div class="ap-health-row">
-                    <span>Login akun Google</span>
-                    <span><i class="status-dot {{ $loggedIn ? 'status-ready' : 'status-idle' }}"></i>{{ $loggedIn ? 'aktif' : 'belum login' }}</span>
-                </div>
-                <div class="ap-health-row">
-                    <span>Model yang bisa dipakai</span>
-                    <span>{{ $status['model_count'] }}</span>
-                </div>
-            </div>
-
-            <div class="ap-head-actions" style="margin-top:16px; display:flex; flex-wrap:wrap; gap:8px;">
-                <button type="button" class="button button-primary" data-agy-login>{{ $loggedIn ? 'Hubungkan ulang akun Google' : 'Hubungkan akun Google' }}</button>
-                @if ($loggedIn)
-                    <form method="POST" action="{{ route('ai-model.test') }}">@csrf<button type="submit" class="button button-secondary">Uji koneksi</button></form>
-                    <form method="POST" action="{{ route('ai-model.models.refresh') }}">@csrf<button type="submit" class="button button-secondary">Perbarui daftar model</button></form>
-                    <button type="button" class="button button-secondary" data-agy-logout>Keluar</button>
-                @endif
-            </div>
-
-            <div class="ap-login" data-agy-panel hidden style="margin-top:18px; border-top:1px solid var(--line, #e5e7eb); padding-top:16px;">
-                <p class="ap-note" data-agy-message>Menyiapkan login…</p>
-                <div data-agy-steps hidden>
-                    <p class="ap-note"><strong>1.</strong> Buka halaman login Google, masuk dengan akun yang ingin dipakai, lalu salin kode yang muncul.</p>
-                    <a class="button button-secondary" data-agy-url href="#" target="_blank" rel="noopener noreferrer">Buka halaman login Google ↗</a>
-                    <p class="ap-note" style="margin-top:14px;"><strong>2.</strong> Tempel kodenya di sini.</p>
-                    <form class="ap-model-form" data-agy-code-form>
-                        <div class="form-field">
-                            <label for="agy-code">Kode otorisasi</label>
-                            <input id="agy-code" name="code" type="text" autocomplete="off" spellcheck="false" placeholder="4/0AVGzR1A…" required>
-                        </div>
-                        <button type="submit" class="button button-primary">Hubungkan</button>
-                    </form>
-                    <p class="form-alert" data-agy-error hidden></p>
-                </div>
-            </div>
-
-            <p class="form-hint" style="margin-top:14px;">Catatan: menurut ketentuan Google, akun Google pribadi (paket Free/Pro/Ultra) tidak didukung untuk dipakai di dalam aplikasi lain dan berisiko diblokir. Pakai akun Google terpisah, bukan akun utama.</p>
-        </article>
-
-        <article class="ap-card">
-            <div class="ap-card-head">
-                <div>
-                    <p class="section-kicker">MODEL PER PERAN</p>
-                    <h2>Pilih model agen</h2>
-                </div>
-                <span class="ap-model-pill {{ $activeModel ? '' : 'is-empty' }}">{{ $activeModel ? $modelName($activeModel) : 'Belum dipilih' }}</span>
-            </div>
-
-            @unless ($activeModel)
-                <p class="form-alert">Model utama belum dipilih. Semua alur agen menolak berjalan sampai model utama dipilih.</p>
-            @endunless
-            @if ($errors->any())
-                <p class="form-alert">{{ $errors->first() }}</p>
-            @endif
-
-            @if ($models === [])
-                <p class="form-alert">Daftar model belum terbaca. Hubungkan akun Google dulu, lalu klik Perbarui daftar model.</p>
-            @else
-                <form method="POST" action="{{ route('ai-model.models.update') }}" class="ap-form-stack">
-                    @csrf
-                    <div class="form-field">
-                        <label for="active_model">Model utama (semua peran)</label>
-                        <select id="active_model" name="active_model" required>
-                            <option value="" disabled @selected(! $activeModel)>Pilih model</option>
-                            @foreach ($models as $model)
-                                <option value="{{ $model['id'] }}" @selected($model['id'] === $activeModel)>{{ $model['name'] }}</option>
-                            @endforeach
-                        </select>
+    <div class="am-layout">
+        {{-- Kolom utama: pengaturan model dan pemakaian token --------------- --}}
+        <div class="am-column">
+            <article class="ap-card am-card">
+                <header class="am-card-head">
+                    <div>
+                        <p class="section-kicker">MODEL PER PERAN</p>
+                        <h2>Pilih model agen</h2>
                     </div>
+                    <span class="ap-model-pill {{ $activeModel ? '' : 'is-empty' }}">{{ $activeModel ? $modelName($activeModel) : 'Belum dipilih' }}</span>
+                </header>
 
-                    @foreach ($roles as $slug => $roleName)
-                        <div class="form-field">
-                            <label for="role-{{ $slug }}">{{ $roleName }}</label>
-                            <select id="role-{{ $slug }}" name="role_models[{{ $slug }}]">
-                                <option value="">Ikuti model utama</option>
+                @unless ($activeModel)
+                    <p class="form-alert am-alert">Model utama belum dipilih. Semua alur agen menolak berjalan sampai model utama dipilih.</p>
+                @endunless
+                @if ($errors->any())
+                    <p class="form-alert am-alert">{{ $errors->first() }}</p>
+                @endif
+
+                @if ($models === [])
+                    <div class="am-empty">
+                        <strong>Daftar model belum terbaca</strong>
+                        <span>Hubungkan akun Google dulu, lalu klik Perbarui daftar model.</span>
+                    </div>
+                @else
+                    <form method="POST" action="{{ route('ai-model.models.update') }}" class="am-model-form">
+                        @csrf
+                        <div class="form-field am-main-model">
+                            <label for="active_model">Model utama <small>dipakai semua peran</small></label>
+                            <select id="active_model" name="active_model" required>
+                                <option value="" disabled @selected(! $activeModel)>Pilih model</option>
                                 @foreach ($models as $model)
-                                    <option value="{{ $model['id'] }}" @selected($model['id'] === ($roleModels[$slug] ?? null))>{{ $model['name'] }}</option>
+                                    <option value="{{ $model['id'] }}" @selected($model['id'] === $activeModel)>{{ $model['name'] }}</option>
                                 @endforeach
                             </select>
                         </div>
-                    @endforeach
 
-                    <button type="submit" class="button button-primary">Simpan model</button>
-                    <p class="form-hint">Daftar model berasal dari akun Google yang terhubung, jadi hanya model yang benar-benar bisa dipakai yang muncul. Saran: model kuat untuk Scrum Master dan QA, model cepat untuk Backend dan Frontend.</p>
-                </form>
-            @endif
-        </article>
-    </div>
+                        <p class="am-subhead">Model khusus per peran <small>opsional</small></p>
+                        <div class="am-role-grid">
+                            @foreach ($roles as $slug => $roleName)
+                                <div class="form-field">
+                                    <label for="role-{{ $slug }}">{{ $roleName }}</label>
+                                    <select id="role-{{ $slug }}" name="role_models[{{ $slug }}]">
+                                        <option value="">Ikuti model utama</option>
+                                        @foreach ($models as $model)
+                                            <option value="{{ $model['id'] }}" @selected($model['id'] === ($roleModels[$slug] ?? null))>{{ $model['name'] }}</option>
+                                        @endforeach
+                                    </select>
+                                </div>
+                            @endforeach
+                        </div>
 
-    <div class="ap-duo">
-        <article class="ap-card" data-quota-card>
-            <div class="ap-card-head">
-                <div>
-                    <p class="section-kicker">KUOTA AKUN GOOGLE</p>
-                    <h2>Sisa kuota</h2>
-                </div>
-                <button type="button" class="button button-secondary ap-small-button" data-quota-refresh>Perbarui</button>
-            </div>
-            <div data-quota-body>
-                <p class="ap-note">{{ $loggedIn ? 'Membaca kuota…' : 'Hubungkan akun Google dulu untuk melihat kuota.' }}</p>
-            </div>
-            <p class="form-hint" style="margin-top:10px;">Model dalam satu kelompok berbagi batas 5 jam dan batas mingguan. Kuota terpakai sebanding dengan biaya token, jadi tugas pendek dan model yang lebih hemat membuat kuota bertahan lebih lama.</p>
-        </article>
+                        <footer class="am-card-foot">
+                            <p class="form-hint">Hanya model dari akun Google yang terhubung yang muncul. Saran: model kuat untuk Scrum Master dan QA, model cepat untuk Backend dan Frontend.</p>
+                            <button type="submit" class="button button-primary">Simpan model</button>
+                        </footer>
+                    </form>
+                @endif
+            </article>
 
-        <article class="ap-card" data-server-card>
-            <div class="ap-card-head">
-                <div>
-                    <p class="section-kicker">SERVER</p>
-                    <h2>Sumber daya VPS</h2>
-                </div>
-                <span class="ap-model-pill" data-server-uptime>…</span>
-            </div>
-            <div data-server-body>
-                <p class="ap-note">Membaca pemakaian server…</p>
-            </div>
-        </article>
-    </div>
-
-    <article class="ap-card" style="margin-top:18px;">
-        <div class="ap-card-head">
-            <div>
-                <p class="section-kicker">PEMAKAIAN 30 HARI</p>
-                <h2>Token AI</h2>
-            </div>
-            <span class="ap-model-pill">{{ number_format($usage['grand_total']) }} token</span>
-        </div>
-        @if ($usage['models'] === [])
-            <p class="ap-note">Belum ada pemakaian tercatat.</p>
-        @else
-            <div class="ap-health">
-                @foreach (array_slice($usage['models'], 0, 8) as $row)
-                    <div class="ap-health-row">
-                        <span>{{ $modelName($row['model']) }} <small class="form-hint">({{ $row['provider'] }})</small></span>
-                        <span>{{ number_format($row['total']) }} token · {{ number_format($row['calls']) }} panggilan</span>
+            <article class="ap-card am-card">
+                <header class="am-card-head">
+                    <div>
+                        <p class="section-kicker">PEMAKAIAN 30 HARI</p>
+                        <h2>Token AI</h2>
                     </div>
-                @endforeach
-            </div>
-        @endif
-    </article>
+                    <span class="ap-model-pill">{{ number_format($usage['grand_total']) }} token</span>
+                </header>
+                @if ($usage['models'] === [])
+                    <div class="am-empty"><span>Belum ada pemakaian tercatat.</span></div>
+                @else
+                    <div class="am-meter-list">
+                        @foreach (array_slice($usage['models'], 0, 8) as $row)
+                            <div class="ap-quota-row">
+                                <div class="ap-quota-line">
+                                    <span>{{ $modelName($row['model']) }} <small class="form-hint">{{ $row['provider'] }}</small></span>
+                                    <strong>{{ number_format($row['total']) }}</strong>
+                                </div>
+                                <div class="ap-quota-bar"><span style="width: {{ round($row['total'] / $usageMax * 100, 1) }}%"></span></div>
+                                <p class="ap-quota-reset">{{ number_format($row['calls']) }} panggilan</p>
+                            </div>
+                        @endforeach
+                    </div>
+                @endif
+            </article>
+        </div>
+
+        {{-- Kolom samping: akun, kuota, server ------------------------------- --}}
+        <aside class="am-column">
+            <article class="ap-card am-card" id="akun-google">
+                <header class="am-card-head">
+                    <div>
+                        <p class="section-kicker">AKUN GOOGLE</p>
+                        <h2>Antigravity</h2>
+                    </div>
+                    <span class="ap-model-pill {{ $loggedIn ? '' : 'is-empty' }}">{{ $loggedIn ? 'Terhubung' : 'Belum terhubung' }}</span>
+                </header>
+
+                <dl class="am-facts">
+                    <div><dt>Antigravity CLI</dt><dd><i class="status-dot {{ $status['installed'] ? 'status-ready' : 'status-idle' }}"></i>{{ $status['installed'] ? ($status['version'] ? 'versi '.$status['version'] : 'terpasang') : 'belum terpasang' }}</dd></div>
+                    <div><dt>Login akun Google</dt><dd><i class="status-dot {{ $loggedIn ? 'status-ready' : 'status-idle' }}"></i>{{ $loggedIn ? 'aktif' : 'belum login' }}</dd></div>
+                    <div><dt>Model tersedia</dt><dd>{{ $status['model_count'] }}</dd></div>
+                </dl>
+
+                <div class="am-actions">
+                    <button type="button" class="button button-primary am-action-main" data-agy-login>{{ $loggedIn ? 'Hubungkan ulang akun Google' : 'Hubungkan akun Google' }}</button>
+                    @if ($loggedIn)
+                        <form method="POST" action="{{ route('ai-model.test') }}">@csrf<button type="submit" class="button button-secondary">Uji koneksi</button></form>
+                        <form method="POST" action="{{ route('ai-model.models.refresh') }}">@csrf<button type="submit" class="button button-secondary">Perbarui model</button></form>
+                        <button type="button" class="button button-secondary" data-agy-logout>Keluar</button>
+                    @endif
+                </div>
+
+                <div class="am-login" data-agy-panel hidden>
+                    <p class="ap-note" data-agy-message>Menyiapkan login…</p>
+                    <div data-agy-steps hidden>
+                        <ol class="am-steps">
+                            <li>
+                                <span>Buka halaman login Google, masuk dengan akun yang ingin dipakai, lalu salin kode yang muncul.</span>
+                                <a class="button button-secondary" data-agy-url href="#" target="_blank" rel="noopener noreferrer">Buka halaman login Google ↗</a>
+                            </li>
+                            <li>
+                                <span>Tempel kodenya di sini.</span>
+                                <form class="ap-model-form" data-agy-code-form>
+                                    <div class="form-field">
+                                        <label for="agy-code">Kode otorisasi</label>
+                                        <input id="agy-code" name="code" type="text" autocomplete="off" spellcheck="false" placeholder="4/0AVGzR1A…" required>
+                                    </div>
+                                    <button type="submit" class="button button-primary">Hubungkan</button>
+                                </form>
+                            </li>
+                        </ol>
+                        <p class="form-alert am-alert" data-agy-error hidden></p>
+                    </div>
+                </div>
+
+                <p class="am-callout">Menurut ketentuan Google, akun pribadi (Free/Pro/Ultra) tidak didukung untuk dipakai di dalam aplikasi lain dan berisiko diblokir. Pakai akun Google terpisah, bukan akun utama.</p>
+            </article>
+
+            <article class="ap-card am-card" data-quota-card>
+                <header class="am-card-head">
+                    <div>
+                        <p class="section-kicker">KUOTA AKUN GOOGLE</p>
+                        <h2>Sisa kuota</h2>
+                    </div>
+                    <button type="button" class="button button-secondary am-small-button" data-quota-refresh @disabled(! $loggedIn)>Perbarui</button>
+                </header>
+                <div data-quota-body>
+                    <p class="ap-note">{{ $loggedIn ? 'Membaca kuota…' : 'Hubungkan akun Google dulu untuk melihat kuota.' }}</p>
+                </div>
+                <p class="form-hint am-card-note">Model dalam satu kelompok berbagi batas 5 jam dan batas mingguan. Tugas pendek dan model yang lebih hemat membuat kuota bertahan lebih lama.</p>
+            </article>
+
+            <article class="ap-card am-card" data-server-card>
+                <header class="am-card-head">
+                    <div>
+                        <p class="section-kicker">SERVER</p>
+                        <h2>Sumber daya VPS</h2>
+                    </div>
+                    <span class="ap-model-pill" data-server-uptime>…</span>
+                </header>
+                <div data-server-body>
+                    <p class="ap-note">Membaca pemakaian server…</p>
+                </div>
+            </article>
+        </aside>
+    </div>
 
     <script>
         (() => {
@@ -261,11 +299,18 @@
             const quotaBody = document.querySelector('[data-quota-body]');
             const serverBody = document.querySelector('[data-server-body]');
             const uptimePill = document.querySelector('[data-server-uptime]');
+            const summary = (name, value, meta, level) => {
+                const valueEl = document.querySelector(`[data-summary-${name}]`);
+                valueEl.textContent = value;
+                valueEl.classList.toggle('is-warning', level === 'is-low');
+                valueEl.classList.toggle('is-danger', level === 'is-empty');
+                document.querySelector(`[data-summary-${name}-meta]`).textContent = meta;
+            };
             const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
             const bytes = (value) => {
                 const units = ['B', 'KB', 'MB', 'GB', 'TB'];
                 let i = 0;
-                while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+                while (value >= 1000 && i < units.length - 1) { value /= 1024; i++; }
                 return (value >= 100 || i === 0 ? Math.round(value) : value.toFixed(1)) + ' ' + units[i];
             };
             const rate = (value) => {
@@ -282,6 +327,7 @@
                 if (hours > 0) { return hours + ' jam ' + minutes + ' mnt'; }
                 return Math.max(minutes, 1) + ' mnt';
             };
+            const percentText = (percent) => (percent >= 99.5 || percent < 1 ? Math.round(percent) : percent.toFixed(1)) + '%';
             const row = (label, value, percent, level, note) => `
                 <div class="ap-quota-row ${level}">
                     <div class="ap-quota-line"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>
@@ -289,6 +335,7 @@
                     ${note ? `<p class="ap-quota-reset">${escapeHtml(note)}</p>` : ''}
                 </div>`;
             const usageLevel = (percent) => percent >= 92 ? 'is-empty' : (percent >= 80 ? 'is-low' : '');
+            const quotaLevel = (percent) => percent <= 5 ? 'is-empty' : (percent <= 25 ? 'is-low' : '');
             const quotaErrors = {
                 NOT_LOGGED_IN: 'Akun Google belum terhubung.',
                 AGY_NOT_INSTALLED: 'Antigravity CLI belum terpasang.',
@@ -305,7 +352,8 @@
                     if (!response.ok) { throw new Error(String(response.status)); }
                     const data = await response.json();
                     if (data.error || !data.groups.length) {
-                        quotaBody.innerHTML = `<p class="form-alert">${escapeHtml(quotaErrors[data.error] || ('Kuota tidak terbaca (' + (data.error || 'kosong') + ').'))}</p>`;
+                        quotaBody.innerHTML = `<p class="form-alert am-alert">${escapeHtml(quotaErrors[data.error] || ('Kuota tidak terbaca (' + (data.error || 'kosong') + ').'))}</p>`;
+                        summary('quota', '-', 'Kuota tidak terbaca', '');
                         return;
                     }
                     const windows = {'5h': 'Batas 5 jam', weekly: 'Batas mingguan'};
@@ -317,12 +365,17 @@
                                 const reset = bucket.reset_at ? new Date(bucket.reset_at) : null;
                                 const left = reset ? (reset.getTime() - Date.now()) / 1000 : null;
                                 const note = reset ? 'Penuh lagi ' + (left > 60 ? 'dalam ' + duration(left) + ' · ' : '') + reset.toLocaleString('id-ID', {weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'}) : '';
-                                const level = percent <= 5 ? 'is-empty' : (percent <= 25 ? 'is-low' : '');
-                                return row(windows[bucket.window] || bucket.window, 'sisa ' + (percent >= 99.5 || percent < 1 ? Math.round(percent) : percent.toFixed(1)) + '%', percent, level, note);
+                                return row(windows[bucket.window] || bucket.window, 'sisa ' + percentText(percent), percent, quotaLevel(percent), note);
                             }).join('')}
-                        </div>`).join('') + `<p class="ap-quota-reset" style="margin-top:6px;">Dibaca ${new Date(data.fetched_at).toLocaleTimeString('id-ID', {hour: '2-digit', minute: '2-digit'})}</p>`;
+                        </div>`).join('') + `<p class="ap-quota-reset am-card-note">Dibaca ${new Date(data.fetched_at).toLocaleTimeString('id-ID', {hour: '2-digit', minute: '2-digit'})}</p>`;
+
+                    const gemini = data.groups.find((group) => /gemini/i.test(group.name)) || data.groups[0];
+                    const fiveHour = gemini.buckets.find((bucket) => bucket.window === '5h') || gemini.buckets[0];
+                    const weekly = gemini.buckets.find((bucket) => bucket.window === 'weekly');
+                    summary('quota', 'sisa ' + percentText(fiveHour.remaining * 100), weekly ? 'Mingguan sisa ' + percentText(weekly.remaining * 100) : gemini.name, quotaLevel(fiveHour.remaining * 100));
                 } catch (error) {
-                    quotaBody.innerHTML = '<p class="form-alert">Kuota tidak bisa dibaca sekarang.</p>';
+                    quotaBody.innerHTML = '<p class="form-alert am-alert">Kuota tidak bisa dibaca sekarang.</p>';
+                    summary('quota', '-', 'Kuota tidak terbaca', '');
                 }
             };
 
@@ -347,13 +400,17 @@
                     if (data.network) {
                         const net = data.network;
                         netPeak = Math.max(netPeak, net.rx_rate, net.tx_rate);
-                        rows.push(row('Network masuk (' + net.interface + ')', rate(net.rx_rate), net.rx_rate / netPeak * 100, '', 'Total sejak boot: ' + bytes(net.rx_total)));
-                        rows.push(row('Network keluar (' + net.interface + ')', rate(net.tx_rate), net.tx_rate / netPeak * 100, '', 'Total sejak boot: ' + bytes(net.tx_total) + ' · bar relatif terhadap puncak sejak halaman dibuka'));
+                        rows.push(row('Network masuk', rate(net.rx_rate), net.rx_rate / netPeak * 100, '', 'Total sejak boot: ' + bytes(net.rx_total)));
+                        rows.push(row('Network keluar', rate(net.tx_rate), net.tx_rate / netPeak * 100, '', 'Total sejak boot: ' + bytes(net.tx_total)));
                     }
-                    serverBody.innerHTML = rows.join('');
+                    serverBody.innerHTML = rows.join('') + (data.network ? `<p class="form-hint am-card-note">Antarmuka ${escapeHtml(data.network.interface)}. Bar network relatif terhadap puncak sejak halaman dibuka.</p>` : '');
                     uptimePill.textContent = data.uptime ? 'Nyala ' + duration(data.uptime) : 'Server';
+
+                    const worst = Math.max(data.disk ? data.disk.percent : 0, data.memory ? data.memory.percent : 0);
+                    summary('server', 'Disk ' + (data.disk ? Math.round(data.disk.percent) + '%' : '-') + ' · RAM ' + (data.memory ? Math.round(data.memory.percent) + '%' : '-'), 'CPU ' + (cpu.percent !== null ? cpu.percent.toFixed(0) + '%' : '-') + (data.network ? ' · ↓ ' + rate(data.network.rx_rate) : ''), usageLevel(worst));
                 } catch (error) {
-                    serverBody.innerHTML = '<p class="form-alert">Pemakaian server tidak bisa dibaca sekarang.</p>';
+                    serverBody.innerHTML = '<p class="form-alert am-alert">Pemakaian server tidak bisa dibaca sekarang.</p>';
+                    summary('server', '-', 'Tidak terbaca', '');
                 }
             };
 
