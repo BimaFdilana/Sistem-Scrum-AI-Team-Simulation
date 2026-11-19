@@ -119,6 +119,27 @@ ONBOARDING_NEEDED = (
 )
 
 
+READY_BAR = re.compile(r"\b(auto|default|accept-edits|plan) ·")
+SETTLE_SECONDS = 4
+
+
+def latest_screen_is_login_menu(screen):
+    """Menu login bisa tampil sesaat sebelum agy memuat token tersimpan.
+    Yang menentukan adalah tampilan terakhir: menu login atau status bar."""
+    lower = screen.lower()
+    menu_at = lower.rfind("select login method")
+    ready_matches = list(READY_BAR.finditer(lower))
+    ready_at = ready_matches[-1].start() if ready_matches else -1
+    onboarding_at = lower.rfind("choose your color scheme")
+    return menu_at > max(ready_at, onboarding_at)
+
+
+def settle(session):
+    """Tunggu tampilan awal agy, lalu beri waktu login otomatis selesai."""
+    session.wait_for(lambda s: is_login_menu(s) or is_ready(s), 40)
+    session.pump(SETTLE_SECONDS)
+
+
 def is_signed_out(screen):
     lower = screen.lower()
     return is_login_menu(screen) or "not signed in" in lower or "signed out" in lower or "logged out" in lower
@@ -135,8 +156,8 @@ def login(folder, binary):
     session = Session(binary)
     try:
         write_state(folder, "starting")
-        session.wait_for(lambda s: is_login_menu(s) or is_ready(s), 40)
-        if not is_login_menu(session.screen):
+        settle(session)
+        if not latest_screen_is_login_menu(session.screen):
             write_state(folder, "already_logged_in" if is_ready(session.screen) else "error",
                         message="Menu login tidak muncul." if not is_ready(session.screen) else "")
             return
@@ -175,15 +196,14 @@ def logout(folder, binary):
     session = Session(binary)
     try:
         write_state(folder, "starting")
-        session.wait_for(lambda s: is_login_menu(s) or is_ready(s), 40)
-        if is_login_menu(session.screen):
+        settle(session)
+        if latest_screen_is_login_menu(session.screen):
             write_state(folder, "submitted")
             return
         # Layar onboarding (pilih warna lalu Terms of Service & Data Use)
         # muncul selama pengaturan awal belum selesai. Persetujuan Terms dan
         # berbagi data adalah keputusan pemilik akun, jadi helper tidak
         # pernah menekan apa pun di layar itu.
-        session.pump(3)
         if is_onboarding(session.screen) or "terms of service & data use" in session.screen.lower():
             write_state(folder, "error", message=ONBOARDING_NEEDED)
             return
@@ -192,7 +212,11 @@ def logout(folder, binary):
         session.pump(1)
         before = len(session.screen)
         session.send("\r")
-        session.wait_for(lambda s: is_signed_out(s[before:]), 25)
+        if not session.wait_for(lambda s: is_signed_out(s[before:]), 8):
+            # Bila agy meminta konfirmasi, Enter memilih jawaban bawaan (keluar).
+            if re.search(r"are you sure|confirm|\(y/n\)|\[y/n\]", session.screen[before:].lower()):
+                session.send("\r")
+            session.wait_for(lambda s: is_signed_out(s[before:]), 20)
         write_state(folder, "submitted")
     finally:
         session.close()
