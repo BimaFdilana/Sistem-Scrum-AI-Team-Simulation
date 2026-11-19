@@ -56,3 +56,4 @@ Thumbs.db
 *.bak
 *.bak-*
 /e2e-exec.php
+__pycache__/
