@@ -112,13 +112,23 @@ def is_ready(screen):
     return bool(re.search(r"\b(auto|default|accept-edits|plan) ·", lower))
 
 
-def finish_onboarding(session, steps=8):
-    """Terima pilihan bawaan onboarding pertama sampai prompt chat siap."""
-    for _ in range(steps):
-        if not is_onboarding(session.screen[-4000:]) and "[next]" not in session.screen[-4000:].lower():
-            return
-        session.send("\r")
-        session.pump(2)
+ONBOARDING_NEEDED = (
+    "Pengaturan awal Antigravity CLI belum selesai, jadi perintah Keluar tidak bisa dijalankan dari web. "
+    "Jalankan `agy` sekali di terminal VPS (user sidik), selesaikan layar warna dan layar Terms of Service "
+    "sesuai pilihanmu sampai Done, lalu keluar dari agy dan klik Keluar lagi."
+)
+
+
+def is_signed_out(screen):
+    lower = screen.lower()
+    return is_login_menu(screen) or "not signed in" in lower or "signed out" in lower or "logged out" in lower
+
+
+def type_slowly(session, text):
+    """Ketik per karakter: TUI agy membuka menu saran saat "/" diketik."""
+    for char in text:
+        session.send(char)
+        session.pump(0.12)
 
 
 def login(folder, binary):
@@ -169,9 +179,20 @@ def logout(folder, binary):
         if is_login_menu(session.screen):
             write_state(folder, "submitted")
             return
-        finish_onboarding(session)
-        session.send("/logout\r")
-        session.pump(10)
+        # Layar onboarding (pilih warna lalu Terms of Service & Data Use)
+        # muncul selama pengaturan awal belum selesai. Persetujuan Terms dan
+        # berbagi data adalah keputusan pemilik akun, jadi helper tidak
+        # pernah menekan apa pun di layar itu.
+        session.pump(3)
+        if is_onboarding(session.screen) or "terms of service & data use" in session.screen.lower():
+            write_state(folder, "error", message=ONBOARDING_NEEDED)
+            return
+
+        type_slowly(session, "/logout")
+        session.pump(1)
+        before = len(session.screen)
+        session.send("\r")
+        session.wait_for(lambda s: is_signed_out(s[before:]), 25)
         write_state(folder, "submitted")
     finally:
         session.close()
