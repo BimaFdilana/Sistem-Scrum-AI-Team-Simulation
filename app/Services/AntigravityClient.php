@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Support\Ai\AiQuota;
 use App\Support\Execution\ExecutionStopper;
+use App\Support\Projects\ProjectEnvironment;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
@@ -604,12 +605,20 @@ class AntigravityClient
     }
 
     /** @return array<string, string> */
-    private function processEnv(): array
+    /**
+     * Lingkungan proses agy. Symfony Process mewarisi lingkungan pekerja, dan
+     * Laravel memuat .env ScrumSpace ke sana; tanpa penyaringan, agen developer
+     * yang menjalankan `php artisan` di worktree project memakai DB_DATABASE,
+     * APP_KEY, dan token milik ScrumSpace (bisa menghapus database ScrumSpace).
+     *
+     * @return array<string, string|false>
+     */
+    public function processEnv(): array
     {
-        return [
+        return ProjectEnvironment::scrubbed([
             'PATH' => getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin',
             'TERM' => 'dumb',
             'NO_COLOR' => '1',
-        ];
+        ]);
     }
 }

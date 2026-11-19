@@ -33,9 +33,32 @@ class BreakdownExecutionJob implements ShouldQueue
 
     public int $tries = 1;
 
-    public int $timeout = 300;
+    /**
+     * Sampai 3 panggilan SM (awal + 2 perbaikan), masing-masing dengan
+     * percobaan ulang agy. Dulu 300 detik: satu jawaban lambat (3 menit) lalu
+     * percobaan ulang membuat job terbunuh dan run tertahan di BREAKDOWN.
+     */
+    public int $timeout = 1200;
+
+    public bool $failOnTimeout = true;
 
     public function __construct(public readonly int $runId) {}
+
+    /** Job mati (mis. melewati batas waktu): run tidak boleh tertahan di BREAKDOWN. */
+    public function failed(?Throwable $exception): void
+    {
+        $run = ExecutionRun::query()->find($this->runId);
+        if ($run === null || $run->status !== 'BREAKDOWN') {
+            return;
+        }
+
+        $run->forceFill([
+            'status' => 'FAILED',
+            'error_code' => 'BREAKDOWN_FAILED',
+            'summary' => 'Scrum Master terlalu lama memecah story sehingga proses dihentikan. Coba jalankan lagi; bila berulang, pilih model yang lebih cepat di halaman AI Model.',
+            'completed_at' => now(),
+        ])->save();
+    }
 
     public function handle(ScrumMasterClient $scrumMaster, ChatDisclosurePolicy $disclosure): void
     {

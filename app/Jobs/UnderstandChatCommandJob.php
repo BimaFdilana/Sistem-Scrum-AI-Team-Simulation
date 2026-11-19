@@ -31,7 +31,10 @@ class UnderstandChatCommandJob implements ShouldQueue
 
     public int $tries = 1;
 
-    public int $timeout = 300;
+    /** Satu panggilan SM dengan percobaan ulang agy (2 x 180 detik) plus jeda. */
+    public int $timeout = 420;
+
+    public bool $failOnTimeout = true;
 
     public function __construct(public int $commandId) {}
 

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\Projects\ProjectEnvironment;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -97,7 +98,8 @@ class AntigravityLogin
         // (sidik) yang tidak bisa membuka folder sesi milik www-data.
         $workDir = (string) config('ai.antigravity.sandbox_dir', storage_path('app/private/agy-sandbox'));
         File::ensureDirectoryExists($workDir, 0775);
-        Process::fromShellCommandline('nohup setsid '.$command.' > '.escapeshellarg($folder.'/helper.log').' 2>&1 < /dev/null &', $workDir)->run();
+        // Lingkungan disaring: helper dan agy tidak mewarisi .env ScrumSpace.
+        Process::fromShellCommandline('nohup setsid '.$command.' > '.escapeshellarg($folder.'/helper.log').' 2>&1 < /dev/null &', $workDir, ProjectEnvironment::scrubbed())->run();
 
         return $session;
     }

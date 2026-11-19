@@ -13,6 +13,7 @@ use App\Services\ChatDisclosurePolicy;
 use App\Services\ScrumMasterClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery;
+use RuntimeException;
 use Tests\TestCase;
 
 class BreakdownExecutionTest extends TestCase
@@ -335,6 +336,23 @@ class BreakdownExecutionTest extends TestCase
         $payload = PermissionRequest::query()->latest('id')->firstOrFail()->payload;
         $this->assertCount(2, $payload['coverage']);
         $this->assertSame([1], $payload['coverage'][0]['tasks']);
+    }
+
+    public function test_killed_breakdown_does_not_leave_the_run_stuck(): void
+    {
+        $stuck = $this->makeRun();
+        $stuck->forceFill(['status' => 'BREAKDOWN'])->save();
+        $done = $this->makeRun();
+        $done->forceFill(['status' => 'EXECUTING'])->save();
+
+        (new BreakdownExecutionJob($stuck->id))->failed(new RuntimeException('timed out'));
+        (new BreakdownExecutionJob($done->id))->failed(new RuntimeException('timed out'));
+
+        $this->assertSame('FAILED', $stuck->fresh()->status);
+        $this->assertSame('BREAKDOWN_FAILED', $stuck->fresh()->error_code);
+        $this->assertStringContainsString('terlalu lama', $stuck->fresh()->summary);
+        $this->assertSame('EXECUTING', $done->fresh()->status);
+        $this->assertTrue((new BreakdownExecutionJob($stuck->id))->failOnTimeout);
     }
 
     public function test_plan_with_task_serving_no_criterion_is_rejected(): void

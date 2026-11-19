@@ -103,6 +103,26 @@ class AntigravityClientTest extends TestCase
         $this->assertSame([], (new AntigravityClient)->parseQuota(['response' => 'tanpa data']));
     }
 
+    public function test_agent_process_does_not_inherit_scrumspace_database_or_secrets(): void
+    {
+        putenv('DB_DATABASE=/srv/scrumspace/database.sqlite');
+        putenv('APP_KEY=base64:rahasia');
+        putenv('HOME=/home/sidik');
+
+        try {
+            $env = (new AntigravityClient)->processEnv();
+
+            $this->assertFalse($env['DB_DATABASE']);
+            $this->assertFalse($env['APP_KEY']);
+            $this->assertArrayNotHasKey('HOME', $env, 'HOME tetap diwarisi agar agy menemukan login-nya.');
+            $this->assertSame('dumb', $env['TERM']);
+            $this->assertNotEmpty($env['PATH']);
+        } finally {
+            putenv('DB_DATABASE');
+            putenv('APP_KEY');
+        }
+    }
+
     public function test_developer_permissions_stay_inside_the_worktree_and_block_git(): void
     {
         $settings = (new AntigravityClient)->taskSettings('/srv/wt/task-1');
