@@ -60,8 +60,11 @@ class AntigravityClient
      */
     public function models(bool $fresh = false): array
     {
-        if ($fresh) {
+        if ($fresh || $this->tokenMissing()) {
             Cache::forget(self::MODELS_CACHE_KEY);
+        }
+        if ($this->tokenMissing()) {
+            return [];
         }
 
         return Cache::remember(self::MODELS_CACHE_KEY, (int) config('ai.antigravity.models_cache', 600), function (): array {
@@ -80,6 +83,22 @@ class AntigravityClient
 
             return $this->parseModels($process->getOutput());
         });
+    }
+
+    /**
+     * Token login agy disimpan di file. Bila foldernya ada tetapi file token
+     * hilang (sudah Keluar), akun pasti tidak login, jadi cache daftar model
+     * tidak boleh lagi menampilkan "Terhubung". Tanpa konfigurasi token_file,
+     * atau bila foldernya tidak terlihat, pemeriksaan ini dilewati.
+     */
+    public function tokenMissing(): bool
+    {
+        $file = (string) config('ai.antigravity.token_file', '');
+        if ($file === '' || ! is_dir(dirname($file))) {
+            return false;
+        }
+
+        return ! file_exists($file);
     }
 
     /**

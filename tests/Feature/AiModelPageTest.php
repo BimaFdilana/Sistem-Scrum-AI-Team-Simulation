@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Services\AntigravityClient;
 use App\Services\AntigravityLogin;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Mockery;
 use Tests\TestCase;
 
@@ -141,6 +142,28 @@ class AiModelPageTest extends TestCase
             ->postJson(route('ai-model.logout'))
             ->assertOk()
             ->assertJsonPath('session', '0b8f6f7e-1111-4222-8333-444455556666');
+    }
+
+    public function test_missing_token_file_overrides_a_stale_logged_in_cache(): void
+    {
+        $dir = storage_path('framework/testing/agy-token-'.uniqid());
+        mkdir($dir, 0777, true);
+        config(['ai.antigravity.token_file' => $dir.'/antigravity-oauth-token']);
+        Cache::put('antigravity:models', [['id' => 'gemini-3.8-flash-high', 'name' => 'Gemini 3.8 Flash (High)']], 600);
+        $client = new AntigravityClient;
+
+        try {
+            touch($dir.'/antigravity-oauth-token');
+            $this->assertCount(1, $client->models());
+
+            unlink($dir.'/antigravity-oauth-token');
+            $this->assertSame([], $client->models());
+            $this->assertFalse($client->status()['logged_in']);
+            $this->assertFalse(Cache::has('antigravity:models'));
+        } finally {
+            @unlink($dir.'/antigravity-oauth-token');
+            rmdir($dir);
+        }
     }
 
     public function test_page_has_quota_and_server_cards(): void
