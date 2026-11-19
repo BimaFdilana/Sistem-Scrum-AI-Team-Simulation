@@ -45,7 +45,7 @@ Aturan yang ditegakkan di kode, bukan di prompt:
   belum diputuskan. Pemulihan manual: `git checkout scrum/run-N` atau
   `git branch pulih refs/scrumspace/run-N-start`.
 - Proses anak yang menjalankan kode project (demo, tes, `composer`/`npm`) tidak mewarisi rahasia
-  ScrumSpace: `APP_KEY`, `DB_*`, `GITHUB_*`, `CLIPROXY_*`, dan variabel bernama
+  ScrumSpace: `APP_KEY`, `DB_*`, `GITHUB_*`, `ANTIGRAVITY_*`/`GEMINI_*`/`GOOGLE_*`/`AGY_*`, dan variabel bernama
   KEY/TOKEN/SECRET/PASSWORD disaring oleh `App\Support\Projects\ProjectEnvironment`.
 - Merge dikunci per run; hasil merge yang gagal diverifikasi disimpan di
   `refs/scrumspace/failed-merge-run-N` sebelum baseline dikembalikan.
@@ -53,7 +53,7 @@ Aturan yang ditegakkan di kode, bukan di prompt:
 ## 2. Watchdog
 
 `php artisan runs:watchdog` berjalan tiap 5 menit (`routes/console.php`). Ambang default 35 menit,
-sengaja di atas batas job Hermes (30 menit) supaya pekerjaan yang sehat tidak dipotong.
+sengaja di atas batas job developer Antigravity (30 menit) supaya pekerjaan yang sehat tidak dipotong.
 
 | Kondisi | Tindakan |
 |---|---|
@@ -68,9 +68,12 @@ Run berhenti dengan alasan yang terbaca di banner halaman eksekusi dan di dock (
 
 | `error_code` | Artinya | Yang dilakukan |
 |---|---|---|
-| `WATCHDOG_STALLED` | Task macet 3 kali. Biasanya worker mati, gateway AI lambat, atau Hermes macet | 1) Cek `systemctl status scrumspace-queue cliproxy`, 2) cek `tail storage/logs/laravel.log`, 3) bila layanan sehat, tekan **Lanjutkan**; bila berulang, tandai **Gagal** dan laporkan |
+| `WATCHDOG_STALLED` | Task macet 3 kali. Biasanya worker mati atau proses `agy` macet | 1) Cek `systemctl status scrumspace-queue` dan `php artisan scrumspace:doctor`, 2) cek `tail storage/logs/laravel.log`, 3) bila layanan sehat, tekan **Lanjutkan**; bila berulang, tandai **Gagal** dan laporkan |
 | `QA_REJECTED_AFTER_REPAIR` | QA masih menolak setelah 3 putaran. Banner memuat argumen QA, developer, dan SM per temuan | Baca argumennya. Tekan **Lanjutkan** untuk jatah 3 putaran baru, atau **Tandai Gagal**, atau perbaiki kriteria story lalu jalankan ulang |
-| `QA_BATCH_FAILED` | Model QA gagal dipanggil | Cek gateway/model di menu AI Providers, lalu **Lanjutkan** (QA diulang) |
+| `QA_BATCH_FAILED` | Model QA gagal dipanggil | Cek login dan model di halaman AI Model, lalu **Lanjutkan** (QA diulang) |
+| `AI_NOT_LOGGED_IN` | Akun Google di Antigravity tidak lagi terhubung | Hubungkan ulang di halaman AI Model, lalu **Lanjutkan** |
+| `AGENT_NO_CHANGES` | Developer AI selesai tanpa mengubah file, dua kali | Perjelas story atau ganti model peran itu, lalu **Lanjutkan** |
+| `AGENT_FAILED` | Proses `agy` developer gagal karena sebab lain | Lihat `storage/logs/laravel.log`, lalu **Lanjutkan** |
 | `QA_BATCH_FORMAT` | Keluaran QA tidak terbaca atau tanpa bukti per kriteria dua kali | Bila sering terjadi, ganti model QA; lalu **Lanjutkan** |
 | `QA_BATCH_NO_FINDINGS` | QA menolak tanpa menyebut file/instruksi | **Lanjutkan** (QA diulang) |
 
@@ -88,8 +91,8 @@ backup database ke `/var/backups/scrumspace/`, `git pull --ff-only`, `composer i
 `npm ci && npm run build`, `migrate --force`, lalu restart `scrumspace-queue`. Gagal di langkah mana
 pun menghentikan update dan kode lama tetap berjalan.
 
-Sebelum push: `vendor/bin/pint --dirty` dan `php artisan test` (di VPS, karena Hermes/OpenCode/CLIProxy
-hanya ada di sana). Sesudah push: cek `curl -I https://scrum-team.artitechlabs.com/up` dan
+Sebelum push: `vendor/bin/pint --dirty` dan `php artisan test` (tes memakai `FakeAntigravityClient`,
+jadi tidak pernah menjalankan `agy` sungguhan). Sesudah push: cek `curl -I https://scrum-team.artitechlabs.com/up` dan
 `systemctl is-active scrumspace-queue`.
 
 ## 5. Rollback
@@ -118,8 +121,10 @@ Cara memundurkan, urutan dari yang paling aman:
 
 - Disk 84% (1,6 GB bebas dari 9,6 GB); RAM 2,2 GB dengan swap 1 GB. Penyumbang terbesar:
   `~/.hermes` 3,5 GB dan `/var/backups/scrumspace` 83 MB (cadangan dari tiap deploy).
-- `ttyd` (7681) berjalan sebagai root di `0.0.0.0` dengan login `su - sidik`; webhook (9000) dan
-  CLIProxy (8317) juga berjalan sebagai root. Dari internet publik ketiga port tidak terjangkau
+- Pembaruan 19 Nov 2026: Hermes (`~/.hermes`), OpenCode, dan CLIProxy dihapus setelah migrasi ke
+  Antigravity. Disk turun dari 88% ke 55% (4,4 GB bebas). Port 8317 sudah tertutup.
+- `ttyd` (7681) berjalan sebagai root di `0.0.0.0` dengan login `su - sidik`; webhook (9000) juga
+  berjalan sebagai root. Dari internet publik kedua port tidak terjangkau
   (diuji), tetapi tetap bisa dijangkau dari jaringan tunnel/Tailscale. Tidak ada firewall host
   (`ufw` tidak terpasang).
 - `scheduler.log` dan `laravel.log` tidak dirotasi (belum ada konfigurasi logrotate).

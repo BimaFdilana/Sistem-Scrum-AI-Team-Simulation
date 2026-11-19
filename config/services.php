@@ -35,13 +35,6 @@ return [
         ],
     ],
 
-    'hermes' => [
-        'base_url' => env('HERMES_API_BASE_URL'),
-        'api_key' => env('HERMES_API_KEY'),
-        'model' => env('HERMES_API_MODEL'),
-        'timeout' => (int) env('HERMES_API_TIMEOUT', 120),
-    ],
-
     'github' => [
         // Personal Access Token (PAT) PO. Bisa juga diatur via UI
         // Settings > GitHub (disimpan terenkripsi di database, prioritas

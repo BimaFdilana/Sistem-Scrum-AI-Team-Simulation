@@ -4,9 +4,31 @@
 > CLIProxy** dengan **Antigravity CLI** untuk semua peran agen (SM, BE, FE, QA), tanpa
 > kehilangan memori sprint. Login akun Google dilakukan dari halaman **AI Model**.
 >
-> Aturan kerja: semua perubahan di `~/scrumspace-dev` pada branch `feat/antigravity`.
+## Status 19 Nov 2026: migrasi selesai, layanan lama sudah dihapus
+
+- **Rilis:** `459771e` + perbaikan `1a1b356` di-deploy ke scrum-team. Doctor di production lolos
+  semua (Antigravity 1.5.12, login Google, 6 model, model aktif `gemini-3.8-flash-high` menjawab).
+- **Sudah jalan di Antigravity:** chat SM (termasuk gambar), breakdown, estimasi Fibonacci,
+  eksekusi BE/FE di worktree (profil `scrumspace-backend`/`scrumspace-frontend`), QA batch,
+  dialog temuan, pemantau kuota, halaman AI Model (login Google dari web, model utama + per peran).
+- **Memori:** `ProjectMemory` menyusun keputusan PO, temuan QA, dan riwayat git menjadi
+  `.agents/rules/memori-proyek.md` di tiap worktree (`php artisan memori:ekspor`).
+  Memori Hermes lama dicadangkan di `~/backup-migrasi-antigravity-20261119/`.
+- **Dihapus dari server (19 Nov):** `cliproxy.service`, `/usr/local/bin/cli-proxy-api`,
+  `/var/lib/cliproxy` (port 8317 tertutup); OpenCode (`opencode-ai` global npm, data dan cache,
+  `.opencode-home`); Hermes (`~/.hermes`, gateway `hermes-gateway.service`, launcher di
+  `~/.local/bin`). Disk 88% → 55%. Kode lama sudah dihapus di rilis `459771e`.
+- **Belum dikerjakan (lanjutan, opsional):** keluaran terstruktur `--json-schema` (Fase 1/4),
+  semaphore paralel, Fase 6 (slash command), pilihan jenis akun Cloud/API key, uji login web
+  dalam keadaan logout, dan jalur Docker (`deploy.sh`, `docker-compose.yml`) yang masih
+  menyebut CLIProxy.
+- **Masih di tangan PO (butuh root):** hapus `/etc/sudoers.d/scrumspace-hermes` dan baris
+  `HERMES_*`/`CLIPROXY_*`/`OPENCODE_*` di `/opt/scrumspace/.env`.
+
+Checklist di bawah adalah rencana awal; status sebenarnya ada di ringkasan di atas.
+
+> Aturan kerja (saat migrasi): semua perubahan di `~/scrumspace-dev` pada branch `feat/antigravity`.
 > **Jangan push ke `main` sebelum Fase 7**, karena push `main` otomatis men-deploy scrum-team.
-> Jalur lama (Hermes/OpenCode/CLIProxy) tetap hidup sampai Fase 8.
 
 ## Fakta yang sudah diverifikasi di VPS
 
@@ -165,5 +187,7 @@ print (ada flag `--disable-slash-commands`); perlu diuji per command.
 
 ## Rollback
 
-Selama Fase 8 belum dijalankan: set `EXECUTION_DRIVER=hermes`, `php artisan optimize:clear`,
-lalu restart `scrumspace-queue`. Jalur lama langsung aktif kembali.
+Fase 8 sudah dijalankan, jadi jalur lama tidak bisa diaktifkan lagi lewat env. Bila Antigravity
+bermasalah: cek `php artisan scrumspace:doctor`, hubungkan ulang akun di halaman AI Model, atau
+ganti model. Mengembalikan Hermes/OpenCode/CLIProxy berarti memasang ulang ketiganya dan
+me-revert `459771e`; konfigurasi dan memorinya ada di `~/backup-migrasi-antigravity-20261119/`.
