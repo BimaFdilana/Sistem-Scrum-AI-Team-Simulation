@@ -395,7 +395,7 @@ class BatchReviewExecutionJob implements ShouldQueue
         $start = 'refs/scrumspace/run-'.$run->id.'-start';
 
         try {
-            if (! app(WorktreeManager::class)->branchExists((string) $project->workspace_path, $start)) {
+            if (! app(WorktreeManager::class)->refExists((string) $project->workspace_path, $start)) {
                 return null;
             }
 

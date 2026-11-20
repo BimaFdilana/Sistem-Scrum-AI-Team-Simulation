@@ -198,6 +198,21 @@ class WorktreeManager
         }
     }
 
+    /**
+     * Ref lengkap apa pun (mis. `refs/scrumspace/run-12-start`) menunjuk ke commit.
+     * Berbeda dengan branchExists() yang hanya mencari di bawah refs/heads/.
+     */
+    public function refExists(string $baselinePath, string $ref): bool
+    {
+        try {
+            $this->git($baselinePath, ['rev-parse', '--verify', '--quiet', $ref.'^{commit}']);
+
+            return true;
+        } catch (RuntimeException) {
+            return false;
+        }
+    }
+
     private function isWorktreeRegistered(string $baselinePath, string $path): bool
     {
         try {

@@ -247,7 +247,7 @@ class ExecutionController extends Controller
         try {
             if ($run->work_branch) {
                 $start = 'refs/scrumspace/run-'.$run->id.'-start';
-                $changed = $git->changedFilesBetween($path, $git->branchExists($path, $start) ? $start : (string) $run->base_branch, $run->work_branch);
+                $changed = $git->changedFilesBetween($path, $git->refExists($path, $start) ? $start : (string) $run->base_branch, $run->work_branch);
             }
         } catch (\Throwable) {
             $changed = [];
@@ -264,7 +264,7 @@ class ExecutionController extends Controller
         $start = 'refs/scrumspace/run-'.$run->id.'-start';
         $base = null;
         try {
-            if ($run->work_branch && $git->branchExists($path, $start)) {
+            if ($run->work_branch && $git->refExists($path, $start)) {
                 $base = $smoke->runAtRef($project, $start, $changed, 'all');
             }
         } catch (\Throwable) {

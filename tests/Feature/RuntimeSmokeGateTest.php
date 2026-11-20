@@ -57,6 +57,7 @@ class RuntimeSmokeGateTest extends TestCase
     {
         $git = Mockery::mock(WorktreeManager::class);
         $git->shouldReceive('branchExists')->andReturn(true);
+        $git->shouldReceive('refExists')->andReturn(true);
         $git->shouldReceive('currentBranch')->andReturn('scrum/run-'.$run->id);
         $git->shouldReceive('changedFilesBetween')->andReturn(['app/Http/Controllers/ProfileController.php']);
         $this->app->instance(WorktreeManager::class, $git);
@@ -198,6 +199,7 @@ class RuntimeSmokeGateTest extends TestCase
         $git = Mockery::mock(WorktreeManager::class);
         $git->shouldReceive('currentBranch')->andReturn('scrum/run-999');
         $git->shouldReceive('branchExists')->andReturn(true);
+        $git->shouldReceive('refExists')->andReturn(true);
         $git->shouldReceive('changedFilesBetween')->andReturn(['app/Http/Controllers/ProfileController.php']);
         $this->app->instance(WorktreeManager::class, $git);
         $this->fakeSmoke(
@@ -255,6 +257,7 @@ class RuntimeSmokeGateTest extends TestCase
         $git = Mockery::mock(WorktreeManager::class);
         $git->shouldReceive('currentBranch')->andReturn('scrum/run-'.$run->id);
         $git->shouldReceive('branchExists')->andReturn(true);
+        $git->shouldReceive('refExists')->andReturn(true);
         $git->shouldReceive('changedFilesBetween')->andReturn(['app/Http/Controllers/IkuController.php']);
         $this->app->instance(WorktreeManager::class, $git);
         $this->fakeSmoke([self::CRASH]);
@@ -280,6 +283,7 @@ class RuntimeSmokeGateTest extends TestCase
         $git = Mockery::mock(WorktreeManager::class);
         $git->shouldReceive('currentBranch')->andReturn('scrum/run-'.$run->id);
         $git->shouldReceive('branchExists')->andReturn(true);
+        $git->shouldReceive('refExists')->andReturn(true);
         $git->shouldReceive('changedFilesBetween')->andReturn(['app/Http/Controllers/IkuController.php']);
         $this->app->instance(WorktreeManager::class, $git);
         $workspace = Mockery::mock(DirectWorkspace::class);

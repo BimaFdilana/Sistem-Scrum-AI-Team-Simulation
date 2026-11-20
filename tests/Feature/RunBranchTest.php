@@ -112,6 +112,19 @@ class RunBranchTest extends TestCase
         $this->assertTrue(app(WorktreeManager::class)->branchExists($this->repo, 'scrum/run-'.$run->id), 'hasil ditolak tetap bisa dilihat di branch run');
     }
 
+    public function test_run_start_point_is_found_as_a_ref_for_baseline_comparison(): void
+    {
+        $project = $this->makeProject();
+        $run = $this->makeRun($project);
+        app(DirectWorkspace::class)->beginRun($project, $run);
+        $git = app(WorktreeManager::class);
+        $start = 'refs/scrumspace/run-'.$run->id.'-start';
+
+        $this->assertTrue($git->refExists($this->repo, $start));
+        $this->assertFalse($git->branchExists($this->repo, $start), 'titik awal run bukan branch');
+        $this->assertFalse($git->refExists($this->repo, 'refs/scrumspace/run-0-start'));
+    }
+
     public function test_next_run_starts_from_base_branch_not_from_unaccepted_run(): void
     {
         $project = $this->makeProject();
