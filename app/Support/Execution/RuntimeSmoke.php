@@ -256,6 +256,28 @@ class RuntimeSmoke
     }
 
     /**
+     * Kunci crash: metode + pola URI (angka jadi {id}) + jenis exception.
+     *
+     * @param  array<string, mixed>  $crash
+     */
+    public function crashKey(array $crash): string
+    {
+        $uri = preg_replace('#/\d+(?=/|$)#', '/{id}', (string) ($crash['uri'] ?? ''));
+        $exception = strtok((string) ($crash['error'] ?? 'HTTP '.($crash['status'] ?? '500')), ':');
+
+        return ($crash['method'] ?? 'GET').' '.$uri.' '.$exception;
+    }
+
+    /**
+     * @param  array{results: array<int, array<string, mixed>>}  $report
+     * @return array<int, string>
+     */
+    public function crashKeys(array $report): array
+    {
+        return array_values(array_unique(array_map($this->crashKey(...), $this->crashes($report))));
+    }
+
+    /**
      * Crash dikelompokkan per penyebab (file + pesan), lalu dijadikan temuan.
      *
      * @param  array{results: array<int, array<string, mixed>>}  $report

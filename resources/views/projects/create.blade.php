@@ -76,6 +76,7 @@
             const branch = document.getElementById('branch-field');
             const githubInput = document.getElementById('github_repository_url');
             const stackInput = document.getElementById('stack');
+            const branchInput = document.getElementById('github_branch');
             const update = () => {
                 const isExisting = type.value === 'EXISTING_PROJECT';
                 github.hidden = !isExisting;
@@ -83,6 +84,10 @@
                 stack.hidden = isExisting;
                 githubInput.required = isExisting;
                 stackInput.required = !isExisting;
+                // Field yang tidak berlaku tidak ikut terkirim, jadi isian lama tidak menggagalkan validasi.
+                githubInput.disabled = !isExisting;
+                branchInput.disabled = !isExisting;
+                stackInput.disabled = isExisting;
             };
             type.addEventListener('change', update);
             update();

@@ -260,31 +260,36 @@ class ExecutionController extends Controller
             return ['blocking' => [], 'note' => $smoke->summary($report)];
         }
 
+        // Kode sebelum run ini (titik awal run): pembanding untuk regresi dan bug lama.
+        $start = 'refs/scrumspace/run-'.$run->id.'-start';
+        $base = null;
+        try {
+            if ($run->work_branch && $git->branchExists($path, $start)) {
+                $base = $smoke->runAtRef($project, $start, $changed, 'all');
+            }
+        } catch (\Throwable) {
+            $base = null;
+        }
+        $baseRan = is_array($base) && ($base['ran'] ?? false);
+        $crashedBefore = $baseRan ? $smoke->crashKeys($base) : [];
+
         $blocking = [];
         $warnings = [];
+        $oldBugs = [];
         foreach ($smoke->crashes($report) as $crash) {
             $label = trim(($crash['method'] ?? 'GET').' '.($crash['uri'] ?? '')).': '.mb_substr((string) ($crash['error'] ?? 'HTTP 500'), 0, 160);
             $ownsStory = in_array($crash['route_file'] ?? null, $changed, true) || in_array($crash['file'] ?? null, $changed, true);
-            if ($ownsStory) {
+            if (in_array($smoke->crashKey($crash), $crashedBefore, true)) {
+                // Halaman ini sudah error sebelum run dimulai: bug lama, bukan hasil story ini.
+                $oldBugs[] = $label;
+            } elseif ($ownsStory) {
                 $blocking[] = $label;
             } else {
                 $warnings[] = $label;
             }
         }
 
-        // Regresi: bandingkan dengan kode sebelum run ini (titik awal run).
-        $start = 'refs/scrumspace/run-'.$run->id.'-start';
-        $regressions = [];
-        try {
-            if ($run->work_branch && $git->branchExists($path, $start)) {
-                $base = $smoke->runAtRef($project, $start, $changed, 'all');
-                if ($base['ran']) {
-                    $regressions = $smoke->regressions($base, $report);
-                }
-            }
-        } catch (\Throwable) {
-            $regressions = [];
-        }
+        $regressions = $baseRan ? $smoke->regressions($base, $report) : [];
         foreach ($regressions as $regression) {
             $blocking[] = mb_substr($regression['instruction'], 0, 220);
         }
@@ -293,6 +298,9 @@ class ExecutionController extends Controller
         $note = 'Uji jalan seluruh halaman: '.$total.' permintaan, '.count($blocking).' error/regresi di halaman story ini';
         if ($warnings !== []) {
             $note .= ', '.count($warnings).' error di halaman lain (regresi atau bug lama): '.implode(' | ', array_slice($warnings, 0, 5));
+        }
+        if ($oldBugs !== []) {
+            $note .= ', '.count($oldBugs).' bug lama yang sudah ada sebelum story ini (perlu story perbaikan sendiri): '.implode(' | ', array_slice($oldBugs, 0, 5));
         }
 
         return ['blocking' => $blocking, 'note' => $note.'.'];

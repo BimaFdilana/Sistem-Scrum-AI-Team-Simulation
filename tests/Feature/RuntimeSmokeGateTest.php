@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Services\AgentProfileClient;
 use App\Support\Demo\DemoServerManager;
 use App\Support\Execution\BatchQa;
+use App\Support\Execution\DirectWorkspace;
 use App\Support\Execution\ProjectFacts;
 use App\Support\Execution\RuntimeSmoke;
 use App\Support\Workspace\WorktreeManager;
@@ -263,6 +264,36 @@ class RuntimeSmokeGateTest extends TestCase
             ->assertSessionHasErrors('acceptance');
 
         $this->assertFalse($story->fresh()->isAccepted());
+    }
+
+    public function test_old_bug_on_a_touched_page_does_not_refuse_acceptance(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create();
+        $run = $this->makeRun();
+        $run->forceFill(['status' => 'COMPLETED', 'completed_at' => now(), 'work_branch' => 'scrum/run-'.$run->id, 'base_branch' => 'main'])->save();
+        $story = $run->story;
+
+        $demo = Mockery::mock(DemoServerManager::class);
+        $demo->shouldReceive('verify')->andReturn(['ok' => true, 'http' => 200, 'url' => 'http://127.0.0.1:9999/', 'error' => null, 'demo' => null]);
+        $this->app->instance(DemoServerManager::class, $demo);
+        $git = Mockery::mock(WorktreeManager::class);
+        $git->shouldReceive('currentBranch')->andReturn('scrum/run-'.$run->id);
+        $git->shouldReceive('branchExists')->andReturn(true);
+        $git->shouldReceive('changedFilesBetween')->andReturn(['app/Http/Controllers/IkuController.php']);
+        $this->app->instance(WorktreeManager::class, $git);
+        $workspace = Mockery::mock(DirectWorkspace::class);
+        $workspace->shouldReceive('settle')->andReturn(null);
+        $this->app->instance(DirectWorkspace::class, $workspace);
+        // Halaman yang sama sudah crash sebelum run dimulai.
+        $this->fakeSmoke([self::CRASH], baseResults: [self::CRASH]);
+
+        $this->actingAs($owner)
+            ->post('/stories/'.$story->id.'/executions/'.$run->id.'/accept', ['status' => 'BERHASIL'])
+            ->assertSessionHasNoErrors();
+
+        $this->assertTrue($story->fresh()->isAccepted());
+        $this->assertStringContainsString('1 bug lama', (string) $run->fresh()->summary);
     }
 
     public function test_project_facts_list_real_tables_and_columns(): void

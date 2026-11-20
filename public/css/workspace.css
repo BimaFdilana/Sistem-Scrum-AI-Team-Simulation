@@ -38,3 +38,6 @@
 .quota-banner-body p{margin:0 0 4px}
 .quota-countdown{font-size:13px}
 .quota-countdown-value,[data-quota-countdown]{font-variant-numeric:tabular-nums}
+
+/* Atribut hidden harus selalu menang atas display komponen (mis. .field-group{display:grid}). */
+[hidden]{display:none !important}
